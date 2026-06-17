@@ -1,0 +1,23 @@
+{
+  "name": "gemini-image-editor-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "@google/generative-ai": "^0.24.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,32 @@
+# 依赖
+node_modules
+**/node_modules
+
+# 环境变量（含敏感信息，禁止提交）
+.env
+.env.local
+.env.*.local
+
+# 构建产物
+dist
+**/dist
+build
+**/build
+
+# 临时文件
+src/scripts/temp/
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# CloudBase
+cloudbaserc.json

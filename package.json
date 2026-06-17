@@ -1,0 +1,17 @@
+{
+  "name": "gemini-image-editor",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "npm run dev --prefix src/client",
+    "dev:server": "npm run dev --prefix src/server",
+    "build": "npm run build --prefix src/client && npm run build --prefix src/server"
+  },
+  "dependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

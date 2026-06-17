@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "gpt-image-edit": {
+      "source": "agentspace-so/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "gpt-image-edit/SKILL.md",
+      "computedHash": "009adeb99a5f985e382d0eed3c3c90fc72b168201c6eceba25d8cb2605bc639e"
+    }
+  }
+}
