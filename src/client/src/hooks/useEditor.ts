@@ -70,7 +70,7 @@ const initialState: EditorState = {
   isLoading: false,
   error: null,
   selectedModel: 'cogview-4-250304',
-  history: loadSavedHistory(),
+  history: [],
   referenceImages: [],
 };
 
@@ -125,6 +125,14 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
 
 export default function useEditor() {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Load saved history on mount
+  useEffect(() => {
+    const saved = loadSavedHistory();
+    if (saved.length > 0) {
+      dispatch({ type: 'LOAD_HISTORY', payload: saved });
+    }
+  }, []);
 
   // Save history to localStorage whenever it changes
   useEffect(() => {

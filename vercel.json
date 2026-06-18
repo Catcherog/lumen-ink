@@ -3,7 +3,8 @@
   "outputDirectory": "src/client/dist",
   "installCommand": "npm install --prefix src/client && npm install --prefix src/server",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" }
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/index.ts": {
