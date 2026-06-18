@@ -26,8 +26,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         onLogin(response.data.token);
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || '登录失败');
+      const axiosError = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
+      const msg = axiosError.response?.data?.error
+        || axiosError.response?.data?.message
+        || axiosError.message
+        || '登录失败';
+      setError(String(msg));
     } finally {
       setIsLoading(false);
     }
