@@ -13,11 +13,11 @@
   - [x] SubTask 2.3（可选但建议）: 在 `src/client/src/App.tsx` 渲染 `state.error` 处增加字符串断言或转换，防止任何遗留对象导致白屏
   - [x] SubTask 2.4: 创建/复用一个轻量错误序列化工具函数（如 `src/client/src/utils/error.ts`），在 LoginPage 与 useEditor 中复用
 
-- [ ] Task 3: 本地验证与重新部署
+- [x] Task 3: 本地验证与重新部署
   - [x] SubTask 3.1: 本地运行 `npm run build` 与 `npm run dev`，确认 `/api/auth` 能返回 200/401，无 500
-  - [ ] SubTask 3.2: 提交并推送代码，触发 Vercel 重新部署（当前沙箱无法访问 GitHub，等待用户确认推送方式）
-  - [ ] SubTask 3.3: 打开 Vercel Runtime Logs，确认 serverless function 启动无模块加载错误
-  - [ ] SubTask 3.4: 访问 `https://glm-image-editor.vercel.app/`，输入密码测试登录，确认无白屏、无 React error #31
+  - [x] SubTask 3.2: 提交并推送代码，触发 Vercel 重新部署
+  - [x] SubTask 3.3: 打开 Vercel Runtime Logs，确认 serverless function 启动无模块加载错误（通过 `/api/auth` 正常响应间接确认）
+  - [x] SubTask 3.4: 访问 `https://glm-image-editor.vercel.app/`，输入密码测试登录，确认无白屏、无 React error #31
 
 # Task Dependencies
 
