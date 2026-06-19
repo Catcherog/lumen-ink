@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { editImage } from '../services/glm.js';
-import type { EditRequest, EditResponse } from '../../shared/types.js';
+import type { EditRequest, EditResponse } from 'shared/types.js';
 
 const router = Router();
 

@@ -9,6 +9,7 @@ import HistoryPanel from './components/HistoryPanel';
 import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import useEditor from './hooks/useEditor';
+import { serializeError } from './utils/error';
 import { GLM_MODELS } from '../../shared/types';
 import type { GLMModel } from '../../shared/types';
 
@@ -201,7 +202,9 @@ export default function App() {
 
             {state.error && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <p className="text-sm text-red-600">{state.error}</p>
+                <p className="text-sm text-red-600">
+                  {typeof state.error === 'string' ? state.error : serializeError(state.error)}
+                </p>
               </div>
             )}
           </div>

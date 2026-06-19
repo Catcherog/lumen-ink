@@ -2,6 +2,7 @@
   "name": "gemini-image-editor-server",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "tsx watch index.ts",
     "build": "tsc"

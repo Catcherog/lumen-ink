@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
+import { serializeError } from '../utils/error';
 
 interface LoginPageProps {
   onLogin: (token: string) => void;
@@ -26,12 +27,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         onLogin(response.data.token);
       }
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
-      const msg = axiosError.response?.data?.error
-        || axiosError.response?.data?.message
-        || axiosError.message
-        || '登录失败';
-      setError(String(msg));
+      const axiosError = err as { response?: { data?: unknown }; message?: string };
+      const serverData = axiosError.response?.data;
+      const msg = serverData !== undefined
+        ? serializeError(serverData)
+        : axiosError.message || '登录失败';
+      setError(msg);
     } finally {
       setIsLoading(false);
     }

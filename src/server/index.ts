@@ -15,6 +15,13 @@ dotenv.config({ path: path.join(__dirname, '../../.env') }); // 项目根目录
 dotenv.config({ path: path.join(__dirname, '../.env') }); // src 目录
 dotenv.config(); // 当前目录
 
+// 关键环境变量兜底与校验，避免未配置时产生未处理异常导致 500
+process.env.JWT_SECRET ??= 'gemini-image-editor-secret';
+process.env.AUTH_PASSWORD ??= 'changeme';
+if (!process.env.GLM_API_KEY && !process.env.ZHIPU_API_KEY) {
+  console.warn('[ENV] GLM_API_KEY / ZHIPU_API_KEY 未配置，/api/edit 接口将不可用');
+}
+
 const app = express();
 
 app.use(cors());

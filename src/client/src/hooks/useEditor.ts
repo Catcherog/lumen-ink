@@ -1,5 +1,6 @@
 import { useReducer, useCallback, useEffect } from 'react';
 import axios from 'axios';
+import { serializeError } from '../utils/error';
 import type { GLMModel } from '../../../shared/types';
 
 interface ReferenceImage {
@@ -213,18 +214,21 @@ export default function useEditor() {
           },
         });
       } else {
-        dispatch({ type: 'SET_ERROR', payload: response.data.error || '编辑失败' });
+        const errorPayload = typeof response.data.error === 'string'
+          ? response.data.error
+          : serializeError(response.data.error);
+        dispatch({ type: 'SET_ERROR', payload: errorPayload || '编辑失败' });
       }
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number; data?: { error?: string } } };
+      const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string };
       if (axiosErr.response?.status === 401) {
         dispatch({ type: 'SET_ERROR', payload: '登录已过期，请重新登录' });
       } else if (axiosErr.response?.status === 429) {
         dispatch({ type: 'SET_ERROR', payload: 'API 调用额度已用尽，请稍后重试' });
-      } else if (axiosErr.response?.data?.error) {
-        dispatch({ type: 'SET_ERROR', payload: axiosErr.response.data.error });
+      } else if (axiosErr.response?.data) {
+        dispatch({ type: 'SET_ERROR', payload: serializeError(axiosErr.response.data) });
       } else {
-        dispatch({ type: 'SET_ERROR', payload: '网络错误，请检查连接后重试' });
+        dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '网络错误，请检查连接后重试' });
       }
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
