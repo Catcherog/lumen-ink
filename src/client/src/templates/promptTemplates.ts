@@ -1,9 +1,12 @@
+import type { RetouchTool } from '../../../shared/types';
+
 export interface PromptTemplate {
   id: string;
   name: string;
   category: string;
   prompt: string;
   description: string;
+  tool?: RetouchTool;
 }
 
 export const PROMPT_TEMPLATES: PromptTemplate[] = [
@@ -12,6 +15,7 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     id: 'face-cream-skin',
     name: '韩系奶油肌',
     category: '面部精修',
+    tool: 'face',
     prompt: '85mm人像镜头, 柔光箱布光. 对面部进行精细修图: 肤色提亮半档, 均匀肤色, 去除暗沉和瑕疵. 保留真实皮肤纹理和毛孔, 保留面部立体光影. 韩系高级奶油肌质感, 不要塑料皮, 不要过度磨皮, 不要假白, 不要柔焦糊脸. 保持本人五官特征不变, 不要网红蛇精脸.',
     description: '自然通透的韩系奶油肌质感',
   },
@@ -19,6 +23,7 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     id: 'face-natural-beauty',
     name: '自然美颜',
     category: '面部精修',
+    tool: 'face',
     prompt: '50mm人像镜头, 自然窗光. 轻微面部美化: 均匀肤色, 去除明显瑕疵, 轻微提亮. 保持完全自然的皮肤质感, 保留所有面部特征和表情. 不要改变五官形状, 不要过度修图, 保持本人辨识度.',
     description: '极轻微的自然美颜处理',
   },
@@ -26,8 +31,103 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     id: 'face-slight-contour',
     name: '轻微修脸',
     category: '面部精修',
+    tool: 'face',
     prompt: '85mm人像镜头, 柔和侧光. 轻微面部调整: 下颌线轻微收紧, 鼻翼鼻头轻微缩小, 人中轻微缩短. 所有调整保持自然, 保持本人特征, 不要网红脸, 不要过度整形感. 保留真实皮肤纹理和面部立体光影.',
     description: '轻微轮廓调整，保持辨识度',
+  },
+
+  // === 液化塑形 ===
+  {
+    id: 'liquify-natural-face',
+    name: '自然小脸',
+    category: '液化塑形',
+    tool: 'liquify',
+    prompt: '85mm人像镜头, 柔光箱布光. 保留人物本人身份、五官辨识度和原始表情不变. 仅对脸型做轻微液化调整: 脸颊两侧轻微内收, 下颌线更流畅, 整体脸型更精致但完全自然. 不要网红蛇精脸, 不要过度瘦脸, 不要改变骨骼结构, 不要改变发型和肩颈线条.',
+    description: '轻微瘦脸，保持本人特征',
+  },
+  {
+    id: 'liquify-jawline',
+    name: '下颌线收紧',
+    category: '液化塑形',
+    tool: 'liquify',
+    prompt: '85mm人像镜头, 柔和侧光. 保留人物身份、五官比例和面部特征不变. 仅收紧下颌线轮廓: 下巴到耳根线条更流畅清晰, 去除轻微双下巴, 增强下颌立体感. 调整程度轻微自然, 不要改变脸型比例, 不要过度锥子脸, 不要影响脖子与肩颈过渡.',
+    description: '收紧下颌线，增强轮廓感',
+  },
+  {
+    id: 'liquify-nose',
+    name: '鼻翼缩小',
+    category: '液化塑形',
+    tool: 'liquify',
+    prompt: '85mm人像镜头, 自然光. 保留人物本人身份、鼻型特征和面部辨识度不变. 仅对鼻翼和鼻头做轻微调整: 鼻翼宽度略微收窄, 鼻头更精致小巧, 鼻型整体更秀气. 调整程度轻微, 保持自然, 不要改变鼻梁高度, 不要影响面部光影, 不要网红化.',
+    description: '轻微收窄鼻翼，精致鼻型',
+  },
+  {
+    id: 'liquify-body',
+    name: '身形微调',
+    category: '液化塑形',
+    tool: 'liquify',
+    prompt: '全身人像, 85mm人像镜头. 保留人物身份、姿势、服装和背景构图完全不变. 仅对身形做轻微液化微调: 肩部线条更流畅, 腰部略微收紧, 手臂线条自然. 调整程度轻微, 保持真实人体比例, 不要过度瘦身, 不要改变服装褶皱和面料纹理, 不要影响背景空间关系.',
+    description: '自然微调身形比例',
+  },
+
+  // === 追色 ===
+  {
+    id: 'color-match-reference',
+    name: '按参考图追色',
+    category: '追色',
+    tool: 'color',
+    prompt: '85mm人像镜头. 保留原图人物身份、姿势、服装、构图和背景结构完全不变. 参考提供的参考图, 将整体色调、光影氛围、色彩倾向向参考图靠拢: 匹配参考图的高光色、阴影色、肤色倾向和环境色. 风格与参考图统一, 但保持人物本人特征不变. 不要改变五官, 不要改变服装细节, 不要重绘背景, 不要产生滤镜糊脸感.',
+    description: '按参考图匹配色调光影',
+  },
+  {
+    id: 'color-japanese-fresh-tone',
+    name: '日系清新通透',
+    category: '追色',
+    tool: 'color',
+    prompt: '富士Pro 400H胶片模拟, 85mm人像镜头. 保留人物身份、面部特征和皮肤质感不变. 整体调成日系清新通透色调: 轻微过曝感, 柔和高光, 淡青色阴影, 整体偏冷但肤色保持自然暖调. 去灰, 提亮暗部, 色彩层次分明. 不要过度饱和, 不要假白, 不要改变五官, 不要柔焦糊脸.',
+    description: '清新通透的日系胶片色调',
+  },
+  {
+    id: 'color-cinematic-warm-tone',
+    name: '电影感暖调追色',
+    category: '追色',
+    tool: 'color',
+    prompt: '柯达Vision3 500T电影胶片模拟, 85mm人像镜头. 保留人物身份、构图和面部特征不变. 整体调成电影感暖调: 暖橙色高光, 深蓝色阴影, 整体偏暖, 暗部有细节, 高光不过曝. 细腻胶片颗粒感, 宽容度高的影调. 不要改变人物细节, 不要过度对比, 不要色彩溢出, 不要滤镜感.',
+    description: '电影胶片感的暖色调',
+  },
+  {
+    id: 'color-new-chinese-dark-tone',
+    name: '新中式暗调追色',
+    category: '追色',
+    tool: 'color',
+    prompt: '柯达Portra 400胶片模拟, 85mm人像镜头. 保留人物身份、姿势、服装和背景构图完全不变. 整体调成新中式暗调电影感: 低饱和, 灰绿色环境色, 暖金色高光, 墨绿暗部. 暖色窗光, 暗部深但保留细节, 柔和高光. 胶片质感, 细腻颗粒感, 东方含蓄氛围. 不要改变人物面部特征, 不要假白, 不要塑料皮, 不要柔焦糊脸.',
+    description: '新中式暗调电影感追色',
+  },
+
+  // === 调色风格 ===
+  {
+    id: 'color-new-chinese',
+    name: '新中式暗调',
+    category: '调色风格',
+    tool: 'color',
+    prompt: '柯达Portra 400胶片模拟, 新中式暗调电影感调色. 低饱和, 灰绿色环境色, 暖金色高光, 墨绿暗部. 暖色窗光, 暗部深但保留细节, 柔和高光. 胶片质感, 细腻颗粒感. 保持人物面部特征和皮肤质感不变, 不要改变构图.',
+    description: '新中式暗调电影感风格',
+  },
+  {
+    id: 'color-japanese-fresh',
+    name: '通透日系',
+    category: '调色风格',
+    tool: 'color',
+    prompt: '富士Pro 400H胶片模拟, 通透日系调色. 轻微过曝, 柔和高光, 淡青色阴影, 整体偏冷但肤色保持暖调. 去灰, 提亮暗部, 保持色彩层次分明. 保持人物面部特征不变, 不要改变构图和皮肤质感.',
+    description: '清新通透的日系色调',
+  },
+  {
+    id: 'color-cinematic-warm',
+    name: '电影感暖调',
+    category: '调色风格',
+    tool: 'color',
+    prompt: '柯达Vision3 500T电影胶片模拟, 电影感暖调. 暖橙色高光, 深蓝色阴影, 整体偏暖. 宽容度高的影调, 暗部有细节, 高光不过曝. 细腻胶片颗粒感. 保持人物面部特征不变, 不要改变构图.',
+    description: '电影胶片感的暖色调',
   },
 
   // === 背景替换 ===
@@ -49,31 +149,61 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     id: 'bg-remove-objects',
     name: '去除杂物',
     category: '背景替换',
+    tool: 'repair',
     prompt: '去除画面中的[在此描述要去除的元素, 如: 路人/电线/杂物]. 用周围环境自然填充被去除的区域, 保持画面完整和自然. 不要改变人物和主要景物的任何细节.',
     description: '去除画面中的多余元素',
   },
 
-  // === 调色风格 ===
+  // === 穿帮修复 ===
   {
-    id: 'color-new-chinese',
-    name: '新中式暗调',
-    category: '调色风格',
-    prompt: '柯达Portra 400胶片模拟, 新中式暗调电影感调色. 低饱和, 灰绿色环境色, 暖金色高光, 墨绿暗部. 暖色窗光, 暗部深但保留细节, 柔和高光. 胶片质感, 细腻颗粒感. 保持人物面部特征和皮肤质感不变, 不要改变构图.',
-    description: '新中式暗调电影感风格',
+    id: 'repair-bg-clutter',
+    name: '自动修复背景杂物',
+    category: '穿帮修复',
+    tool: 'repair',
+    prompt: '85mm人像镜头. 保留人物身份、姿势、服装、构图和主要背景结构完全不变. 自动识别并去除画面中的背景杂物: 电线、垃圾、零散道具、不和谐元素等. 用周围环境纹理自然填充修复区域, 保持透视和光影一致. 不要改变人物, 不要重绘主体景物, 不要留下修复痕迹.',
+    description: '自动清理背景不和谐元素',
   },
   {
-    id: 'color-japanese-fresh',
-    name: '通透日系',
-    category: '调色风格',
-    prompt: '富士Pro 400H胶片模拟, 通透日系调色. 轻微过曝, 柔和高光, 淡青色阴影, 整体偏冷但肤色保持暖调. 去灰, 提亮暗部, 保持色彩层次分明. 保持人物面部特征不变, 不要改变构图和皮肤质感.',
-    description: '清新通透的日系色调',
+    id: 'repair-stand-reflector',
+    name: '去除支架/反光板',
+    category: '穿帮修复',
+    tool: 'repair',
+    prompt: '85mm人像镜头. 保留人物、服装、姿势和整体构图完全不变. 去除画面中穿帮的摄影器材: 灯架、支架、反光板、电线、柔光箱边缘等. 用周围环境自然填补, 保持地面纹理、墙面纹理和光影方向一致. 不要改变人物, 不要影响背景透视, 不要留下模糊或重复纹理.',
+    description: '去除摄影器材穿帮',
   },
   {
-    id: 'color-cinematic-warm',
-    name: '电影感暖调',
-    category: '调色风格',
-    prompt: '柯达Vision3 500T电影胶片模拟, 电影感暖调. 暖橙色高光, 深蓝色阴影, 整体偏暖. 宽容度高的影调, 暗部有细节, 高光不过曝. 细腻胶片颗粒感. 保持人物面部特征不变, 不要改变构图.',
-    description: '电影胶片感的暖色调',
+    id: 'repair-ground',
+    name: '修复地面穿帮',
+    category: '穿帮修复',
+    tool: 'repair',
+    prompt: '85mm人像镜头. 保留人物身份、姿势、服装和整体构图完全不变. 修复地面穿帮区域: 脚印、反光、污渍、道具阴影、不自然的地面拼接等. 用周围地面纹理自然填充, 保持透视和光影一致. 不要改变人物, 不要改变地面材质, 不要留下修复痕迹.',
+    description: '修复地面瑕疵和穿帮',
+  },
+
+  // === 路人去除 ===
+  {
+    id: 'remove-passersby-auto',
+    name: '自动去除路人',
+    category: '路人去除',
+    tool: 'remove',
+    prompt: '85mm人像镜头. 保留主体人物身份、姿势、服装和整体构图完全不变. 自动识别并去除画面中的路人、游客、背景行人. 用周围环境纹理自然填充被去除区域, 保持背景建筑、街道、植物的完整性和透视关系. 不要改变主体人物, 不要重绘主要景物, 不要留下模糊或重复纹理.',
+    description: '智能识别并去除路人',
+  },
+  {
+    id: 'remove-selected-person',
+    name: '框选去除背景人物',
+    category: '路人去除',
+    tool: 'remove',
+    prompt: '85mm人像镜头. 保留主体人物和主要背景构图完全不变. 去除框选区域内的背景人物: 用周围环境自然填补, 恢复被遮挡的建筑、地面、植物等背景元素. 保持光影方向和透视一致. 不要改变主体人物, 不要影响未选中区域, 不要留下修复痕迹.',
+    description: '框选指定区域去除人物',
+  },
+  {
+    id: 'remove-tourists',
+    name: '去除多余游客',
+    category: '路人去除',
+    tool: 'remove',
+    prompt: '85mm人像镜头. 保留主体人物身份、姿势、服装和背景标志性景物完全不变. 去除画面中多余游客和闲散行人, 保留场景本身应有的空旷感或正常人流氛围. 用周围环境自然填充, 保持地面、建筑、天空的连续性. 不要改变主体人物, 不要改变场景结构, 不要留下修复痕迹.',
+    description: '去除游客保持场景自然',
   },
 
   // === 风格迁移 ===
@@ -91,6 +221,32 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     prompt: '将这张照片调整为[在此描述摄影风格, 如: 90年代港风/法式复古/北欧极简]的摄影风格. 调整色调、光影和氛围以匹配该风格. 保持人物面部特征不变, 不要改变五官和表情.',
     description: '指定摄影风格迁移',
   },
+
+  // === 导出 ===
+  {
+    id: 'export-upscale',
+    name: '超分辨率放大',
+    category: '导出',
+    tool: 'export',
+    prompt: '保持画面内容、人物身份、构图、色彩和光影完全不变. 对整图进行超分辨率放大: 提升分辨率, 增强细节清晰度, 锐化眼睛、头发、服装纹理等关键区域, 去除轻微噪点和压缩痕迹. 不要改变画面内容, 不要添加原图不存在的细节, 不要过度锐化产生白边.',
+    description: '高清放大，增强细节',
+  },
+  {
+    id: 'export-png-transparent',
+    name: '输出 PNG 透明背景',
+    category: '导出',
+    tool: 'export',
+    prompt: '保留人物主体、服装、发型和边缘细节完全不变. 将背景去除并输出为透明背景的PNG格式, 主体边缘干净, 头发丝等细节保留完整, 边缘无白边/黑边/杂色. 不要改变人物主体, 不要裁切主体, 不要丢失半透明区域细节.',
+    description: '抠图输出透明背景PNG',
+  },
+  {
+    id: 'export-print',
+    name: '输出印刷用高清图',
+    category: '导出',
+    tool: 'export',
+    prompt: '保持画面内容、色彩、光影和人物细节完全不变. 输出印刷级高清图: 提升分辨率至印刷标准, 色彩配置适合CMYK印刷, 暗部和高光保留细节, 整体锐度适中, 无压缩噪点. 不要改变画面内容, 不要过度饱和, 不要产生印刷无法还原的荧光色.',
+    description: '印刷级高清输出',
+  },
 ];
 
-export const TEMPLATE_CATEGORIES = ['面部精修', '背景替换', '调色风格', '风格迁移'];
+export const TEMPLATE_CATEGORIES = ['面部精修', '液化塑形', '追色', '调色风格', '背景替换', '穿帮修复', '路人去除', '风格迁移', '导出'];

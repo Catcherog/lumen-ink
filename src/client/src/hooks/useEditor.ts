@@ -1,52 +1,9 @@
 import { useReducer, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { serializeError } from '../utils/error';
-import type { GLMModel } from '../../../shared/types';
+import type { EditorState, EditorAction, ReferenceImage, HistoryEntry, RetouchTool, GLMModel, Region } from '../../../shared/types';
 
-interface ReferenceImage {
-  base64: string;
-  mimeType: string;
-}
-
-interface HistoryItem {
-  id: string;
-  prompt: string;
-  resultImageUrl?: string;
-  resultImage?: string; // base64
-  resultMimeType?: string;
-  text?: string;
-  timestamp: number;
-}
-
-interface EditorState {
-  originalImage: string | null;
-  originalMimeType: string;
-  currentImage: string | null;
-  currentImageUrl: string | null;
-  currentMimeType: string;
-  resultImage: string | null;
-  resultImageUrl: string | null;
-  resultText: string | null;
-  resultMimeType: string;
-  isLoading: boolean;
-  error: string | null;
-  selectedModel: GLMModel;
-  history: HistoryItem[];
-  referenceImages: ReferenceImage[];
-}
-
-type EditorAction =
-  | { type: 'UPLOAD_IMAGE'; payload: { base64: string; mimeType: string } }
-  | { type: 'SET_MODEL'; payload: GLMModel }
-  | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'SET_RESULT'; payload: { imageData?: string; imageUrl?: string; text?: string; mimeType: string; history: HistoryItem[] } }
-  | { type: 'SET_REFERENCE_IMAGES'; payload: ReferenceImage[] }
-  | { type: 'RESTORE_FROM_HISTORY'; payload: { image?: string; imageUrl?: string; mimeType: string; historyIndex: number } }
-  | { type: 'LOAD_HISTORY'; payload: HistoryItem[] };
-
-// Load saved history from localStorage (exclude image data to save space)
-const loadSavedHistory = (): HistoryItem[] => {
+const loadSavedHistory = (): HistoryEntry[] => {
   try {
     const saved = localStorage.getItem('edit_history');
     if (saved) {
@@ -73,6 +30,9 @@ const initialState: EditorState = {
   selectedModel: 'cogview-4-250304',
   history: [],
   referenceImages: [],
+  selectedTool: 'face',
+  selectedProvider: null,
+  showApiSettings: false,
 };
 
 function reducer(state: EditorState, action: EditorAction): EditorState {
@@ -107,18 +67,31 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         currentMimeType: action.payload.mimeType,
         history: action.payload.history,
       };
-    case 'SET_REFERENCE_IMAGES':
-      return { ...state, referenceImages: action.payload };
-    case 'RESTORE_FROM_HISTORY':
+    case 'SET_CURRENT_IMAGE':
       return {
         ...state,
         currentImage: action.payload.image || null,
         currentImageUrl: action.payload.imageUrl || null,
         currentMimeType: action.payload.mimeType,
-        history: state.history.slice(0, action.payload.historyIndex),
+      };
+    case 'SET_REFERENCE_IMAGES':
+      return { ...state, referenceImages: action.payload };
+    case 'RESTORE_FROM_HISTORY':
+      return {
+        ...state,
+        currentImage: action.payload.entry.resultImage || null,
+        currentImageUrl: action.payload.entry.resultImageUrl || null,
+        currentMimeType: action.payload.entry.resultMimeType || 'image/png',
+        history: state.history.slice(0, action.payload.index),
       };
     case 'LOAD_HISTORY':
       return { ...state, history: action.payload };
+    case 'SET_TOOL':
+      return { ...state, selectedTool: action.payload };
+    case 'SET_PROVIDER':
+      return { ...state, selectedProvider: action.payload };
+    case 'SET_SHOW_API_SETTINGS':
+      return { ...state, showApiSettings: action.payload };
     default:
       return state;
   }
@@ -139,10 +112,15 @@ export default function useEditor() {
   useEffect(() => {
     if (state.history.length > 0) {
       try {
-        // Save a lightweight version without base64 image data
+        // Save a lightweight version without base64 image data,
+        // but keep tool/params/providerId/regions for history restoration.
         const lightweightHistory = state.history.map(item => ({
           id: item.id,
           prompt: item.prompt,
+          tool: item.tool,
+          params: item.params,
+          providerId: item.providerId,
+          regions: item.regions,
           resultImageUrl: item.resultImageUrl,
           resultMimeType: item.resultMimeType,
           text: item.text,
@@ -169,7 +147,24 @@ export default function useEditor() {
     dispatch({ type: 'SET_REFERENCE_IMAGES', payload: images });
   }, []);
 
-  const submitEdit = useCallback(async (prompt: string) => {
+  const setTool = useCallback((tool: RetouchTool) => {
+    dispatch({ type: 'SET_TOOL', payload: tool });
+  }, []);
+
+  const setProvider = useCallback((providerId: string | null) => {
+    dispatch({ type: 'SET_PROVIDER', payload: providerId });
+  }, []);
+
+  const setShowApiSettings = useCallback((show: boolean) => {
+    dispatch({ type: 'SET_SHOW_API_SETTINGS', payload: show });
+  }, []);
+
+  const submitEdit = useCallback(async (prompt: string, options?: {
+    tool?: RetouchTool;
+    params?: Record<string, unknown>;
+    regions?: Region[];
+    referenceImages?: ReferenceImage[];
+  }) => {
     // 文生图模型不需要图片，图像理解模型需要图片
     const isChatModel = state.selectedModel === 'glm-4.6v';
     if (isChatModel && !state.currentImage) {
@@ -181,21 +176,28 @@ export default function useEditor() {
     dispatch({ type: 'SET_ERROR', payload: null });
 
     try {
+      const referenceImages = options?.referenceImages || state.referenceImages;
       const response = await axios.post('/api/edit', {
         prompt,
         image: state.currentImage || undefined,
         mimeType: state.currentMimeType,
         model: state.selectedModel,
-        referenceImages: state.referenceImages.length > 0
-          ? state.referenceImages.map(img => ({ data: img.base64, mimeType: img.mimeType }))
+        providerId: state.selectedProvider || undefined,
+        regions: options?.regions,
+        referenceImages: referenceImages.length > 0
+          ? referenceImages.map(img => ({ data: img.base64, mimeType: img.mimeType }))
           : undefined,
       });
 
       if (response.data.success) {
         const hasImage = response.data.imageData || response.data.imageUrl;
-        const newHistoryEntry: HistoryItem = {
+        const newHistoryEntry: HistoryEntry = {
           id: Date.now().toString(),
           prompt,
+          tool: options?.tool,
+          params: options?.params,
+          providerId: state.selectedProvider || undefined,
+          regions: options?.regions,
           resultImage: response.data.imageData,
           resultImageUrl: response.data.imageUrl,
           resultMimeType: response.data.mimeType || 'image/png',
@@ -221,10 +223,15 @@ export default function useEditor() {
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string };
-      if (axiosErr.response?.status === 401) {
-        dispatch({ type: 'SET_ERROR', payload: '登录已过期，请重新登录' });
+      const responseErrorText = serializeError(axiosErr.response?.data) || '';
+      if (axiosErr.response?.status === 401 || axiosErr.response?.status === 403) {
+        if (responseErrorText.includes('API Key') || responseErrorText.includes('Key')) {
+          dispatch({ type: 'SET_ERROR', payload: 'API Key 无效或已过期' });
+        } else {
+          dispatch({ type: 'SET_ERROR', payload: '登录已过期，请重新登录' });
+        }
       } else if (axiosErr.response?.status === 429) {
-        dispatch({ type: 'SET_ERROR', payload: 'API 调用额度已用尽，请稍后重试' });
+        dispatch({ type: 'SET_ERROR', payload: '该 API 额度已用尽，请切换 Provider 或稍后重试' });
       } else if (axiosErr.response?.data) {
         dispatch({ type: 'SET_ERROR', payload: serializeError(axiosErr.response.data) });
       } else {
@@ -233,26 +240,25 @@ export default function useEditor() {
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [state.currentImage, state.currentMimeType, state.selectedModel, state.history, state.referenceImages]);
+  }, [state.currentImage, state.currentMimeType, state.selectedModel, state.selectedProvider, state.history, state.referenceImages]);
 
-  const restoreFromHistory = useCallback((entry: HistoryItem, index: number) => {
+  const restoreFromHistory = useCallback((entry: HistoryEntry, index: number) => {
     dispatch({
       type: 'RESTORE_FROM_HISTORY',
-      payload: {
-        image: entry.resultImage,
-        imageUrl: entry.resultImageUrl,
-        mimeType: entry.resultMimeType || 'image/png',
-        historyIndex: index,
-      },
+      payload: { entry, index },
     });
   }, []);
 
   return {
     state,
+    dispatch,
     uploadImage,
     setModel,
     submitEdit,
     restoreFromHistory,
     setReferenceImages,
+    setTool,
+    setProvider,
+    setShowApiSettings,
   };
 }

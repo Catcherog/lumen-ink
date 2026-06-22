@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { editImage } from '../services/glm.js';
-import type { EditRequest, EditResponse } from 'shared/types.js';
+import { getProvider, getProviderOperationType } from '../services/providers/ProviderFactory.js';
+import type { EditRequest, EditResponse, EditResult } from 'shared/types.js';
 
 const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { prompt, image, mimeType, model, referenceImages, history } = req.body as EditRequest;
+    const { prompt, image, mimeType, model, referenceImages, history, providerId, regions } =
+      req.body as EditRequest;
 
     if (!prompt) {
       res.status(400).json({
@@ -16,11 +17,19 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    // 文生图模型不需要上传图片，图像理解模型需要图片
-    const selectedModel = model || 'cogview-4-250304';
-    const isChatModel = selectedModel === 'glm-4.6v';
+    const provider = getProvider(providerId);
+    if (!provider) {
+      res.status(400).json({
+        success: false,
+        error: '未找到可用的 Provider，请先在 API 设置中配置',
+      } as EditResponse);
+      return;
+    }
 
-    if (isChatModel && (!image || !mimeType)) {
+    const selectedModel = model || provider.config.defaultModel;
+    const operationType = getProviderOperationType(provider.config.type, selectedModel);
+
+    if (operationType === 'chat' && (!image || !mimeType)) {
       res.status(400).json({
         success: false,
         error: '图像理解模型需要上传图片',
@@ -28,14 +37,34 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await editImage({
-      prompt,
-      imageData: image || '',
-      mimeType: mimeType || 'image/jpeg',
-      model: selectedModel,
-      referenceImages,
-      history,
-    });
+    let result: EditResult;
+    switch (operationType) {
+      case 'generate':
+        result = await provider.generate({ prompt, referenceImages, model: selectedModel });
+        break;
+      case 'edit':
+        result = await provider.edit({
+          prompt,
+          image: image || '',
+          mimeType: mimeType || 'image/jpeg',
+          referenceImages,
+          model: selectedModel,
+          regions,
+        });
+        break;
+      case 'chat':
+        result = await provider.chat({
+          prompt,
+          image,
+          mimeType,
+          referenceImages,
+          history,
+          model: selectedModel,
+        });
+        break;
+      default:
+        throw new Error(`不支持的模型: ${selectedModel}`);
+    }
 
     res.json({
       success: true,
@@ -49,11 +78,20 @@ router.post('/', async (req: Request, res: Response) => {
 
     const err = error as { status?: number; message?: string };
 
+    // API Key 无效或已过期
+    if (err.status === 401 || err.status === 403) {
+      res.status(401).json({
+        success: false,
+        error: 'API Key 无效或已过期',
+      } as EditResponse);
+      return;
+    }
+
     // 额度耗尽
     if (err.status === 429 || err.message?.includes('quota') || err.message?.includes('额度')) {
       res.status(429).json({
         success: false,
-        error: 'API 调用额度已用尽，请稍后重试',
+        error: '额度已用尽',
       } as EditResponse);
       return;
     }
@@ -62,7 +100,7 @@ router.post('/', async (req: Request, res: Response) => {
     if (err.status && err.status >= 500) {
       res.status(502).json({
         success: false,
-        error: 'GLM 服务暂时不可用，请稍后重试',
+        error: '服务暂时不可用',
       } as EditResponse);
       return;
     }

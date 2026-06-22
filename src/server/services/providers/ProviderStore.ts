@@ -1,0 +1,228 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+import type { ProviderConfig } from 'shared/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_FILE = path.join(DATA_DIR, 'providers.json');
+
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 16;
+const TAG_LENGTH = 16;
+
+function getEncryptionKey(): Buffer {
+  const envKey = process.env.PROVIDER_ENCRYPTION_KEY;
+  if (envKey) {
+    return crypto.createHash('sha256').update(envKey).digest();
+  }
+  const jwtSecret = process.env.JWT_SECRET || 'gemini-image-editor-secret';
+  return crypto.createHash('sha256').update(jwtSecret).digest();
+}
+
+function encrypt(plainText: string): string {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, getEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decrypt(encryptedText: string): string {
+  const parts = encryptedText.split(':');
+  if (parts.length !== 3) {
+    throw new Error('Invalid encrypted API key format');
+  }
+  const [ivHex, tagHex, encryptedHex] = parts;
+  const iv = Buffer.from(ivHex, 'hex');
+  const tag = Buffer.from(tagHex, 'hex');
+  const encrypted = Buffer.from(encryptedHex, 'hex');
+  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, getEncryptionKey(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+}
+
+function isEncrypted(value: string): boolean {
+  return value.includes(':') && value.split(':').length === 3;
+}
+
+interface StoreData {
+  providers: ProviderConfig[];
+}
+
+export class ProviderStore {
+  private providers: ProviderConfig[] = [];
+  private loaded = false;
+
+  private ensureDataDir(): void {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  }
+
+  private load(): void {
+    if (this.loaded) return;
+    this.ensureDataDir();
+    if (fs.existsSync(DATA_FILE)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) as StoreData;
+        this.providers = data.providers || [];
+      } catch (error) {
+        console.error('[ProviderStore] Failed to load providers.json:', error);
+        this.providers = [];
+      }
+    }
+    this.loaded = true;
+    this.migrateFromEnv();
+  }
+
+  private save(): void {
+    this.ensureDataDir();
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ providers: this.providers }, null, 2));
+  }
+
+  private migrateFromEnv(): void {
+    const glmApiKey = process.env.GLM_API_KEY || process.env.ZHIPU_API_KEY;
+    if (!glmApiKey) return;
+
+    const hasGlmProvider = this.providers.some((p) => p.type === 'glm');
+    if (hasGlmProvider) return;
+
+    const now = Date.now();
+    const provider: ProviderConfig = {
+      id: crypto.randomUUID(),
+      name: '默认 GLM Provider',
+      type: 'glm',
+      apiKey: encrypt(glmApiKey),
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      defaultModel: 'cogview-4-250304',
+      enabled: true,
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.providers.forEach((p) => (p.isDefault = false));
+    this.providers.push(provider);
+    this.save();
+    console.log('[ProviderStore] Auto-created default GLM provider from GLM_API_KEY');
+  }
+
+  private decryptConfig(config: ProviderConfig): ProviderConfig {
+    return {
+      ...config,
+      apiKey: config.apiKey ? decrypt(config.apiKey) : '',
+    };
+  }
+
+  list(): ProviderConfig[] {
+    this.load();
+    return this.providers.map((p) => {
+      const { apiKey: _apiKey, ...rest } = p;
+      return { ...rest, apiKey: '' } as ProviderConfig;
+    });
+  }
+
+  get(id: string): ProviderConfig | null {
+    this.load();
+    const found = this.providers.find((p) => p.id === id);
+    return found ? this.decryptConfig(found) : null;
+  }
+
+  getDefault(): ProviderConfig | null {
+    this.load();
+    const defaultId = process.env.DEFAULT_PROVIDER_ID;
+    let found: ProviderConfig | undefined;
+
+    if (defaultId) {
+      found = this.providers.find((p) => p.enabled && p.id === defaultId);
+    }
+    if (!found) {
+      found = this.providers.find((p) => p.enabled && p.isDefault);
+    }
+    if (!found) {
+      found = this.providers.find((p) => p.enabled);
+    }
+
+    return found ? this.decryptConfig(found) : null;
+  }
+
+  create(config: Omit<ProviderConfig, 'id' | 'createdAt' | 'updatedAt'>): ProviderConfig {
+    this.load();
+    const now = Date.now();
+    const provider: ProviderConfig = {
+      ...config,
+      id: crypto.randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (provider.apiKey) {
+      provider.apiKey = encrypt(provider.apiKey);
+    }
+
+    if (provider.isDefault) {
+      this.providers.forEach((p) => (p.isDefault = false));
+    }
+
+    this.providers.push(provider);
+    this.save();
+    return this.decryptConfig(provider);
+  }
+
+  update(id: string, config: Partial<ProviderConfig>): ProviderConfig | null {
+    this.load();
+    const index = this.providers.findIndex((p) => p.id === id);
+    if (index === -1) return null;
+
+    const existing = this.providers[index];
+    const updated: ProviderConfig = {
+      ...existing,
+      ...config,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      updatedAt: Date.now(),
+    };
+
+    if (config.apiKey && !isEncrypted(config.apiKey)) {
+      updated.apiKey = encrypt(config.apiKey);
+    } else if (config.apiKey === undefined || config.apiKey === '') {
+      updated.apiKey = existing.apiKey;
+    }
+
+    if (updated.isDefault) {
+      this.providers.forEach((p, i) => {
+        if (i !== index) p.isDefault = false;
+      });
+    }
+
+    this.providers[index] = updated;
+    this.save();
+    return this.decryptConfig(updated);
+  }
+
+  delete(id: string): boolean {
+    this.load();
+    const index = this.providers.findIndex((p) => p.id === id);
+    if (index === -1) return false;
+    this.providers.splice(index, 1);
+    this.save();
+    return true;
+  }
+
+  setDefault(id: string): ProviderConfig | null {
+    this.load();
+    const index = this.providers.findIndex((p) => p.id === id);
+    if (index === -1) return null;
+
+    this.providers.forEach((p, i) => {
+      p.isDefault = i === index;
+      if (i === index) p.updatedAt = Date.now();
+    });
+    this.save();
+    return this.decryptConfig(this.providers[index]);
+  }
+}
+
+export const providerStore = new ProviderStore();

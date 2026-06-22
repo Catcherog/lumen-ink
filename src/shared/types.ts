@@ -1,13 +1,44 @@
+export type ProviderType = 'openai' | 'glm' | 'jimeng' | 'custom';
+
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  type: ProviderType;
+  apiKey: string;
+  baseUrl?: string;
+  defaultModel: string;
+  enabled: boolean;
+  isDefault?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProviderModel {
+  id: string;
+  name: string;
+}
+
+export interface Region {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+}
+
 export interface EditRequest {
   prompt: string;
-  image: string; // base64
-  mimeType: string;
+  image?: string; // base64
+  mimeType?: string;
   referenceImages?: Array<{
     data: string; // base64
     mimeType: string;
   }>;
   model?: string;
+  providerId?: string;
   history?: ConversationTurn[];
+  // 可选：区域信息（用于穿帮修复/路人去除）
+  regions?: Region[];
 }
 
 export interface ConversationTurn {
@@ -28,6 +59,13 @@ export interface EditResponse {
   error?: string;
 }
 
+export interface EditResult {
+  imageData?: string;
+  imageUrl?: string;
+  text?: string;
+  mimeType?: string;
+}
+
 // GLM 模型定义
 export type GLMModel = 'cogview-4-250304' | 'glm-4.6v' | 'glm-image';
 
@@ -41,12 +79,25 @@ export const GLM_MODELS: Array<{ id: GLMModel; name: string; description: string
 export type GeminiModel = GLMModel;
 export const GEMINI_MODELS = GLM_MODELS;
 
+// 修图工具
+export type RetouchTool = 'face' | 'color' | 'liquify' | 'repair' | 'remove' | 'export';
+
+export interface ReferenceImage {
+  base64: string;
+  mimeType: string;
+}
+
 export interface HistoryEntry {
   id: string;
   prompt: string;
+  tool?: RetouchTool;
+  params?: Record<string, unknown>;
+  providerId?: string;
+  regions?: Region[];
   resultImage?: string; // base64
   resultImageUrl?: string; // GLM URL
   resultMimeType?: string;
+  text?: string;
   timestamp: number;
 }
 
@@ -56,17 +107,30 @@ export interface EditorState {
   currentImage: string | null; // latest result, or original if no edits yet
   currentImageUrl: string | null; // GLM URL
   currentMimeType: string;
-  history: HistoryEntry[];
-  selectedModel: GLMModel;
+  resultImage: string | null;
+  resultImageUrl: string | null;
+  resultText: string | null;
+  resultMimeType: string;
   isLoading: boolean;
   error: string | null;
+  selectedModel: GLMModel;
+  history: HistoryEntry[];
+  referenceImages: ReferenceImage[];
+  selectedTool: RetouchTool;
+  selectedProvider: string | null;
+  showApiSettings: boolean;
 }
 
 export type EditorAction =
   | { type: 'UPLOAD_IMAGE'; payload: { base64: string; mimeType: string } }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'ADD_HISTORY'; payload: HistoryEntry }
+  | { type: 'SET_RESULT'; payload: { imageData?: string; imageUrl?: string; text?: string; mimeType: string; history: HistoryEntry[] } }
+  | { type: 'SET_REFERENCE_IMAGES'; payload: ReferenceImage[] }
   | { type: 'SET_CURRENT_IMAGE'; payload: { image?: string; imageUrl?: string; mimeType: string } }
   | { type: 'SET_MODEL'; payload: GLMModel }
-  | { type: 'RESTORE_FROM_HISTORY'; payload: { entry: HistoryEntry; index: number } };
+  | { type: 'RESTORE_FROM_HISTORY'; payload: { entry: HistoryEntry; index: number } }
+  | { type: 'LOAD_HISTORY'; payload: HistoryEntry[] }
+  | { type: 'SET_TOOL'; payload: RetouchTool }
+  | { type: 'SET_PROVIDER'; payload: string | null }
+  | { type: 'SET_SHOW_API_SETTINGS'; payload: boolean };

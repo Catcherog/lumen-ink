@@ -14,6 +14,7 @@ export default function PromptInput({ onSubmit, isLoading, placeholder = '输入
 
   useEffect(() => {
     if (externalPrompt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPrompt(externalPrompt);
       onPromptConsumed?.();
     }

@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import editRouter from './routes/edit.js';
 import authRouter from './routes/auth.js';
+import providersRouter from './routes/providers.js';
+import detectRouter from './routes/detect.js';
 import { authMiddleware } from './middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,8 +20,8 @@ dotenv.config(); // 当前目录
 // 关键环境变量兜底与校验，避免未配置时产生未处理异常导致 500
 process.env.JWT_SECRET ??= 'gemini-image-editor-secret';
 process.env.AUTH_PASSWORD ??= 'changeme';
-if (!process.env.GLM_API_KEY && !process.env.ZHIPU_API_KEY) {
-  console.warn('[ENV] GLM_API_KEY / ZHIPU_API_KEY 未配置，/api/edit 接口将不可用');
+if (!process.env.GLM_API_KEY && !process.env.ZHIPU_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
+  console.warn('[ENV] GLM_API_KEY / ZHIPU_API_KEY / DEFAULT_PROVIDER_ID 未配置，系统启动后可能没有可用的默认 Provider');
 }
 
 const app = express();
@@ -32,7 +34,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/providers', authMiddleware, providersRouter);
 app.use('/api/edit', authMiddleware, editRouter);
+app.use('/api/detect', authMiddleware, detectRouter);
 
 // 静态文件托管（前端构建产物，仅本地开发用）
 const publicDir = path.join(__dirname, 'public');
