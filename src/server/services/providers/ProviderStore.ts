@@ -6,7 +6,10 @@ import type { ProviderConfig } from 'shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// Vercel Serverless 文件系统只读，只有 /tmp 可写；其他环境用项目目录
+const DATA_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'glm-image-editor-data')
+  : path.join(__dirname, '..', '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'providers.json');
 
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
