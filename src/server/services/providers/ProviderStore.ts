@@ -87,29 +87,48 @@ export class ProviderStore {
   }
 
   private migrateFromEnv(): void {
-    const glmApiKey = process.env.GLM_API_KEY || process.env.ZHIPU_API_KEY;
-    if (!glmApiKey) return;
-
-    const hasGlmProvider = this.providers.some((p) => p.type === 'glm');
-    if (hasGlmProvider) return;
-
     const now = Date.now();
-    const provider: ProviderConfig = {
-      id: crypto.randomUUID(),
-      name: '默认 GLM Provider',
-      type: 'glm',
-      apiKey: encrypt(glmApiKey),
-      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-      defaultModel: 'cogview-4-250304',
-      enabled: true,
-      isDefault: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.providers.forEach((p) => (p.isDefault = false));
-    this.providers.push(provider);
-    this.save();
-    console.log('[ProviderStore] Auto-created default GLM provider from GLM_API_KEY');
+    let changed = false;
+
+    // GLM 自动迁移
+    const glmApiKey = process.env.GLM_API_KEY || process.env.ZHIPU_API_KEY;
+    if (glmApiKey && !this.providers.some((p) => p.type === 'glm')) {
+      this.providers.push({
+        id: crypto.randomUUID(),
+        name: '默认 GLM Provider',
+        type: 'glm',
+        apiKey: encrypt(glmApiKey),
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        defaultModel: 'cogview-4-250304',
+        enabled: true,
+        isDefault: this.providers.length === 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      changed = true;
+      console.log('[ProviderStore] Auto-created GLM provider from GLM_API_KEY');
+    }
+
+    // Gemini 自动迁移
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (geminiApiKey && !this.providers.some((p) => p.type === 'gemini')) {
+      this.providers.push({
+        id: crypto.randomUUID(),
+        name: '默认 Gemini Provider',
+        type: 'gemini',
+        apiKey: encrypt(geminiApiKey),
+        baseUrl: '',
+        defaultModel: 'gemini-2.5-flash-image',
+        enabled: true,
+        isDefault: this.providers.length === 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      changed = true;
+      console.log('[ProviderStore] Auto-created Gemini provider from GEMINI_API_KEY');
+    }
+
+    if (changed) this.save();
   }
 
   private decryptConfig(config: ProviderConfig): ProviderConfig {
