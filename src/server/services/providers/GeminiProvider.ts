@@ -1,7 +1,10 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GOOGLE_AI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const VERTEX_AI_BASE = 'https://aiplatform.googleapis.com/v1';
+
+type ApiMode = 'google-ai' | 'vertex-ai';
 
 export class GeminiProvider implements ImageProvider {
   readonly config: ProviderConfig;
@@ -14,8 +17,29 @@ export class GeminiProvider implements ImageProvider {
     return this.config.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
   }
 
+  private get apiMode(): ApiMode {
+    const baseUrl = (this.config.baseUrl || '').toLowerCase();
+    if (baseUrl.includes('aiplatform.googleapis.com') || baseUrl.includes('vertex')) {
+      return 'vertex-ai';
+    }
+    return 'google-ai';
+  }
+
   private get baseUrl(): string {
-    return this.config.baseUrl || GEMINI_API_BASE;
+    if (this.config.baseUrl) {
+      return this.config.baseUrl.replace(/\/$/, '');
+    }
+    return this.apiMode === 'vertex-ai' ? VERTEX_AI_BASE : GOOGLE_AI_BASE;
+  }
+
+  private buildModelPath(model: string): string {
+    if (this.apiMode === 'vertex-ai') {
+      if (this.baseUrl.includes('/projects/')) {
+        return `${this.baseUrl}/publishers/google/models/${model}:generateContent`;
+      }
+      return `${this.baseUrl}/publishers/google/models/${model}:generateContent`;
+    }
+    return `${this.baseUrl}/models/${model}:generateContent`;
   }
 
   private stripDataUrl(image: string): string {
@@ -46,19 +70,30 @@ export class GeminiProvider implements ImageProvider {
       body.systemInstruction = { parts: [{ text: systemInstruction }] };
     }
 
-    const response = await fetch(
-      `${this.baseUrl}/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }
-    );
+    const url = `${this.buildModelPath(model)}?key=${apiKey}`;
+    console.log('[GeminiProvider] Calling API:', this.apiMode, url.split('?')[0]);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Gemini API error:', response.status, errorText);
-      throw Object.assign(new Error(`Gemini API 错误: ${response.status}`), { status: response.status });
+      let errorMessage = `Gemini API 错误: ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          errorMessage += ` - ${errorJson.error.message}`;
+        }
+      } catch {
+        if (errorText) {
+          errorMessage += ` - ${errorText.slice(0, 300)}`;
+        }
+      }
+      throw Object.assign(new Error(errorMessage), { status: response.status });
     }
 
     const data = (await response.json()) as {
@@ -94,6 +129,10 @@ export class GeminiProvider implements ImageProvider {
     throw new Error('Gemini API 未返回有效数据');
   }
 
+  private getDefaultModel(): string {
+    return 'gemini-2.5-flash-image';
+  }
+
   async generate(params: GenerateParams): Promise<EditResult> {
     const parts: Array<Record<string, unknown>> = [{ text: params.prompt }];
 
@@ -105,18 +144,16 @@ export class GeminiProvider implements ImageProvider {
       }
     }
 
-    return this.callGemini(params.model || 'gemini-2.5-flash-image', parts);
+    return this.callGemini(params.model || this.getDefaultModel(), parts);
   }
 
   async edit(params: EditParams): Promise<EditResult> {
-    // 无图片时走生成逻辑
     if (!params.image) {
       return this.generate({ prompt: params.prompt, referenceImages: params.referenceImages, model: params.model });
     }
 
     const parts: Array<Record<string, unknown>> = [];
 
-    // 先放图片，再放文本指令（Gemini 的推荐顺序）
     parts.push({
       inlineData: { mimeType: params.mimeType, data: this.stripDataUrl(params.image) },
     });
@@ -139,7 +176,7 @@ export class GeminiProvider implements ImageProvider {
 
     parts.push({ text: prompt });
 
-    return this.callGemini(params.model || 'gemini-2.5-flash-image', parts);
+    return this.callGemini(params.model || this.getDefaultModel(), parts);
   }
 
   async chat(params: ChatParams): Promise<EditResult> {
@@ -159,6 +196,6 @@ export class GeminiProvider implements ImageProvider {
       }
     }
 
-    return this.callGemini(params.model || 'gemini-2.5-flash-image', parts);
+    return this.callGemini(params.model || this.getDefaultModel(), parts);
   }
 }

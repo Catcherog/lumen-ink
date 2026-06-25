@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { downloadImage } from '../utils/image';
+import { downloadImage, validateImageFile, fileToBase64 } from '../utils/image';
 import ImageUploader from './ImageUploader';
 import {
   Eye,
@@ -12,6 +12,7 @@ import {
   Download,
   ExternalLink,
   Loader2,
+  Upload,
 } from 'lucide-react';
 
 interface ResultViewerProps {
@@ -43,13 +44,54 @@ export default function ResultViewer({
   const [compareMode, setCompareMode] = useState<CompareMode>('slider');
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [sliderPosition, setSliderPosition] = useState(50);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isDragging = useRef(false);
 
   const hasResult = !!(resultImage || resultImageUrl || resultText);
   const hasOriginal = !!originalImage;
+
+  const handleFileSelect = useCallback(async (file: File) => {
+    if (!onImageUpload) return;
+    const validationError = validateImageFile(file);
+    if (validationError) {
+      return;
+    }
+    const base64 = await fileToBase64(file);
+    onImageUpload({ base64, mimeType: file.type, file });
+  }, [onImageUpload]);
+
+  const handleCanvasDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
+  }, [handleFileSelect]);
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleCanvasDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.currentTarget === e.target) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFileSelect(file);
+    e.target.value = '';
+  };
 
   const getResultSrc = (): string | null => {
     if (resultImage) {
@@ -70,7 +112,8 @@ export default function ResultViewer({
 
   const resultSrc = getResultSrc();
   const originalSrc = getOriginalSrc();
-  const displaySrc = viewMode === 'original' ? originalSrc : resultSrc;
+  const effectiveViewMode = !resultSrc && hasOriginal ? 'original' : viewMode;
+  const displaySrc = effectiveViewMode === 'original' ? originalSrc : resultSrc;
 
   // Sync fullscreen state with browser events
   useEffect(() => {
@@ -168,26 +211,28 @@ export default function ResultViewer({
     >
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex-wrap">
-        {hasResult && (
+        {(hasResult || hasOriginal) && (
           <>
-            <button
-              onClick={() => setViewMode('result')}
-              title="生成结果"
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
-                viewMode === 'result'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              <ImageIcon className="w-3.5 h-3.5" />
-              {resultText ? 'AI 回复' : '结果'}
-            </button>
+            {hasResult && (
+              <button
+                onClick={() => setViewMode('result')}
+                title="生成结果"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                  effectiveViewMode === 'result'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                {resultText ? 'AI 回复' : '结果'}
+              </button>
+            )}
             {hasOriginal && (
               <button
                 onClick={() => setViewMode('original')}
                 title="原图"
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
-                  viewMode === 'original'
+                  effectiveViewMode === 'original'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
@@ -201,7 +246,7 @@ export default function ResultViewer({
                 onClick={() => setViewMode('compare')}
                 title="对比"
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
-                  viewMode === 'compare'
+                  effectiveViewMode === 'compare'
                     ? 'bg-purple-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
@@ -213,7 +258,7 @@ export default function ResultViewer({
           </>
         )}
 
-        {viewMode === 'compare' && hasOriginal && resultSrc && (
+        {effectiveViewMode === 'compare' && hasOriginal && resultSrc && (
           <div className="flex items-center gap-1 ml-1">
             <button
               onClick={() => setCompareMode('slider')}
@@ -241,6 +286,15 @@ export default function ResultViewer({
         )}
 
         <div className="flex items-center gap-1 ml-auto">
+          {onImageUpload && (
+            <button
+              onClick={handleUploadClick}
+              title="上传/替换图片"
+              className="p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <Upload className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={() => setZoomMode(zoomMode === '1:1' ? 'fit' : '1:1')}
             title={zoomMode === '1:1' ? '适应屏幕' : '1:1 缩放'}
@@ -282,8 +336,22 @@ export default function ResultViewer({
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 relative overflow-hidden bg-gray-100 dark:bg-black">
-        {viewMode === 'result' && resultText && !resultSrc && (
+      <div
+        className={`flex-1 relative overflow-hidden bg-gray-100 dark:bg-black ${onImageUpload ? 'cursor-default' : ''}`}
+        onDrop={onImageUpload ? handleCanvasDrop : undefined}
+        onDragOver={onImageUpload ? handleCanvasDragOver : undefined}
+        onDragLeave={onImageUpload ? handleCanvasDragLeave : undefined}
+      >
+        {isDragOver && onImageUpload && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-blue-500/20 border-4 border-dashed border-blue-500 pointer-events-none">
+            <div className="bg-white dark:bg-gray-800 rounded-xl px-6 py-4 shadow-xl text-center">
+              <Upload className="w-10 h-10 text-blue-500 mx-auto mb-2" />
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">拖放图片到此处上传</p>
+            </div>
+          </div>
+        )}
+
+        {effectiveViewMode === 'result' && resultText && !resultSrc && (
           <div className="absolute inset-0 overflow-auto p-6">
             <div className="max-w-3xl mx-auto bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
               <p className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">{resultText}</p>
@@ -291,7 +359,7 @@ export default function ResultViewer({
           </div>
         )}
 
-        {resultSrc && viewMode === 'compare' && hasOriginal ? (
+        {resultSrc && effectiveViewMode === 'compare' && hasOriginal ? (
           <div
             ref={containerRef}
             className="absolute inset-0 flex items-center justify-center select-none"
@@ -362,7 +430,7 @@ export default function ResultViewer({
           >
             <img
               src={displaySrc || undefined}
-              alt={viewMode === 'result' ? '生成结果' : '原图'}
+              alt={effectiveViewMode === 'result' ? '生成结果' : '原图'}
               className={imgContainerClasses}
               draggable={false}
             />
@@ -378,6 +446,14 @@ export default function ResultViewer({
             <p className="mt-3 text-sm text-white">处理中，请稍候…</p>
           </div>
         )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={handleFileInputChange}
+          className="hidden"
+        />
       </div>
     </div>
   );

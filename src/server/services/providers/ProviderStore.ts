@@ -112,12 +112,13 @@ export class ProviderStore {
     // Gemini 自动迁移
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (geminiApiKey && !this.providers.some((p) => p.type === 'gemini')) {
+      const isVertexKey = geminiApiKey.startsWith('AQ.');
       this.providers.push({
         id: crypto.randomUUID(),
-        name: '默认 Gemini Provider',
+        name: isVertexKey ? '默认 Gemini Provider (Vertex AI/Agent Platform)' : '默认 Gemini Provider',
         type: 'gemini',
         apiKey: encrypt(geminiApiKey),
-        baseUrl: '',
+        baseUrl: isVertexKey ? 'https://aiplatform.googleapis.com/v1' : '',
         defaultModel: 'gemini-2.5-flash-image',
         enabled: true,
         isDefault: this.providers.length === 0,
