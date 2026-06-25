@@ -1,7 +1,7 @@
 import { useReducer, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { serializeError } from '../utils/error';
-import type { EditorState, EditorAction, ReferenceImage, HistoryEntry, RetouchTool, GLMModel, Region } from '../../../shared/types';
+import type { EditorState, EditorAction, ReferenceImage, HistoryEntry, RetouchTool, Region } from '../../../shared/types';
 
 const loadSavedHistory = (): HistoryEntry[] => {
   try {
@@ -139,7 +139,7 @@ export default function useEditor() {
     dispatch({ type: 'UPLOAD_IMAGE', payload: { base64: data.base64, mimeType: data.mimeType } });
   }, []);
 
-  const setModel = useCallback((model: GLMModel) => {
+  const setModel = useCallback((model: string) => {
     dispatch({ type: 'SET_MODEL', payload: model });
   }, []);
 

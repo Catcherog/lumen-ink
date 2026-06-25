@@ -30,3 +30,6 @@ Thumbs.db
 
 # CloudBase
 cloudbaserc.json
+
+# Provider 本地数据
+src/server/data/

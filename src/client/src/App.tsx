@@ -10,6 +10,7 @@ import ApiSettingsModal from './components/ApiSettingsModal';
 import useEditor from './hooks/useEditor';
 import { serializeError } from './utils/error';
 import type { ProviderConfig } from '../../shared/types';
+import { PROVIDER_MODELS } from '../../shared/types';
 import { Sun, Moon, LogOut, PanelRightOpen, PanelRightClose, Image as ImageIcon } from 'lucide-react';
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
     restoreFromHistory,
     setTool,
     setProvider,
+    setModel,
     setShowApiSettings,
   } = useEditor();
 
@@ -65,6 +67,18 @@ export default function App() {
       setProvider(defaultProvider.id);
     }
   }, [providers, state.selectedProvider, setProvider]);
+
+  // Auto-set model when provider changes
+  useEffect(() => {
+    if (!state.selectedProvider) return;
+    const provider = providers.find((p) => p.id === state.selectedProvider);
+    if (provider) {
+      setModel(provider.defaultModel);
+    }
+  }, [state.selectedProvider, providers, setModel]);
+
+  const selectedProviderConfig = providers.find((p) => p.id === state.selectedProvider);
+  const availableModels = selectedProviderConfig ? (PROVIDER_MODELS[selectedProviderConfig.type] || []) : [];
 
   // Responsive desktop detection
   useEffect(() => {
@@ -136,6 +150,29 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Model selector */}
+              {availableModels.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-500 dark:text-gray-400 hidden md:inline">模型：</label>
+                  <div className="relative">
+                    <select
+                      value={state.selectedModel}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none max-w-[180px]"
+                    >
+                      {availableModels.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <ApiSettingsButton onClick={() => setShowApiSettings(true)} />
 

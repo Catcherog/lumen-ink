@@ -14,6 +14,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import type { ProviderConfig, ProviderType } from '../../../shared/types';
+import { PROVIDER_MODELS } from '../../../shared/types';
 import { serializeError } from '../utils/error';
 
 interface ApiSettingsModalProps {
@@ -33,16 +34,25 @@ type FormData = {
 const PROVIDER_TYPES: { value: ProviderType; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'glm', label: 'GLM' },
+  { value: 'gemini', label: 'Gemini' },
   { value: 'jimeng', label: '即梦' },
   { value: 'custom', label: '自定义' },
 ];
+
+const ENV_KEY_HINTS: Record<ProviderType, string> = {
+  glm: '留空则使用环境变量 GLM_API_KEY',
+  gemini: '留空则使用环境变量 GEMINI_API_KEY',
+  openai: '留空则使用环境变量 OPENAI_API_KEY',
+  jimeng: '',
+  custom: '',
+};
 
 const EMPTY_FORM: FormData = {
   name: '',
   type: 'glm',
   apiKey: '',
   baseUrl: '',
-  defaultModel: '',
+  defaultModel: 'cogview-4-250304',
   enabled: true,
 };
 
@@ -104,7 +114,6 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
     const errors: Partial<Record<keyof FormData, string>> = {};
     if (!form.name.trim()) errors.name = '名称必填';
     if (!form.type) errors.type = '类型必填';
-    if (!editingId && !form.apiKey.trim()) errors.apiKey = 'API Key 必填';
     if (!form.defaultModel.trim()) errors.defaultModel = '默认模型必填';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -185,7 +194,17 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
   };
 
   const updateForm = (field: keyof FormData, value: string | boolean) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      // 切换类型时自动设置默认模型为该类型的第一个
+      if (field === 'type' && typeof value === 'string') {
+        const models = PROVIDER_MODELS[value as ProviderType] || [];
+        if (models.length > 0 && !models.some((m) => m.value === prev.defaultModel)) {
+          next.defaultModel = models[0].value;
+        }
+      }
+      return next;
+    });
     if (formErrors[field]) {
       setFormErrors((prev) => ({ ...prev, [field]: undefined }));
     }
@@ -267,19 +286,28 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                     默认模型 <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={form.defaultModel}
                     onChange={(e) => updateForm('defaultModel', e.target.value)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    placeholder="例如：cogview-4-250304"
-                  />
+                  >
+                    {PROVIDER_MODELS[form.type]?.length ? (
+                      PROVIDER_MODELS[form.type].map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))
+                    ) : (
+                      <option value="">请先选择类型</option>
+                    )}
+                  </select>
                   {formErrors.defaultModel && <p className="mt-1 text-xs text-red-500">{formErrors.defaultModel}</p>}
                 </div>
 
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                    API Key {editingId === 'new' && <span className="text-red-500">*</span>}
+                    API Key
+                    {ENV_KEY_HINTS[form.type] && (
+                      <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal">{ENV_KEY_HINTS[form.type]}</span>
+                    )}
                   </label>
                   <div className="relative">
                     <input

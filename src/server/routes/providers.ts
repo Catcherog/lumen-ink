@@ -22,8 +22,8 @@ router.post('/', (req: Request, res: Response) => {
   try {
     const { name, type, apiKey, baseUrl, defaultModel, enabled } = req.body as Partial<ProviderConfig>;
 
-    if (!name || !type || !apiKey || !defaultModel) {
-      res.status(400).json({ error: '缺少必要参数：name, type, apiKey, defaultModel' });
+    if (!name || !type || !defaultModel) {
+      res.status(400).json({ error: '缺少必要参数：name, type, defaultModel' });
       return;
     }
 

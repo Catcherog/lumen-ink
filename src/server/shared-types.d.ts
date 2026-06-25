@@ -5,7 +5,7 @@
  * 注意：这里只放服务端实际使用的类型；运行时值仍由 src/shared/types.ts 维护。
  */
 
-export type ProviderType = 'openai' | 'glm' | 'jimeng' | 'custom';
+export type ProviderType = 'openai' | 'glm' | 'gemini' | 'jimeng' | 'custom';
 
 export interface ProviderConfig {
   id: string;
