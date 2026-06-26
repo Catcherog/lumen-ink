@@ -24,6 +24,12 @@ interface ResultViewerProps {
   resultMimeType?: string;
   isLoading?: boolean;
   onImageUpload?: (data: { base64: string; mimeType: string; file: File }) => void;
+  lastCallMeta?: {
+    providerName: string;
+    providerType: string;
+    model: string;
+    operationType: string;
+  } | null;
 }
 
 type ViewMode = 'result' | 'original' | 'compare';
@@ -39,6 +45,7 @@ export default function ResultViewer({
   resultMimeType = 'image/png',
   isLoading = false,
   onImageUpload,
+  lastCallMeta,
 }: ResultViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('result');
   const [compareMode, setCompareMode] = useState<CompareMode>('slider');
@@ -331,6 +338,11 @@ export default function ResultViewer({
               <Download className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{resultImageUrl ? '查看原图' : '下载结果'}</span>
             </button>
+          )}
+          {lastCallMeta && (
+            <span className="ml-auto text-[10px] text-gray-400 dark:text-gray-500 hidden lg:inline">
+              via {lastCallMeta.providerName} · {lastCallMeta.model} · {lastCallMeta.operationType}
+            </span>
           )}
         </div>
       </div>

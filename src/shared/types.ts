@@ -57,6 +57,12 @@ export interface EditResponse {
   mimeType?: string;
   text?: string;
   error?: string;
+  meta?: {
+    providerName: string;
+    providerType: string;
+    model: string;
+    operationType: string;
+  };
 }
 
 export interface EditResult {
@@ -149,13 +155,19 @@ export interface EditorState {
   selectedTool: RetouchTool;
   selectedProvider: string | null;
   showApiSettings: boolean;
+  lastCallMeta?: {
+    providerName: string;
+    providerType: string;
+    model: string;
+    operationType: string;
+  };
 }
 
 export type EditorAction =
   | { type: 'UPLOAD_IMAGE'; payload: { base64: string; mimeType: string } }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'SET_RESULT'; payload: { imageData?: string; imageUrl?: string; text?: string; mimeType: string; history: HistoryEntry[] } }
+  | { type: 'SET_RESULT'; payload: { imageData?: string; imageUrl?: string; text?: string; mimeType: string; history: HistoryEntry[]; meta?: { providerName: string; providerType: string; model: string; operationType: string } } }
   | { type: 'SET_REFERENCE_IMAGES'; payload: ReferenceImage[] }
   | { type: 'SET_CURRENT_IMAGE'; payload: { image?: string; imageUrl?: string; mimeType: string } }
   | { type: 'SET_MODEL'; payload: string }

@@ -70,6 +70,12 @@ export interface EditResponse {
   mimeType?: string;
   text?: string;
   error?: string;
+  meta?: {
+    providerName: string;
+    providerType: string;
+    model: string;
+    operationType: string;
+  };
 }
 
 export interface EditResult {

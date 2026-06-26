@@ -72,6 +72,12 @@ router.post('/', async (req: Request, res: Response) => {
       imageUrl: result.imageUrl,
       mimeType: result.mimeType,
       text: result.text,
+      meta: {
+        providerName: provider.config.name,
+        providerType: provider.config.type,
+        model: selectedModel,
+        operationType,
+      },
     } as EditResponse);
   } catch (error: unknown) {
     console.error('Edit error:', error);

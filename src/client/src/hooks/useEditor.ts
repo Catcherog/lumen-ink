@@ -66,6 +66,7 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         currentImageUrl: action.payload.imageUrl || null,
         currentMimeType: action.payload.mimeType,
         history: action.payload.history,
+        lastCallMeta: action.payload.meta,
       };
     case 'SET_CURRENT_IMAGE':
       return {
@@ -213,6 +214,7 @@ export default function useEditor() {
             text: response.data.text,
             mimeType: response.data.mimeType || (hasImage ? 'image/png' : 'text/plain'),
             history: [...state.history, newHistoryEntry],
+            meta: response.data.meta,
           },
         });
       } else {

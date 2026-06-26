@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -68,12 +68,16 @@ export default function App() {
     }
   }, [providers, state.selectedProvider, setProvider]);
 
-  // Auto-set model when provider changes
+  // Auto-set model only when provider actually switches (not on providers list refresh)
+  const prevProviderRef = useRef<string | null>(null);
   useEffect(() => {
     if (!state.selectedProvider) return;
-    const provider = providers.find((p) => p.id === state.selectedProvider);
-    if (provider) {
-      setModel(provider.defaultModel);
+    if (prevProviderRef.current !== state.selectedProvider) {
+      prevProviderRef.current = state.selectedProvider;
+      const provider = providers.find((p) => p.id === state.selectedProvider);
+      if (provider) {
+        setModel(provider.defaultModel);
+      }
     }
   }, [state.selectedProvider, providers, setModel]);
 
@@ -226,6 +230,7 @@ export default function App() {
                 resultMimeType={state.resultMimeType}
                 isLoading={state.isLoading}
                 onImageUpload={uploadImage}
+                lastCallMeta={state.lastCallMeta}
               />
 
               {/* Mobile right panel drawer */}
