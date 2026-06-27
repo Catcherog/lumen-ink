@@ -83,17 +83,29 @@ export class GeminiProvider implements ImageProvider {
       const errorText = await response.text();
       console.error('Gemini API error:', response.status, errorText);
       let errorMessage = `Gemini API 错误: ${response.status}`;
+      let isApiKeyError = false;
       try {
         const errorJson = JSON.parse(errorText);
         if (errorJson.error?.message) {
           errorMessage += ` - ${errorJson.error.message}`;
+          if (
+            errorJson.error.message.includes('API key not valid') ||
+            errorJson.error.message.includes('API key expired') ||
+            errorJson.error.message.includes('API key not found')
+          ) {
+            isApiKeyError = true;
+          }
         }
       } catch {
         if (errorText) {
           errorMessage += ` - ${errorText.slice(0, 300)}`;
+          if (errorText.includes('API key not valid')) {
+            isApiKeyError = true;
+          }
         }
       }
-      throw Object.assign(new Error(errorMessage), { status: response.status });
+      const errCode = isApiKeyError ? 401 : response.status;
+      throw Object.assign(new Error(errorMessage), { status: errCode });
     }
 
     const data = (await response.json()) as {

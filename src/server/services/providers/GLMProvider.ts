@@ -22,6 +22,30 @@ export class GLMProvider implements ImageProvider {
     return `data:${mimeType};base64,${base64}`;
   }
 
+  private parseError(status: number, errorText: string): { message: string; status: number } {
+    let message = `GLM API 错误: ${status}`;
+    let isApiKeyError = false;
+    try {
+      const errorJson = JSON.parse(errorText);
+      if (errorJson.error?.message) {
+        message += ` - ${errorJson.error.message}`;
+        if (
+          errorJson.error.message.includes('API key') ||
+          errorJson.error.message.includes('Unauthorized') ||
+          errorJson.error.message.includes('认证失败') ||
+          errorJson.error.message.includes('无效的token')
+        ) {
+          isApiKeyError = true;
+        }
+      }
+    } catch {
+      if (errorText) {
+        message += ` - ${errorText.slice(0, 300)}`;
+      }
+    }
+    return { message, status: isApiKeyError ? 401 : status };
+  }
+
   async generate(params: GenerateParams): Promise<EditResult> {
     const apiKey = this.apiKey;
     if (!apiKey) {
@@ -52,7 +76,8 @@ export class GLMProvider implements ImageProvider {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('GLM Image API error:', response.status, errorText);
-      throw Object.assign(new Error(`GLM API 错误: ${response.status}`), { status: response.status });
+      const errMsg = this.parseError(response.status, errorText);
+      throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
 
     const data = (await response.json()) as {
@@ -136,7 +161,8 @@ export class GLMProvider implements ImageProvider {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('GLM Chat API error:', response.status, errorText);
-      throw Object.assign(new Error(`GLM API 错误: ${response.status}`), { status: response.status });
+      const errMsg = this.parseError(response.status, errorText);
+      throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
 
     const data = (await response.json()) as {

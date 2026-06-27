@@ -22,6 +22,34 @@ export class OpenAIProvider implements ImageProvider {
     return `data:${mimeType};base64,${base64}`;
   }
 
+  private parseError(status: number, errorText: string): { message: string; status: number } {
+    let message = `OpenAI API 错误: ${status}`;
+    let isApiKeyError = false;
+    try {
+      const errorJson = JSON.parse(errorText);
+      if (errorJson.error?.message) {
+        message += ` - ${errorJson.error.message}`;
+        if (
+          errorJson.error.message.includes('Incorrect API key') ||
+          errorJson.error.message.includes('Invalid API key') ||
+          errorJson.error.message.includes('API key') ||
+          errorJson.error.code === 'invalid_api_key' ||
+          errorJson.error.code === 'invalid_api_key'
+        ) {
+          isApiKeyError = true;
+        }
+      }
+    } catch {
+      if (errorText) {
+        message += ` - ${errorText.slice(0, 300)}`;
+        if (errorText.includes('Incorrect API key') || errorText.includes('Invalid API key')) {
+          isApiKeyError = true;
+        }
+      }
+    }
+    return { message, status: isApiKeyError ? 401 : status };
+  }
+
   private base64ToBlob(base64: string, mimeType: string): Blob {
     const buffer = Buffer.from(base64, 'base64');
     return new Blob([buffer], { type: mimeType });
@@ -59,7 +87,8 @@ export class OpenAIProvider implements ImageProvider {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI Image API error:', response.status, errorText);
-      throw Object.assign(new Error(`OpenAI API 错误: ${response.status}`), { status: response.status });
+      const errMsg = this.parseError(response.status, errorText);
+      throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
 
     const data = (await response.json()) as {
@@ -112,7 +141,8 @@ export class OpenAIProvider implements ImageProvider {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI Edit API error:', response.status, errorText);
-      throw Object.assign(new Error(`OpenAI API 错误: ${response.status}`), { status: response.status });
+      const errMsg = this.parseError(response.status, errorText);
+      throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
 
     const data = (await response.json()) as {
@@ -200,7 +230,8 @@ export class OpenAIProvider implements ImageProvider {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI Chat API error:', response.status, errorText);
-      throw Object.assign(new Error(`OpenAI API 错误: ${response.status}`), { status: response.status });
+      const errMsg = this.parseError(response.status, errorText);
+      throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
 
     const data = (await response.json()) as {
