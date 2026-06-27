@@ -16,6 +16,7 @@ export interface ProviderConfig {
   defaultModel: string;
   enabled: boolean;
   isDefault?: boolean;
+  hasApiKey?: boolean;
   createdAt: number;
   updatedAt: number;
 }

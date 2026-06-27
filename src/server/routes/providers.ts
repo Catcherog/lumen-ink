@@ -5,8 +5,8 @@ import type { ProviderConfig } from 'shared/types.js';
 const router = Router();
 
 function sanitize(config: ProviderConfig): ProviderConfig {
-  const { apiKey: _apiKey, ...rest } = config;
-  return { ...rest, apiKey: '' } as ProviderConfig;
+  const { apiKey: _apiKey, hasApiKey: _existing, ...rest } = config;
+  return { ...rest, apiKey: '', hasApiKey: _existing ?? !!_apiKey } as ProviderConfig;
 }
 
 router.get('/', (_req: Request, res: Response) => {
@@ -20,7 +20,7 @@ router.get('/', (_req: Request, res: Response) => {
 
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { name, type, apiKey, baseUrl, defaultModel, enabled } = req.body as Partial<ProviderConfig>;
+    const { name, type, apiKey, baseUrl, defaultModel, enabled, isDefault } = req.body as Partial<ProviderConfig>;
 
     if (!name || !type || !defaultModel) {
       res.status(400).json({ error: '缺少必要参数：name, type, defaultModel' });
@@ -34,6 +34,7 @@ router.post('/', (req: Request, res: Response) => {
       baseUrl,
       defaultModel,
       enabled: enabled ?? true,
+      isDefault,
     } as Omit<ProviderConfig, 'id' | 'createdAt' | 'updatedAt'>);
 
     res.status(201).json(sanitize(provider));

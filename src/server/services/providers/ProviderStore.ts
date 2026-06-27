@@ -6,10 +6,27 @@ import type { ProviderConfig } from 'shared/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// Vercel Serverless 文件系统只读，只有 /tmp 可写；其他环境用项目目录
+
+function findProjectRoot(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      if (pkg.name === 'gemini-image-editor') {
+        return dir;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+
+const projectRoot = findProjectRoot(__dirname);
 const DATA_DIR = process.env.VERCEL
   ? path.join('/tmp', 'glm-image-editor-data')
-  : path.join(__dirname, '..', '..', 'data');
+  : path.join(projectRoot, 'src', 'server', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'providers.json');
 
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
@@ -79,6 +96,7 @@ export class ProviderStore {
     }
     this.loaded = true;
     this.migrateFromEnv();
+    this.ensureDefault();
   }
 
   private save(): void {
@@ -86,11 +104,19 @@ export class ProviderStore {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ providers: this.providers }, null, 2));
   }
 
+  private ensureDefault(): void {
+    const enabled = this.providers.filter(p => p.enabled);
+    if (enabled.length === 0) return;
+    const hasDefault = enabled.some(p => p.isDefault);
+    if (!hasDefault) {
+      enabled[0].isDefault = true;
+    }
+  }
+
   private migrateFromEnv(): void {
     const now = Date.now();
     let changed = false;
 
-    // GLM 自动迁移
     const glmApiKey = process.env.GLM_API_KEY || process.env.ZHIPU_API_KEY;
     if (glmApiKey && !this.providers.some((p) => p.type === 'glm')) {
       this.providers.push({
@@ -109,7 +135,6 @@ export class ProviderStore {
       console.log('[ProviderStore] Auto-created GLM provider from GLM_API_KEY');
     }
 
-    // Gemini 自动迁移
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (geminiApiKey && !this.providers.some((p) => p.type === 'gemini')) {
       this.providers.push({
@@ -135,6 +160,7 @@ export class ProviderStore {
     return {
       ...config,
       apiKey: config.apiKey ? decrypt(config.apiKey) : '',
+      hasApiKey: !!config.apiKey,
     };
   }
 
@@ -142,7 +168,7 @@ export class ProviderStore {
     this.load();
     return this.providers.map((p) => {
       const { apiKey: _apiKey, ...rest } = p;
-      return { ...rest, apiKey: '' } as ProviderConfig;
+      return { ...rest, apiKey: '', hasApiKey: !!p.apiKey } as ProviderConfig;
     });
   }
 
@@ -189,6 +215,7 @@ export class ProviderStore {
     }
 
     this.providers.push(provider);
+    this.ensureDefault();
     this.save();
     return this.decryptConfig(provider);
   }
@@ -207,9 +234,13 @@ export class ProviderStore {
       updatedAt: Date.now(),
     };
 
-    if (config.apiKey && !isEncrypted(config.apiKey)) {
-      updated.apiKey = encrypt(config.apiKey);
-    } else if (config.apiKey === undefined || config.apiKey === '') {
+    if (config.apiKey !== undefined) {
+      if (config.apiKey && !isEncrypted(config.apiKey)) {
+        updated.apiKey = encrypt(config.apiKey);
+      } else if (config.apiKey === '') {
+        updated.apiKey = '';
+      }
+    } else {
       updated.apiKey = existing.apiKey;
     }
 
@@ -220,6 +251,7 @@ export class ProviderStore {
     }
 
     this.providers[index] = updated;
+    this.ensureDefault();
     this.save();
     return this.decryptConfig(updated);
   }
@@ -229,6 +261,7 @@ export class ProviderStore {
     const index = this.providers.findIndex((p) => p.id === id);
     if (index === -1) return false;
     this.providers.splice(index, 1);
+    this.ensureDefault();
     this.save();
     return true;
   }
@@ -237,6 +270,9 @@ export class ProviderStore {
     this.load();
     const index = this.providers.findIndex((p) => p.id === id);
     if (index === -1) return null;
+
+    // 设为默认时自动启用该 Provider
+    this.providers[index].enabled = true;
 
     this.providers.forEach((p, i) => {
       p.isDefault = i === index;

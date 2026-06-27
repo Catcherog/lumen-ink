@@ -43,18 +43,28 @@ export default function App() {
     }
   }, [token]);
 
-  // Load providers from backend
-  useEffect(() => {
+  const loadProviders = async () => {
     if (!token) return;
-    axios.get('/api/providers')
-      .then((res) => {
-        const list = Array.isArray(res.data) ? res.data : [];
-        setProviders(list);
-      })
-      .catch((err: unknown) => {
-        dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
-      });
-  }, [token, dispatch, state.showApiSettings]);
+    try {
+      const res = await axios.get('/api/providers');
+      const list = Array.isArray(res.data) ? res.data : [];
+      setProviders(list);
+    } catch (err: unknown) {
+      dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
+    }
+  };
+
+  useEffect(() => {
+    loadProviders();
+  }, [token]);
+
+  const prevShowApiSettings = useRef(state.showApiSettings);
+  useEffect(() => {
+    if (prevShowApiSettings.current && !state.showApiSettings) {
+      loadProviders();
+    }
+    prevShowApiSettings.current = state.showApiSettings;
+  }, [state.showApiSettings]);
 
   // Auto-select default/first enabled provider when list or selection changes
   useEffect(() => {
@@ -298,6 +308,7 @@ export default function App() {
       <ApiSettingsModal
         isOpen={state.showApiSettings}
         onClose={() => setShowApiSettings(false)}
+        onProvidersChanged={loadProviders}
       />
     </div>
   );

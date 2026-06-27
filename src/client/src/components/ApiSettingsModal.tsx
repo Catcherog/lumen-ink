@@ -12,6 +12,8 @@ import {
   EyeOff,
   AlertCircle,
   Loader2,
+  Shield,
+  ShieldOff,
 } from 'lucide-react';
 import type { ProviderConfig, ProviderType } from '../../../shared/types';
 import { PROVIDER_MODELS } from '../../../shared/types';
@@ -20,6 +22,7 @@ import { serializeError } from '../utils/error';
 interface ApiSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onProvidersChanged?: () => void;
 }
 
 type FormData = {
@@ -29,6 +32,7 @@ type FormData = {
   baseUrl: string;
   defaultModel: string;
   enabled: boolean;
+  isDefault: boolean;
 };
 
 const PROVIDER_TYPES: { value: ProviderType; label: string }[] = [
@@ -54,9 +58,10 @@ const EMPTY_FORM: FormData = {
   baseUrl: '',
   defaultModel: 'cogview-4-250304',
   enabled: true,
+  isDefault: false,
 };
 
-export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalProps) {
+export default function ApiSettingsModal({ isOpen, onClose, onProvidersChanged }: ApiSettingsModalProps) {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +69,11 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
+
+  const notifyChanged = () => {
+    onProvidersChanged?.();
+  };
 
   const loadProviders = async () => {
     try {
@@ -83,18 +93,19 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
     setEditingId(null);
     setFormErrors({});
     setShowApiKey(false);
+    setHasApiKey(false);
   };
 
   useEffect(() => {
     if (!isOpen) return;
-    // Reset form asynchronously to avoid synchronous setState in effect body.
     Promise.resolve().then(() => {
       setForm(EMPTY_FORM);
       setEditingId(null);
       setFormErrors({});
       setShowApiKey(false);
+      setHasApiKey(false);
+      setError(null);
     });
-    // Load providers when modal opens.
     Promise.resolve().then(() => setLoading(true));
     axios
       .get('/api/providers')
@@ -123,17 +134,19 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
     if (!validate()) return;
     try {
       setLoading(true);
+      setError(null);
       const payload: Partial<FormData> & Omit<FormData, 'apiKey'> = { ...form };
-      if (editingId && !payload.apiKey?.trim()) {
+      if (editingId && editingId !== 'new' && !payload.apiKey?.trim()) {
         delete payload.apiKey;
       }
-      if (editingId) {
+      if (editingId && editingId !== 'new') {
         await axios.put(`/api/providers/${editingId}`, payload);
       } else {
         await axios.post('/api/providers', payload);
       }
       await loadProviders();
       resetForm();
+      notifyChanged();
     } catch (err: unknown) {
       setError(serializeError(err) || '保存 Provider 失败');
     } finally {
@@ -145,9 +158,11 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
     if (!window.confirm('确定删除该 Provider？')) return;
     try {
       setLoading(true);
+      setError(null);
       await axios.delete(`/api/providers/${id}`);
       if (editingId === id) resetForm();
       await loadProviders();
+      notifyChanged();
     } catch (err: unknown) {
       setError(serializeError(err) || '删除 Provider 失败');
     } finally {
@@ -158,8 +173,10 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
   const handleToggleEnabled = async (provider: ProviderConfig) => {
     try {
       setLoading(true);
+      setError(null);
       await axios.put(`/api/providers/${provider.id}`, { enabled: !provider.enabled });
       await loadProviders();
+      notifyChanged();
     } catch (err: unknown) {
       setError(serializeError(err) || '更新状态失败');
     } finally {
@@ -170,8 +187,10 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
   const handleSetDefault = async (id: string) => {
     try {
       setLoading(true);
+      setError(null);
       await axios.patch(`/api/providers/${id}/default`);
       await loadProviders();
+      notifyChanged();
     } catch (err: unknown) {
       setError(serializeError(err) || '设置默认 Provider 失败');
     } finally {
@@ -188,20 +207,35 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
       baseUrl: provider.baseUrl || '',
       defaultModel: provider.defaultModel,
       enabled: provider.enabled,
+      isDefault: !!provider.isDefault,
     });
     setFormErrors({});
     setShowApiKey(false);
+    setHasApiKey(!!provider.hasApiKey);
+    setError(null);
+  };
+
+  const handleAddNew = () => {
+    setEditingId('new');
+    setForm(EMPTY_FORM);
+    setFormErrors({});
+    setShowApiKey(false);
+    setHasApiKey(false);
+    setError(null);
   };
 
   const updateForm = (field: keyof FormData, value: string | boolean) => {
     setForm((prev) => {
       const next = { ...prev, [field]: value };
-      // 切换类型时自动设置默认模型为该类型的第一个
       if (field === 'type' && typeof value === 'string') {
         const models = PROVIDER_MODELS[value as ProviderType] || [];
         if (models.length > 0 && !models.some((m) => m.value === prev.defaultModel)) {
           next.defaultModel = models[0].value;
         }
+      }
+      if (field === 'isDefault' && value === true) {
+        // 勾选设为默认时，保持启用状态
+        next.enabled = true;
       }
       return next;
     });
@@ -209,6 +243,11 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
       setFormErrors((prev) => ({ ...prev, [field]: undefined }));
     }
   };
+
+  const isEditingExisting = editingId && editingId !== 'new';
+  const apiKeyPlaceholder = isEditingExisting
+    ? (hasApiKey ? '留空则不修改' : '输入 API Key')
+    : (ENV_KEY_HINTS[form.type] || '输入 API Key（可选）');
 
   if (!isOpen) return null;
 
@@ -237,7 +276,7 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Provider 列表</h3>
               <button
-                onClick={() => setEditingId('new')}
+                onClick={handleAddNew}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-4 h-4" />
@@ -303,19 +342,31 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                    API Key
-                    {ENV_KEY_HINTS[form.type] && (
-                      <span className="ml-2 text-gray-400 dark:text-gray-500 font-normal">{ENV_KEY_HINTS[form.type]}</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                      API Key
+                    </label>
+                    {isEditingExisting && (
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                        hasApiKey
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                          : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                      }`}>
+                        {hasApiKey ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
+                        {hasApiKey ? '已设置' : '未设置'}
+                      </span>
                     )}
-                  </label>
+                    {ENV_KEY_HINTS[form.type] && (
+                      <span className="text-gray-400 dark:text-gray-500 font-normal text-xs">{ENV_KEY_HINTS[form.type]}</span>
+                    )}
+                  </div>
                   <div className="relative">
                     <input
                       type={showApiKey ? 'text' : 'password'}
                       value={form.apiKey}
                       onChange={(e) => updateForm('apiKey', e.target.value)}
                       className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      placeholder={editingId === 'new' ? '输入 API Key' : '留空则保留原 Key'}
+                      placeholder={apiKeyPlaceholder}
                     />
                     <button
                       type="button"
@@ -342,16 +393,26 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
                   />
                 </div>
 
-                <div className="flex items-center gap-2 sm:col-span-2">
-                  <input
-                    id="provider-enabled"
-                    type="checkbox"
-                    checked={form.enabled}
-                    onChange={(e) => updateForm('enabled', e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="provider-enabled" className="text-sm text-gray-700 dark:text-gray-300">
-                    启用该 Provider
+                <div className="flex items-center gap-4 sm:col-span-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      id="provider-enabled"
+                      type="checkbox"
+                      checked={form.enabled}
+                      onChange={(e) => updateForm('enabled', e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">启用该 Provider</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      id="provider-default"
+                      type="checkbox"
+                      checked={form.isDefault}
+                      onChange={(e) => updateForm('isDefault', e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">设为默认 Provider</span>
                   </label>
                 </div>
               </div>
@@ -388,6 +449,7 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
                       <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">名称</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">类型</th>
                       <th className="px-4 py-3 text-left font-medium text-gray-600 dark:text-gray-300">默认模型</th>
+                      <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">Key</th>
                       <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">状态</th>
                       <th className="px-4 py-3 text-center font-medium text-gray-600 dark:text-gray-300">默认</th>
                       <th className="px-4 py-3 text-right font-medium text-gray-600 dark:text-gray-300">操作</th>
@@ -399,6 +461,16 @@ export default function ApiSettingsModal({ isOpen, onClose }: ApiSettingsModalPr
                         <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{provider.name}</td>
                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{provider.type}</td>
                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{provider.defaultModel}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                            provider.hasApiKey
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                          }`}>
+                            {provider.hasApiKey ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
+                            {provider.hasApiKey ? '已设置' : '未设置'}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => handleToggleEnabled(provider)}

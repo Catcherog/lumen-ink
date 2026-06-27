@@ -5,11 +5,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'gemini-image-editor-secret';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'changeme';
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  // Skip auth for health check
-  if (req.path === '/api/health') {
-    return next();
-  }
-
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     res.status(401).json({ error: '未登录' });
