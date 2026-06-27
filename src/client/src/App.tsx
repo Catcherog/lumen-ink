@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -7,11 +7,27 @@ import ParamPanel from './components/ParamPanel';
 import ResultViewer from './components/ResultViewer';
 import ApiSettingsButton from './components/ApiSettingsButton';
 import ApiSettingsModal from './components/ApiSettingsModal';
+import ManualWorkflowDialog from './components/ManualWorkflowDialog';
 import useEditor from './hooks/useEditor';
 import { serializeError } from './utils/error';
 import type { ProviderConfig } from '../../shared/types';
 import { PROVIDER_MODELS } from '../../shared/types';
+import type { ProviderModelOption } from '../../shared/types';
 import { Sun, Moon, LogOut, PanelRightOpen, PanelRightClose, Image as ImageIcon } from 'lucide-react';
+
+const CAPABILITY_ICONS: Record<string, string> = {
+  generation: '🎨',
+  edit: '✏️',
+  chat: '💬',
+};
+
+function formatModelLabel(model: ProviderModelOption): string {
+  if (!model.capabilities || model.capabilities.length === 0) {
+    return model.label;
+  }
+  const icons = model.capabilities.map((cap) => CAPABILITY_ICONS[cap] || '').join(' ');
+  return `${model.label} ${icons}`.trim();
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
@@ -21,6 +37,8 @@ export default function App() {
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [templatePrompt, setTemplatePrompt] = useState<string | undefined>(undefined);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [manualWorkflowOpen, setManualWorkflowOpen] = useState(false);
+  const [promptInput, setPromptInput] = useState('');
 
   const {
     state,
@@ -32,7 +50,25 @@ export default function App() {
     setProvider,
     setModel,
     setShowApiSettings,
+    importExternalResult,
   } = useEditor();
+
+  const handlePromptChange = useCallback((value: string) => {
+    setPromptInput(value);
+  }, []);
+
+  const handleExportToGemini = useCallback(() => {
+    setManualWorkflowOpen(true);
+  }, []);
+
+  const handleManualImport = useCallback((data: { base64: string; mimeType: string; prompt: string }) => {
+    importExternalResult(data);
+    setManualWorkflowOpen(false);
+  }, [importExternalResult]);
+
+  const handleManualDialogClose = useCallback(() => {
+    setManualWorkflowOpen(false);
+  }, []);
 
   // Set axios default auth header when token changes
   useEffect(() => {
@@ -176,7 +212,7 @@ export default function App() {
                       className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none max-w-[180px]"
                     >
                       {availableModels.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
+                        <option key={m.value} value={m.value}>{formatModelLabel(m)}</option>
                       ))}
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
@@ -216,6 +252,8 @@ export default function App() {
               onToolChange={setTool}
               expanded={isDesktop && toolbarExpanded}
               onToggleExpand={isDesktop ? () => setToolbarExpanded(v => !v) : undefined}
+              onExportToGemini={handleExportToGemini}
+              hasImage={!!(state.currentImage || state.currentImageUrl)}
               className={`flex-shrink-0 ${isDesktop && toolbarExpanded ? 'w-52' : 'w-14'}`}
             />
 
@@ -270,6 +308,7 @@ export default function App() {
                         onRestoreHistory={restoreFromHistory}
                         externalPrompt={templatePrompt}
                         onPromptConsumed={handlePromptConsumed}
+                        onPromptChange={handlePromptChange}
                       />
                     </div>
                   </div>
@@ -288,6 +327,7 @@ export default function App() {
                 onRestoreHistory={restoreFromHistory}
                 externalPrompt={templatePrompt}
                 onPromptConsumed={handlePromptConsumed}
+                onPromptChange={handlePromptChange}
               />
             </div>
           </div>
@@ -309,6 +349,16 @@ export default function App() {
         isOpen={state.showApiSettings}
         onClose={() => setShowApiSettings(false)}
         onProvidersChanged={loadProviders}
+      />
+
+      <ManualWorkflowDialog
+        isOpen={manualWorkflowOpen}
+        onClose={handleManualDialogClose}
+        onImport={handleManualImport}
+        currentImage={state.currentImage}
+        currentImageUrl={state.currentImageUrl}
+        currentMimeType={state.currentMimeType}
+        currentPrompt={promptInput}
       />
     </div>
   );

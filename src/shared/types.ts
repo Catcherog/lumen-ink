@@ -1,4 +1,4 @@
-export type ProviderType = 'openai' | 'glm' | 'gemini' | 'jimeng' | 'custom';
+export type ProviderType = 'openai' | 'glm' | 'gemini' | 'seedream' | 'jimeng' | 'custom';
 
 export interface ProviderConfig {
   id: string;
@@ -91,22 +91,40 @@ export const GEMINI_IMAGE_MODELS: Array<{ id: string; name: string; description:
   { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image（Nano Banana Pro）', description: '高质量，更好的文字渲染与构图', type: 'edit' },
 ];
 
+// Seedream 图像模型（火山引擎方舟）
+export type SeedreamModel = 'seedream-4.5' | 'seedream-5.0-lite';
+
+export const SEEDREAM_MODELS: Array<{ id: string; name: string; description: string; type: 'generation' | 'edit' }> = [
+  { id: 'seedream-4.5', name: 'Seedream 4.5', description: '即梦图像模型4.5，支持文生图和图生图编辑，文字渲染强', type: 'edit' },
+  { id: 'seedream-5.0-lite', name: 'Seedream 5.0 Lite', description: '即梦图像模型5.0 Lite，支持深度思考与原生4K输出', type: 'edit' },
+];
+
 // 各 Provider 类型的可选模型列表（供前端动态下拉使用）
-export const PROVIDER_MODELS: Record<ProviderType, Array<{ value: string; label: string }>> = {
+export interface ProviderModelOption {
+  value: string;
+  label: string;
+  capabilities?: Array<'generation' | 'edit' | 'chat'>;
+}
+
+export const PROVIDER_MODELS: Record<ProviderType, ProviderModelOption[]> = {
   glm: [
-    { value: 'cogview-4-250304', label: 'CogView-4（文生图）' },
-    { value: 'glm-image', label: 'GLM-Image（高清文生图）' },
-    { value: 'glm-4.6v', label: 'GLM-4.6V（图像理解+编辑）' },
+    { value: 'cogview-4-250304', label: 'CogView-4（文生图）', capabilities: ['generation'] },
+    { value: 'glm-image', label: 'GLM-Image（高清文生图）', capabilities: ['generation'] },
+    { value: 'glm-4.6v', label: 'GLM-4.6V（图像理解+编辑）', capabilities: ['chat'] },
   ],
   openai: [
-    { value: 'gpt-image-2', label: 'GPT Image 2' },
-    { value: 'dall-e-3', label: 'DALL-E 3' },
-    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-image-2', label: 'GPT Image 2', capabilities: ['edit'] },
+    { value: 'dall-e-3', label: 'DALL-E 3', capabilities: ['generation'] },
+    { value: 'gpt-4o', label: 'GPT-4o', capabilities: ['chat'] },
   ],
   gemini: [
-    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image（Nano Banana）' },
-    { value: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image（Nano Banana 2）' },
-    { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image（Nano Banana Pro）' },
+    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image（Nano Banana）', capabilities: ['generation', 'edit'] },
+    { value: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image（Nano Banana 2）', capabilities: ['generation', 'edit'] },
+    { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image（Nano Banana Pro）', capabilities: ['generation', 'edit'] },
+  ],
+  seedream: [
+    { value: 'seedream-4.5', label: 'Seedream 4.5（文生图+图生图）', capabilities: ['generation', 'edit'] },
+    { value: 'seedream-5.0-lite', label: 'Seedream 5.0 Lite（4K 高清）', capabilities: ['generation', 'edit'] },
   ],
   jimeng: [],
   custom: [],
@@ -117,11 +135,21 @@ export type GeminiModel = GLMModel;
 export const GEMINI_MODELS = GLM_MODELS;
 
 // 修图工具
-export type RetouchTool = 'face' | 'color' | 'liquify' | 'repair' | 'remove' | 'export';
+export type RetouchTool = 'face' | 'color' | 'liquify' | 'repair' | 'remove' | 'export' | 'manual';
 
 export interface ReferenceImage {
   base64: string;
   mimeType: string;
+}
+
+// 手动工作流导出数据
+export interface ManualWorkflowExport {
+  imageBase64: string;
+  mimeType: string;
+  prompt: string;
+  tool?: RetouchTool;
+  params?: Record<string, unknown>;
+  regions?: Region[];
 }
 
 export interface HistoryEntry {

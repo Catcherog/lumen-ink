@@ -1,5 +1,5 @@
 import type { HistoryEntry, RetouchTool } from '../../../shared/types';
-import { Smile, Palette, Droplets, Wand2, Eraser, Download, type LucideIcon } from 'lucide-react';
+import { Smile, Palette, Droplets, Wand2, Eraser, Download, ExternalLink, type LucideIcon } from 'lucide-react';
 
 const TOOL_META: Record<RetouchTool, { label: string; icon: LucideIcon; color: string }> = {
   face: { label: '修脸', icon: Smile, color: 'text-rose-500 bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' },
@@ -8,6 +8,7 @@ const TOOL_META: Record<RetouchTool, { label: string; icon: LucideIcon; color: s
   repair: { label: '修复', icon: Wand2, color: 'text-violet-500 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800' },
   remove: { label: '消除', icon: Eraser, color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' },
   export: { label: '导出', icon: Download, color: 'text-blue-500 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' },
+  manual: { label: '手动', icon: ExternalLink, color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800' },
 };
 
 const PARAM_LABELS: Record<string, string> = {

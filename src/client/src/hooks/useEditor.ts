@@ -251,6 +251,35 @@ export default function useEditor() {
     });
   }, []);
 
+  const importExternalResult = useCallback((data: { base64: string; mimeType: string; prompt: string }) => {
+    const newHistoryEntry: HistoryEntry = {
+      id: Date.now().toString(),
+      prompt: data.prompt,
+      tool: 'manual',
+      providerId: 'manual-gemini',
+      resultImage: data.base64,
+      resultMimeType: data.mimeType,
+      timestamp: Date.now(),
+    };
+
+    dispatch({
+      type: 'SET_RESULT',
+      payload: {
+        imageData: data.base64,
+        imageUrl: undefined,
+        text: undefined,
+        mimeType: data.mimeType,
+        history: [...state.history, newHistoryEntry],
+        meta: {
+          providerName: '手动工作流（Gemini 网页版）',
+          providerType: 'manual',
+          model: 'gemini-web-manual',
+          operationType: 'manual',
+        },
+      },
+    });
+  }, [state.history]);
+
   return {
     state,
     dispatch,
@@ -262,5 +291,6 @@ export default function useEditor() {
     setTool,
     setProvider,
     setShowApiSettings,
+    importExternalResult,
   };
 }

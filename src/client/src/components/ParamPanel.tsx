@@ -5,7 +5,7 @@ import ReferenceImages from './ReferenceImages';
 import TemplatePanel from './TemplatePanel';
 import HistoryPanel from './HistoryPanel';
 import ToolPanel from './tools/ToolPanel';
-import { Smile, Palette, Droplets, Wand2, Eraser, Download, Layers, History } from 'lucide-react';
+import { Smile, Palette, Droplets, Wand2, Eraser, Download, Layers, History, ExternalLink } from 'lucide-react';
 
 const TOOL_META: Record<RetouchTool, { title: string; description: string; icon: ElementType; color: string }> = {
   face: { title: '修脸', description: '磨皮、瘦脸、五官精修与自然美颜', icon: Smile, color: 'text-rose-500 bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' },
@@ -14,6 +14,7 @@ const TOOL_META: Record<RetouchTool, { title: string; description: string; icon:
   repair: { title: '修复', description: '祛痘、祛斑、祛皱与局部修补', icon: Wand2, color: 'text-violet-500 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800' },
   remove: { title: '消除', description: '去除杂物、路人、水印与背景干扰', icon: Eraser, color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' },
   export: { title: '导出', description: '格式选择、质量压缩与批量导出', icon: Download, color: 'text-blue-500 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' },
+  manual: { title: '手动工作流', description: '导出到 Gemini 网页版手动生图并回传结果', icon: ExternalLink, color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800' },
 };
 
 interface ParamPanelProps {
@@ -30,6 +31,7 @@ interface ParamPanelProps {
   onRestoreHistory?: (entry: HistoryEntry, index: number) => void;
   externalPrompt?: string;
   onPromptConsumed?: () => void;
+  onPromptChange?: (prompt: string) => void;
 }
 
 export default function ParamPanel({
@@ -41,6 +43,7 @@ export default function ParamPanel({
   onRestoreHistory,
   externalPrompt,
   onPromptConsumed,
+  onPromptChange,
 }: ParamPanelProps) {
   const meta = TOOL_META[tool];
   const Icon = meta.icon;
@@ -94,6 +97,7 @@ export default function ParamPanel({
             isLoading={state.isLoading}
             externalPrompt={externalPrompt}
             onPromptConsumed={onPromptConsumed}
+            onPromptChange={onPromptChange}
             placeholder={isChatModel ? '输入分析指令，如：描述这张图片的内容...' : '输入编辑指令，如：面部精修，保持自然质感...'}
           />
         </section>

@@ -96,8 +96,24 @@ export class GLMProvider implements ImageProvider {
     throw new Error('GLM API 未返回图片数据');
   }
 
-  async edit(_params: EditParams): Promise<EditResult> {
-    throw new Error('GLM Provider 暂不支持图像编辑接口，请使用 generate 或 chat');
+  async edit(params: EditParams): Promise<EditResult> {
+    // GLM-4.6V 委托给 chat 处理（图像理解）
+    if (params.model === 'glm-4.6v') {
+      return this.chat(params);
+    }
+    // CogView / GLM-Image 文生图模型不支持图生图编辑
+    if (params.image) {
+      throw Object.assign(
+        new Error('CogView-4 仅支持文生图，无法编辑上传的图片。请切换到 Seedream 或 Gemini Provider，或使用"导出到 Gemini"手动工作流'),
+        { status: 400 }
+      );
+    }
+    // 没有图片输入时降级为文生图
+    return this.generate({
+      prompt: params.prompt,
+      referenceImages: params.referenceImages,
+      model: params.model,
+    });
   }
 
   async chat(params: ChatParams): Promise<EditResult> {

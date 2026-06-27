@@ -153,6 +153,24 @@ export class ProviderStore {
       console.log('[ProviderStore] Auto-created Gemini provider from GEMINI_API_KEY');
     }
 
+    const seedreamApiKey = process.env.SEEDREAM_API_KEY || process.env.VOLC_API_KEY;
+    if (seedreamApiKey && !this.providers.some((p) => p.type === 'seedream')) {
+      this.providers.push({
+        id: crypto.randomUUID(),
+        name: '默认 Seedream Provider',
+        type: 'seedream',
+        apiKey: encrypt(seedreamApiKey),
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+        defaultModel: 'seedream-4.5',
+        enabled: true,
+        isDefault: this.providers.length === 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      changed = true;
+      console.log('[ProviderStore] Auto-created Seedream provider from SEEDREAM_API_KEY');
+    }
+
     if (changed) this.save();
   }
 

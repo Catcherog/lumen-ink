@@ -47,6 +47,7 @@ const ENV_KEY_HINTS: Record<ProviderType, string> = {
   glm: '留空则使用环境变量 GLM_API_KEY',
   gemini: '留空则使用环境变量 GEMINI_API_KEY',
   openai: '留空则使用环境变量 OPENAI_API_KEY',
+  seedream: '留空则使用环境变量 SEEDREAM_API_KEY',
   jimeng: '',
   custom: '',
 };

@@ -3,6 +3,7 @@ import type { ImageProvider } from './ImageProvider.js';
 import { GLMProvider } from './GLMProvider.js';
 import { OpenAIProvider } from './OpenAIProvider.js';
 import { GeminiProvider } from './GeminiProvider.js';
+import { SeedreamProvider } from './SeedreamProvider.js';
 import type { ProviderConfig, ProviderType } from 'shared/types.js';
 
 function createProvider(config: ProviderConfig): ImageProvider {
@@ -13,6 +14,8 @@ function createProvider(config: ProviderConfig): ImageProvider {
       return new OpenAIProvider(config);
     case 'gemini':
       return new GeminiProvider(config);
+    case 'seedream':
+      return new SeedreamProvider(config);
     case 'jimeng':
       throw new Error('Jimeng Provider 尚未实现');
     case 'custom':
@@ -48,6 +51,9 @@ export function getProviderOperationType(
       return 'chat';
     case 'gemini':
       // Gemini 图像模型同时支持生成和编辑，统一走 edit 路径（有图片则编辑，无图片则生成）
+      return 'edit';
+    case 'seedream':
+      // Seedream 统一走 edit 路径（有图片则编辑，无图片则生成）
       return 'edit';
     case 'jimeng':
     case 'custom':

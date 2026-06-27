@@ -1,6 +1,6 @@
 import type { ElementType } from 'react';
 import type { RetouchTool } from '../../../shared/types';
-import { Smile, Palette, Droplets, Wand2, Eraser, Download, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
+import { Smile, Palette, Droplets, Wand2, Eraser, Download, PanelLeftOpen, PanelLeftClose, ExternalLink } from 'lucide-react';
 
 const TOOLS: Array<{ id: RetouchTool; label: string; icon: ElementType }> = [
   { id: 'face', label: '修脸', icon: Smile },
@@ -18,6 +18,8 @@ interface ToolbarProps {
   onToggleExpand?: () => void;
   orientation?: 'vertical' | 'horizontal';
   className?: string;
+  onExportToGemini?: () => void;
+  hasImage?: boolean;
 }
 
 export default function Toolbar({
@@ -27,6 +29,8 @@ export default function Toolbar({
   onToggleExpand,
   orientation = 'vertical',
   className = '',
+  onExportToGemini,
+  hasImage = false,
 }: ToolbarProps) {
   const isVertical = orientation === 'vertical';
 
@@ -63,6 +67,28 @@ export default function Toolbar({
           );
         })}
       </div>
+
+      {onExportToGemini && (
+        <div className={isVertical ? 'p-2 border-t border-gray-200 dark:border-gray-700' : 'px-2'}>
+          <button
+            onClick={onExportToGemini}
+            disabled={!hasImage}
+            title={hasImage ? '导出到 Gemini 网页版手动生图' : '请先上传图片'}
+            className={`
+              flex items-center rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400
+              ${isVertical ? 'mx-2 px-2 py-2.5 justify-start w-[calc(100%-1rem)]' : 'px-3 py-2 justify-center'}
+              ${hasImage
+                ? 'text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'}
+            `}
+          >
+            <ExternalLink className="w-5 h-5 flex-shrink-0" />
+            {expanded && isVertical && (
+              <span className="ml-3 text-sm font-medium whitespace-nowrap">导出到 Gemini</span>
+            )}
+          </button>
+        </div>
+      )}
 
       {isVertical && onToggleExpand && (
         <div className="p-2 border-t border-gray-200 dark:border-gray-700">

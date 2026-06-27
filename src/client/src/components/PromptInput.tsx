@@ -6,9 +6,10 @@ interface PromptInputProps {
   placeholder?: string;
   externalPrompt?: string;
   onPromptConsumed?: () => void;
+  onPromptChange?: (prompt: string) => void;
 }
 
-export default function PromptInput({ onSubmit, isLoading, placeholder = '输入编辑指令，如：面部精修，保持自然质感...', externalPrompt, onPromptConsumed }: PromptInputProps) {
+export default function PromptInput({ onSubmit, isLoading, placeholder = '输入编辑指令，如：面部精修，保持自然质感...', externalPrompt, onPromptConsumed, onPromptChange }: PromptInputProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -16,9 +17,10 @@ export default function PromptInput({ onSubmit, isLoading, placeholder = '输入
     if (externalPrompt) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPrompt(externalPrompt);
+      onPromptChange?.(externalPrompt);
       onPromptConsumed?.();
     }
-  }, [externalPrompt, onPromptConsumed]);
+  }, [externalPrompt, onPromptConsumed, onPromptChange]);
 
   const handleSubmit = () => {
     if (!prompt.trim()) {
@@ -41,7 +43,7 @@ export default function PromptInput({ onSubmit, isLoading, placeholder = '输入
       <div className="flex gap-2">
         <textarea
           value={prompt}
-          onChange={(e) => { setPrompt(e.target.value); setError(null); }}
+          onChange={(e) => { setPrompt(e.target.value); setError(null); onPromptChange?.(e.target.value); }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={isLoading}
