@@ -51,5 +51,5 @@
 ## 构建与部署验证
 - [x] `npm run build --prefix src/server` 退出码为 0
 - [x] `npm run build --prefix src/client` 退出码为 0
-- [ ] git commit 成功，message 符合规范
-- [ ] git push 成功，Vercel 自动触发部署
+- [x] git commit 成功，message 符合规范
+- [x] git push 成功，Vercel 自动触发部署

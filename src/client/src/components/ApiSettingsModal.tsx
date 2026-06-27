@@ -39,7 +39,7 @@ const PROVIDER_TYPES: { value: ProviderType; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'glm', label: 'GLM' },
   { value: 'gemini', label: 'Gemini' },
-  { value: 'jimeng', label: '即梦' },
+  { value: 'seedream', label: '即梦/Seedream' },
   { value: 'custom', label: '自定义' },
 ];
 

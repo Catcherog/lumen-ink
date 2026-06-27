@@ -54,20 +54,20 @@
 
 ## Phase 4: 验证与测试
 
-- [ ] Task 9: 添加端到端验证
-  - [ ] SubTask 9.1: 验证 Seedream Provider 在 UI 中正确显示在模型列表
-  - [ ] SubTask 9.2: 验证"导出到 Gemini"对话框正确显示图片+prompt
-  - [ ] SubTask 9.3: 验证用户上传结果图后，历史记录正确添加，currentImage 正确更新
-  - [ ] SubTask 9.4: 验证 GLM cogview-4 选模型并上传图片时，显示清晰错误提示
-  - [ ] SubTask 9.5: 验证模型选择器显示能力标签
+- [x] Task 9: 添加端到端验证
+  - [x] SubTask 9.1: 验证 Seedream Provider 在 UI 中正确显示在模型列表
+  - [x] SubTask 9.2: 验证"导出到 Gemini"对话框正确显示图片+prompt
+  - [x] SubTask 9.3: 验证用户上传结果图后，历史记录正确添加，currentImage 正确更新
+  - [x] SubTask 9.4: 验证 GLM cogview-4 选模型并上传图片时，显示清晰错误提示
+  - [x] SubTask 9.5: 验证模型选择器显示能力标签
 
-- [ ] Task 10: TypeScript 构建验证
-  - [ ] SubTask 10.1: `npm run build --prefix src/server` 通过
-  - [ ] SubTask 10.2: `npm run build --prefix src/client` 通过
+- [x] Task 10: TypeScript 构建验证
+  - [x] SubTask 10.1: `npm run build --prefix src/server` 通过
+  - [x] SubTask 10.2: `npm run build --prefix src/client` 通过
 
-- [ ] Task 11: 提交并推送
-  - [ ] SubTask 11.1: git commit message: "feat: 添加 Seedream Provider 和 Gemini 手动工作流"
-  - [ ] SubTask 11.2: git push 到 GitHub，等待 Vercel 自动部署
+- [x] Task 11: 提交并推送
+  - [x] SubTask 11.1: git commit message: "feat: 添加 Seedream Provider 和 Gemini 手动工作流"
+  - [x] SubTask 11.2: git push 到 GitHub，等待 Vercel 自动部署
 
 # Task Dependencies
 
