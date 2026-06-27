@@ -161,7 +161,7 @@ export class ProviderStore {
         type: 'seedream',
         apiKey: encrypt(seedreamApiKey),
         baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-        defaultModel: 'seedream-4.5',
+        defaultModel: 'doubao-seedream-4-5-251128',
         enabled: true,
         isDefault: this.providers.length === 0,
         createdAt: now,

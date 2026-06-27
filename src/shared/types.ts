@@ -91,12 +91,12 @@ export const GEMINI_IMAGE_MODELS: Array<{ id: string; name: string; description:
   { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image（Nano Banana Pro）', description: '高质量，更好的文字渲染与构图', type: 'edit' },
 ];
 
-// Seedream 图像模型（火山引擎方舟）
-export type SeedreamModel = 'seedream-4.5' | 'seedream-5.0-lite';
+// Seedream 图像模型（火山引擎方舟）— 模型 ID 为方舟推理接入点 ID
+export type SeedreamModel = 'doubao-seedream-4-5-251128' | 'doubao-seedream-5-0-lite-250415';
 
 export const SEEDREAM_MODELS: Array<{ id: string; name: string; description: string; type: 'generation' | 'edit' }> = [
-  { id: 'seedream-4.5', name: 'Seedream 4.5', description: '即梦图像模型4.5，支持文生图和图生图编辑，文字渲染强', type: 'edit' },
-  { id: 'seedream-5.0-lite', name: 'Seedream 5.0 Lite', description: '即梦图像模型5.0 Lite，支持深度思考与原生4K输出', type: 'edit' },
+  { id: 'doubao-seedream-4-5-251128', name: 'Seedream 4.5', description: '即梦图像模型4.5，支持文生图和图生图编辑，文字渲染强', type: 'edit' },
+  { id: 'doubao-seedream-5-0-lite-250415', name: 'Seedream 5.0 Lite', description: '即梦图像模型5.0 Lite，支持深度思考与原生4K输出（需在方舟控制台开通接入点）', type: 'edit' },
 ];
 
 // 各 Provider 类型的可选模型列表（供前端动态下拉使用）
@@ -123,8 +123,8 @@ export const PROVIDER_MODELS: Record<ProviderType, ProviderModelOption[]> = {
     { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image（Nano Banana Pro）', capabilities: ['generation', 'edit'] },
   ],
   seedream: [
-    { value: 'seedream-4.5', label: 'Seedream 4.5（文生图+图生图）', capabilities: ['generation', 'edit'] },
-    { value: 'seedream-5.0-lite', label: 'Seedream 5.0 Lite（4K 高清）', capabilities: ['generation', 'edit'] },
+    { value: 'doubao-seedream-4-5-251128', label: 'Seedream 4.5（文生图+图生图）', capabilities: ['generation', 'edit'] },
+    { value: 'doubao-seedream-5-0-lite-250415', label: 'Seedream 5.0 Lite（4K 高清）', capabilities: ['generation', 'edit'] },
   ],
   jimeng: [],
   custom: [],
