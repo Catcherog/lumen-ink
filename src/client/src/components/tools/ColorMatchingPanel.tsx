@@ -3,6 +3,10 @@ import type { ToolPanelProps } from './types';
 import ReferenceImages from '../ReferenceImages';
 import { Palette, Check } from 'lucide-react';
 
+const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其面部骨骼结构、五官比例与辨识度，仅作为身份识别参考';
+const LIGHTING_ANCHOR = '柔光箱45度主光，反光板补光，自然光比，色温5500K';
+const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
+
 export default function ColorMatchingPanel({ state, onSubmit }: ToolPanelProps) {
   const [referenceImages, setReferenceImages] = useState(state.referenceImages.slice(0, 1));
   const [description, setDescription] = useState('');
@@ -10,7 +14,7 @@ export default function ColorMatchingPanel({ state, onSubmit }: ToolPanelProps) 
   const hasReference = referenceImages.length > 0;
 
   const buildPrompt = (): string => {
-    const styleAnchor = '85mm人像镜头，富士Pro 400H胶片模拟，低饱和高级色调，自然光影';
+    const styleAnchor = '85mm f/1.4人像镜头，富士Pro 400H胶片模拟，低饱和暖调，柯达Portra色彩科学';
     const refClause = hasReference
       ? '参考上传的参考图，将整体色调、光影与质感调整至参考图风格。'
       : '根据以下文字描述调整整体色调与光影。';
@@ -20,10 +24,12 @@ export default function ColorMatchingPanel({ state, onSubmit }: ToolPanelProps) 
       : `【修改】${refClause}`;
 
     return [
+      `【身份锚定】${IDENTITY_ANCHOR}。`,
       '【保留】保留原图人物特征、五官、姿势、构图、光影结构与细节不变。',
       modify,
+      `【光影镜头】${LIGHTING_ANCHOR}。`,
       `【风格】${styleAnchor}。`,
-      '【限制】不要改变人物五官和姿势，不要重绘背景，不要过度风格化，不要丢失原图细节。',
+      `【限制】不要改变人物五官和姿势，不要重绘背景，不要过度风格化，不要丢失原图细节。${QUALITY_ANCHOR}。`,
     ].join('\n');
   };
 

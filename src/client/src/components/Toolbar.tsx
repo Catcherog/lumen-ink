@@ -37,7 +37,7 @@ export default function Toolbar({
   return (
     <div
       className={`
-        flex bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700
+        flex bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 min-h-0
         ${isVertical ? 'flex-col border-r h-full' : 'flex-row border-b items-center'}
         ${className}
       `}

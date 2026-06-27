@@ -9,7 +9,10 @@ interface FeatureState {
   strength: number;
 }
 
-const PHOTO_ANCHOR = '85mm人像镜头，柔光箱布光';
+const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其面部骨骼结构、五官比例与辨识度，仅作为身份识别参考';
+const PHOTO_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，自然肤色还原';
+const LIGHTING_ANCHOR = '柔光箱45度主光，反光板补光，自然光比，轮廓光保留';
+const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
 
 const FEATURES: Array<{ key: LiquifyFeature; label: string }> = [
   { key: 'faceSmall', label: '小脸' },
@@ -30,10 +33,10 @@ const LABEL_PHRASES: Record<LiquifyFeature, string> = {
 };
 
 function intensityAdjective(value: number): string {
-  if (value < 30) return '轻微';
-  if (value < 55) return '适度';
-  if (value < 80) return '明显';
-  return '大幅';
+  if (value < 30) return '液化轻微';
+  if (value < 55) return '液化适度';
+  if (value < 80) return '液化明显';
+  return '液化大幅';
 }
 
 function buildPrompt(features: Record<LiquifyFeature, FeatureState>): string {
@@ -49,10 +52,12 @@ function buildPrompt(features: Record<LiquifyFeature, FeatureState>): string {
     : '【修改】保持面部轮廓与身形自然，不做明显调整。';
 
   return [
+    `【身份锚定】${IDENTITY_ANCHOR}。`,
     '【保留】保留本人特征、五官辨识度、面部结构与原始构图背景不变。',
     modify,
+    `【光影镜头】${LIGHTING_ANCHOR}。`,
     `【风格】自然液化塑形，${PHOTO_ANCHOR}。`,
-    '【限制】不要网红脸，不要过度整形感，不要改变五官比例，不要扭曲背景，保持本人辨识度。',
+    `【限制】不要网红脸，不要过度整形感，不要改变五官比例，不要扭曲背景，保持本人辨识度。${QUALITY_ANCHOR}。`,
   ].join('\n');
 }
 

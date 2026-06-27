@@ -14,7 +14,13 @@ interface FaceParams {
 type PresetKey = 'natural' | 'refined' | 'premium';
 type ActivePreset = PresetKey | 'custom';
 
-const PHOTO_ANCHOR = '85mm人像镜头，柔光箱布光，柯达Portra 400胶片模拟';
+const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其独特面部骨骼结构、眼型、鼻型、唇形、下颌线与五官比例，仅作为身份识别参考，不复制背景服装姿势';
+
+const PHOTO_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，反光板补光，柯达Portra 400胶片模拟，自然肤色还原';
+
+const LIGHTING_ANCHOR = '柔光箱45度主光，反光板阴影侧补光，眼神光保留，自然光比';
+
+const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
 
 const PRESETS: Record<PresetKey, FaceParams> = {
   natural: { skinBrightness: 20, smoothing: 20, faceSlim: 20, eyeEnlarge: 10, blemish: 30, sculptLight: 20 },
@@ -33,48 +39,48 @@ const SLIDERS: Array<{ key: keyof FaceParams; label: string }> = [
 
 function skinBrightnessPhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '肤色轻微提亮';
-  if (value < 60) return '肤色提亮半档';
-  if (value < 85) return '肤色明显提亮一档';
-  return '肤色提亮一档半';
+  if (value < 30) return '肤色轻微提亮，D&B中性灰微调';
+  if (value < 60) return '肤色提亮半档，曲线中间调上提';
+  if (value < 85) return '肤色明显提亮一档，色相统一';
+  return '肤色提亮一档半，明度层级丰富';
 }
 
 function smoothingPhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '轻微软化并均匀肤色，保留毛孔';
-  if (value < 60) return '均匀肤色并柔化轻微瑕疵，保留真实纹理';
+  if (value < 30) return '低频磨皮，保留高频纹理与毛孔';
+  if (value < 60) return 'Portraiture级别中度磨皮，均匀肤色保留真实纹理';
   if (value < 85) return '中度磨皮并均匀肤色，保留皮肤纹理';
   return '较强磨皮同时尽量保留毛孔细节';
 }
 
 function faceSlimPhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '脸型轻微收紧';
-  if (value < 60) return '下颌线轻微收紧，脸型更精致';
-  if (value < 85) return '瘦脸一档，轮廓更精致';
-  return '瘦脸一档半';
+  if (value < 30) return '液化轻微推下颌线，保持骨骼辨识度';
+  if (value < 60) return '液化适度收紧下颌线，脸型更精致';
+  if (value < 85) return '液化瘦脸一档，轮廓更精致';
+  return '液化瘦脸一档半';
 }
 
 function eyeEnlargePhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '双眼自然提亮';
-  if (value < 60) return '自然放大双眼';
-  if (value < 85) return '明显放大双眼';
+  if (value < 30) return '眼神光增强，眼白微提';
+  if (value < 60) return '自然放大双眼，瞳孔细节保留';
+  if (value < 85) return '明显放大双眼，虹膜清晰';
   return '显著放大双眼';
 }
 
 function blemishPhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '去除少量明显瑕疵';
-  if (value < 60) return '去除痘印与暗沉';
+  if (value < 30) return '去除少量明显瑕疵，污点修复';
+  if (value < 60) return '去除痘印与暗沉，频率分离修复';
   if (value < 85) return '去除多数面部瑕疵';
   return '彻底清理瑕疵';
 }
 
 function sculptLightPhrase(value: number): string {
   if (value <= 0) return '';
-  if (value < 30) return '保留并轻微强化面部立体光影';
-  if (value < 60) return '增强面部立体光影';
+  if (value < 30) return '保留并轻微强化面部立体光影，中性灰微调';
+  if (value < 60) return '增强面部立体光影，明暗对比适中';
   if (value < 85) return '明显增强面部立体光影';
   return '强烈增强面部立体光影';
 }
@@ -92,10 +98,12 @@ function buildPrompt(params: FaceParams): string {
   const modify = parts.length > 0 ? `【修改】${parts.join('，')}。` : '【修改】保持整体自然优化。';
 
   return [
+    `【身份锚定】${IDENTITY_ANCHOR}。`,
     '【保留】保留本人特征与五官辨识度，保持原始构图和背景不变，保留真实皮肤纹理与毛孔。',
     modify,
-    `【风格】韩系高级奶油肌，${PHOTO_ANCHOR}。`,
-    '【限制】不要网红脸，不要塑料皮，不要假白，不要过度磨皮，不要柔焦糊脸，不要改变五官比例。',
+    `【光影镜头】${LIGHTING_ANCHOR}。`,
+    `【风格】${PHOTO_ANCHOR}。`,
+    `【限制】不要网红脸，不要塑料皮，不要假白，不要过度磨皮，不要柔焦糊脸，不要改变五官比例。${QUALITY_ANCHOR}。`,
   ].join('\n');
 }
 

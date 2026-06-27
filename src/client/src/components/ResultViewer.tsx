@@ -214,7 +214,7 @@ export default function ResultViewer({
   return (
     <div
       ref={wrapperRef}
-      className="w-full h-full flex flex-col bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+      className="w-full h-full min-h-0 flex flex-col bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
     >
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex-wrap">
@@ -349,7 +349,7 @@ export default function ResultViewer({
 
       {/* Canvas */}
       <div
-        className={`flex-1 relative overflow-hidden bg-gray-100 dark:bg-black ${onImageUpload ? 'cursor-default' : ''}`}
+        className={`flex-1 min-h-0 relative overflow-hidden bg-gray-100 dark:bg-black ${onImageUpload ? 'cursor-default' : ''}`}
         onDrop={onImageUpload ? handleCanvasDrop : undefined}
         onDragOver={onImageUpload ? handleCanvasDragOver : undefined}
         onDragLeave={onImageUpload ? handleCanvasDragLeave : undefined}

@@ -166,7 +166,7 @@ export default function App() {
   return (
     <div className={darkMode ? 'dark' : ''}>
       <ErrorBoundary>
-        <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+        <div className="flex flex-col h-[100dvh] bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
           {/* Header */}
           <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -245,7 +245,7 @@ export default function App() {
           </header>
 
           {/* Main workspace */}
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex flex-1 overflow-hidden min-h-0">
             {/* Left toolbar */}
             <Toolbar
               activeTool={state.selectedTool}
@@ -254,11 +254,11 @@ export default function App() {
               onToggleExpand={isDesktop ? () => setToolbarExpanded(v => !v) : undefined}
               onExportToGemini={handleExportToGemini}
               hasImage={!!(state.currentImage || state.currentImageUrl)}
-              className={`flex-shrink-0 ${isDesktop && toolbarExpanded ? 'w-52' : 'w-14'}`}
+              className={`flex-shrink-0 min-h-0 ${isDesktop && toolbarExpanded ? 'w-52' : 'w-14'}`}
             />
 
             {/* Center canvas */}
-            <main className="flex-1 min-w-0 relative flex flex-col">
+            <main className="flex-1 min-w-0 min-h-0 relative flex flex-col">
               {state.error && (
                 <div className="absolute top-3 left-3 right-3 z-20">
                   <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl px-4 py-2.5 shadow-sm">
@@ -317,7 +317,7 @@ export default function App() {
             </main>
 
             {/* Right panel — desktop */}
-            <div className="hidden lg:flex w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700">
+            <div className="hidden lg:flex w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 min-h-0 overflow-hidden">
               <ParamPanel
                 tool={state.selectedTool}
                 state={state}
