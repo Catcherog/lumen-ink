@@ -95,7 +95,7 @@ export class ProviderStore {
       }
     }
     this.loaded = true;
-    this.migrateFromEnv();
+    this.seedDefaults();
     this.ensureDefault();
   }
 
@@ -113,62 +113,42 @@ export class ProviderStore {
     }
   }
 
-  private migrateFromEnv(): void {
+  private seedDefaults(): void {
     const now = Date.now();
     let changed = false;
 
-    const glmApiKey = process.env.GLM_API_KEY || process.env.ZHIPU_API_KEY;
-    if (glmApiKey && !this.providers.some((p) => p.type === 'glm')) {
+    // 首次启动（无任何 Provider）：预置 Seedream（默认）+ OpenAI 两个 Provider
+    if (this.providers.length === 0) {
+      const seedreamApiKey = process.env.SEEDREAM_API_KEY || process.env.VOLC_API_KEY;
       this.providers.push({
         id: crypto.randomUUID(),
-        name: '默认 GLM Provider',
-        type: 'glm',
-        apiKey: encrypt(glmApiKey),
-        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-        defaultModel: 'cogview-4-250304',
-        enabled: true,
-        isDefault: this.providers.length === 0,
-        createdAt: now,
-        updatedAt: now,
-      });
-      changed = true;
-      console.log('[ProviderStore] Auto-created GLM provider from GLM_API_KEY');
-    }
-
-    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-    if (geminiApiKey && !this.providers.some((p) => p.type === 'gemini')) {
-      this.providers.push({
-        id: crypto.randomUUID(),
-        name: '默认 Gemini Provider',
-        type: 'gemini',
-        apiKey: encrypt(geminiApiKey),
-        baseUrl: '',
-        defaultModel: 'gemini-2.5-flash-image',
-        enabled: true,
-        isDefault: this.providers.length === 0,
-        createdAt: now,
-        updatedAt: now,
-      });
-      changed = true;
-      console.log('[ProviderStore] Auto-created Gemini provider from GEMINI_API_KEY');
-    }
-
-    const seedreamApiKey = process.env.SEEDREAM_API_KEY || process.env.VOLC_API_KEY;
-    if (seedreamApiKey && !this.providers.some((p) => p.type === 'seedream')) {
-      this.providers.push({
-        id: crypto.randomUUID(),
-        name: '默认 Seedream Provider',
+        name: '即梦 Seedream',
         type: 'seedream',
-        apiKey: encrypt(seedreamApiKey),
+        apiKey: seedreamApiKey ? encrypt(seedreamApiKey) : '',
         baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
         defaultModel: 'doubao-seedream-4-5-251128',
         enabled: true,
-        isDefault: this.providers.length === 0,
+        isDefault: true,
         createdAt: now,
         updatedAt: now,
       });
+
+      const openaiApiKey = process.env.OPENAI_API_KEY;
+      this.providers.push({
+        id: crypto.randomUUID(),
+        name: 'GPT OpenAI',
+        type: 'openai',
+        apiKey: openaiApiKey ? encrypt(openaiApiKey) : '',
+        baseUrl: '',
+        defaultModel: 'gpt-image-2',
+        enabled: true,
+        isDefault: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+
       changed = true;
-      console.log('[ProviderStore] Auto-created Seedream provider from SEEDREAM_API_KEY');
+      console.log('[ProviderStore] Seeded default providers: Seedream (default) + OpenAI');
     }
 
     if (changed) this.save();

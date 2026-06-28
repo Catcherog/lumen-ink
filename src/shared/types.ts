@@ -113,9 +113,10 @@ export const PROVIDER_MODELS: Record<ProviderType, ProviderModelOption[]> = {
     { value: 'glm-4.6v', label: 'GLM-4.6V（图像理解+编辑）', capabilities: ['chat'] },
   ],
   openai: [
-    { value: 'gpt-image-2', label: 'GPT Image 2', capabilities: ['edit'] },
-    { value: 'dall-e-3', label: 'DALL-E 3', capabilities: ['generation'] },
-    { value: 'gpt-4o', label: 'GPT-4o', capabilities: ['chat'] },
+    { value: 'gpt-image-2', label: 'GPT Image 2（图生图编辑）', capabilities: ['edit'] },
+    { value: 'gpt-image-2-t2i', label: 'GPT Image 2（文生图）', capabilities: ['generation'] },
+    { value: 'gpt-4o', label: 'GPT-4o（图像理解）', capabilities: ['chat'] },
+    { value: 'dall-e-3', label: 'DALL·E 3（文生图）', capabilities: ['generation'] },
   ],
   gemini: [
     { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image（Nano Banana）', capabilities: ['generation', 'edit'] },

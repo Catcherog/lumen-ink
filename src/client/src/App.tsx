@@ -173,7 +173,7 @@ export default function App() {
               <div className="p-1.5 bg-blue-600 text-white rounded-lg">
                 <ImageIcon className="w-5 h-5" />
               </div>
-              <h1 className="text-base lg:text-lg font-bold text-gray-900 dark:text-gray-100 hidden sm:block">GLM 图像编辑器</h1>
+              <h1 className="text-base lg:text-lg font-bold text-gray-900 dark:text-gray-100 hidden sm:block">光砚</h1>
             </div>
 
             <div className="flex items-center gap-3">
