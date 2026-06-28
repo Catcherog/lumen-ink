@@ -3,8 +3,10 @@ import type { ProviderConfig } from 'shared/types.js';
 import sharp from 'sharp';
 
 const SEEDREAM_API_BASE = 'https://ark.cn-beijing.volces.com/api/v3';
-const FETCH_TIMEOUT = 90000;
-const FETCH_TIMEOUT_2K = 120000;
+// Vercel maxDuration = 90s，超时阈值必须 < 90s 才能保证我们抛出友好错误而非被 Vercel 网关杀成空 504
+// 留 10s 余量给响应回传 + JSON 解析
+const FETCH_TIMEOUT = 80000;
+const FETCH_TIMEOUT_2K = 80000;
 
 export class SeedreamProvider implements ImageProvider {
   readonly config: ProviderConfig;
