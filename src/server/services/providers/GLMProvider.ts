@@ -2,6 +2,23 @@ import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult 
 import type { ProviderConfig } from 'shared/types.js';
 
 const GLM_API_BASE = 'https://open.bigmodel.cn/api/paas/v4';
+const FETCH_TIMEOUT = 50000;
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if ((err as Error).name === 'AbortError') {
+      throw Object.assign(new Error('API 请求超时（超过50秒），请稍后重试'), { status: 504 });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export class GLMProvider implements ImageProvider {
   readonly config: ProviderConfig;
@@ -64,7 +81,7 @@ export class GLMProvider implements ImageProvider {
       quality: params.model === 'glm-image' ? 'hd' : 'standard',
     };
 
-    const response = await fetch(`${this.baseUrl}/images/generations`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/images/generations`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -165,7 +182,7 @@ export class GLMProvider implements ImageProvider {
       max_tokens: 2048,
     };
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

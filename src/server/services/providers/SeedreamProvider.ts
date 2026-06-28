@@ -2,6 +2,7 @@ import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult 
 import type { ProviderConfig } from 'shared/types.js';
 
 const SEEDREAM_API_BASE = 'https://ark.cn-beijing.volces.com/api/v3';
+const FETCH_TIMEOUT = 50000;
 
 export class SeedreamProvider implements ImageProvider {
   readonly config: ProviderConfig;
@@ -75,14 +76,27 @@ export class SeedreamProvider implements ImageProvider {
       throw Object.assign(new Error('未配置 Seedream API Key'), { status: 401 });
     }
 
-    const response = await fetch(`${this.baseUrl}/images/generations`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/images/generations`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      if ((err as Error).name === 'AbortError') {
+        throw Object.assign(new Error('Seedream API 请求超时（超过50秒），请稍后重试'), { status: 504 });
+      }
+      throw err;
+    }
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();

@@ -103,6 +103,15 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    // 请求超时
+    if (err.status === 504 || err.message?.includes('超时')) {
+      res.status(504).json({
+        success: false,
+        error: `请求超时${upstreamMsg ? `（${upstreamMsg}）` : '（API 响应过慢，请稍后重试）'}`,
+      } as EditResponse);
+      return;
+    }
+
     // 服务不可用
     if (err.status && err.status >= 500) {
       res.status(502).json({

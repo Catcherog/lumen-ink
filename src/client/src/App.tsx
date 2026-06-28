@@ -70,13 +70,33 @@ export default function App() {
     setManualWorkflowOpen(false);
   }, []);
 
-  // Set axios default auth header when token changes
+  // Set axios default auth header when token changes + handle auth 401 globally
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     } else {
       delete axios.defaults.headers.common['Authorization'];
     }
+
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          const errData = error.response.data;
+          const errMsg = typeof errData?.error === 'string' ? errData.error : '';
+          const isApiKeyError = errMsg.includes('API Key') || errMsg.includes('Key 无效');
+          if (!isApiKeyError) {
+            localStorage.removeItem('auth_token');
+            setToken(null);
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      axios.interceptors.response.eject(interceptor);
+    };
   }, [token]);
 
   const loadProviders = async () => {

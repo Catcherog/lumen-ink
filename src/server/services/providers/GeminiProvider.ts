@@ -3,6 +3,23 @@ import type { ProviderConfig } from 'shared/types.js';
 
 const GOOGLE_AI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const VERTEX_AI_BASE = 'https://aiplatform.googleapis.com/v1';
+const FETCH_TIMEOUT = 50000;
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if ((err as Error).name === 'AbortError') {
+      throw Object.assign(new Error('API 请求超时（超过50秒），请稍后重试'), { status: 504 });
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 type ApiMode = 'google-ai' | 'vertex-ai';
 
@@ -73,7 +90,7 @@ export class GeminiProvider implements ImageProvider {
     const url = `${this.buildModelPath(model)}?key=${apiKey}`;
     console.log('[GeminiProvider] Calling API:', this.apiMode, url.split('?')[0]);
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
