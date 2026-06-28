@@ -1,8 +1,10 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
+import sharp from 'sharp';
 
 const SEEDREAM_API_BASE = 'https://ark.cn-beijing.volces.com/api/v3';
-const FETCH_TIMEOUT = 50000;
+const FETCH_TIMEOUT = 90000;
+const FETCH_TIMEOUT_2K = 120000;
 
 export class SeedreamProvider implements ImageProvider {
   readonly config: ProviderConfig;
@@ -29,6 +31,29 @@ export class SeedreamProvider implements ImageProvider {
   private base64ToDataUrl(base64: string, mimeType: string): string {
     const clean = this.stripDataUrl(base64);
     return `data:${mimeType};base64,${clean}`;
+  }
+
+  private async compressImage(image: string, mimeType: string, maxEdge = 2048): Promise<{ image: string; mimeType: string }> {
+    const clean = this.stripDataUrl(image);
+    const buffer = Buffer.from(clean, 'base64');
+    const metadata = await sharp(buffer).metadata();
+    const { width = 0, height = 0 } = metadata;
+    const longestEdge = Math.max(width, height);
+
+    if (longestEdge <= maxEdge) {
+      return { image, mimeType };
+    }
+
+    const scale = maxEdge / longestEdge;
+    const targetWidth = Math.round(width * scale);
+    const targetHeight = Math.round(height * scale);
+
+    const outBuffer = await sharp(buffer)
+      .resize({ width: targetWidth, height: targetHeight, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+
+    return { image: outBuffer.toString('base64'), mimeType: 'image/jpeg' };
   }
 
   private parseError(status: number, errorText: string): { message: string; status: number } {
@@ -70,14 +95,16 @@ export class SeedreamProvider implements ImageProvider {
     return prompt;
   }
 
-  private async callGenerations(body: Record<string, unknown>): Promise<EditResult> {
+  private async callGenerations(body: Record<string, unknown>, size: '1080P' | '2K' = '1080P'): Promise<EditResult> {
     const apiKey = this.apiKey;
     if (!apiKey) {
       throw Object.assign(new Error('未配置 Seedream API Key'), { status: 401 });
     }
 
+    const timeout = size === '2K' ? FETCH_TIMEOUT_2K : FETCH_TIMEOUT;
+    const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}/images/generations`, {
@@ -92,7 +119,8 @@ export class SeedreamProvider implements ImageProvider {
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       if ((err as Error).name === 'AbortError') {
-        throw Object.assign(new Error('Seedream API 请求超时（超过50秒），请稍后重试'), { status: 504 });
+        const elapsed = Date.now() - startTime;
+        throw Object.assign(new Error(`Seedream API 请求超时（耗时 ${elapsed}ms，size=${size}），建议切换为 1080P 出图或稍后重试`), { status: 504 });
       }
       throw err;
     }
@@ -127,16 +155,21 @@ export class SeedreamProvider implements ImageProvider {
       fullPrompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
+    const size = params.outputSize || '1080P';
+    if (size === '2K') {
+      console.warn('[Seedream] 2K mode enabled, timeout extended to 120s');
+    }
+
     const body: Record<string, unknown> = {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt: fullPrompt,
-      size: '2K',
+      size,
       response_format: 'url',
       watermark: false,
       stream: false,
     };
 
-    return this.callGenerations(body);
+    return this.callGenerations(body, size);
   }
 
   async edit(params: EditParams): Promise<EditResult> {
@@ -145,10 +178,15 @@ export class SeedreamProvider implements ImageProvider {
       prompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
+    const size = params.outputSize || '1080P';
+    if (size === '2K') {
+      console.warn('[Seedream] 2K mode enabled, timeout extended to 120s');
+    }
+
     const body: Record<string, unknown> = {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt,
-      size: '2K',
+      size,
       response_format: 'url',
       watermark: false,
       stream: false,
@@ -156,10 +194,11 @@ export class SeedreamProvider implements ImageProvider {
     };
 
     if (params.image && params.mimeType) {
-      body.image = this.base64ToDataUrl(params.image, params.mimeType);
+      const compressed = await this.compressImage(params.image, params.mimeType);
+      body.image = this.base64ToDataUrl(compressed.image, compressed.mimeType);
     }
 
-    return this.callGenerations(body);
+    return this.callGenerations(body, size);
   }
 
   async chat(_params: ChatParams): Promise<EditResult> {

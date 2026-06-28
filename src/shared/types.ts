@@ -40,6 +40,8 @@ export interface EditRequest {
   history?: ConversationTurn[];
   // 可选：区域信息（用于穿帮修复/路人去除）
   regions?: Region[];
+  // 可选：出图尺寸，默认 1080P，可选 '2K'
+  outputSize?: '1080P' | '2K';
 }
 
 export interface ConversationTurn {

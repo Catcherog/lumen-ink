@@ -14,11 +14,9 @@ interface FaceParams {
 type PresetKey = 'natural' | 'refined' | 'premium';
 type ActivePreset = PresetKey | 'custom';
 
-const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其独特面部骨骼结构、眼型、鼻型、唇形、下颌线与五官比例，仅作为身份识别参考，不复制背景服装姿势';
+const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其面部骨骼结构、眼型、鼻型、唇形、下颌线，仅作为身份识别参考，不复制背景服装姿势';
 
-const PHOTO_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，反光板补光，柯达Portra 400胶片模拟，自然肤色还原';
-
-const LIGHTING_ANCHOR = '柔光箱45度主光，反光板阴影侧补光，眼神光保留，自然光比';
+const STYLE_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，反光板补光，眼神光保留，柯达Portra 400胶片模拟，自然肤色还原';
 
 const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
 
@@ -99,11 +97,9 @@ function buildPrompt(params: FaceParams): string {
 
   return [
     `【身份锚定】${IDENTITY_ANCHOR}。`,
-    '【保留】保留本人特征与五官辨识度，保持原始构图和背景不变，保留真实皮肤纹理与毛孔。',
+    '【保留】保留本人五官辨识度，保持原始构图和背景不变，保留真实皮肤纹理与毛孔。',
     modify,
-    `【光影镜头】${LIGHTING_ANCHOR}。`,
-    `【风格】${PHOTO_ANCHOR}。`,
-    `【限制】不要网红脸，不要塑料皮，不要假白，不要过度磨皮，不要柔焦糊脸，不要改变五官比例。${QUALITY_ANCHOR}。`,
+    `【限制】${STYLE_ANCHOR}。不要网红脸，不要塑料皮，不要假白，不要过度磨皮，不要柔焦糊脸，不要改变五官比例。${QUALITY_ANCHOR}。`,
   ].join('\n');
 }
 

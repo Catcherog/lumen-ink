@@ -53,6 +53,7 @@ export interface EditRequest {
     }>;
   }>;
   regions?: Region[];
+  outputSize?: '1080P' | '2K';
 }
 
 export interface ConversationTurn {

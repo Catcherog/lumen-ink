@@ -6,7 +6,7 @@ const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { prompt, image, mimeType, model, referenceImages, history, providerId, regions } =
+    const { prompt, image, mimeType, model, referenceImages, history, providerId, regions, outputSize } =
       req.body as EditRequest;
 
     if (!prompt) {
@@ -40,7 +40,7 @@ router.post('/', async (req: Request, res: Response) => {
     let result: EditResult;
     switch (operationType) {
       case 'generate':
-        result = await provider.generate({ prompt, referenceImages, model: selectedModel });
+        result = await provider.generate({ prompt, referenceImages, model: selectedModel, outputSize });
         break;
       case 'edit':
         result = await provider.edit({
@@ -50,6 +50,7 @@ router.post('/', async (req: Request, res: Response) => {
           referenceImages,
           model: selectedModel,
           regions,
+          outputSize,
         });
         break;
       case 'chat':

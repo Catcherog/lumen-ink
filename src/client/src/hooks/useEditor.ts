@@ -188,6 +188,8 @@ export default function useEditor() {
         referenceImages: referenceImages.length > 0
           ? referenceImages.map(img => ({ data: img.base64, mimeType: img.mimeType }))
           : undefined,
+      }, {
+        timeout: 100000,
       });
 
       if (response.data.success) {

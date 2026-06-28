@@ -4,6 +4,7 @@ export interface GenerateParams {
   prompt: string;
   referenceImages?: Array<{ data: string; mimeType: string }>;
   model?: string;
+  outputSize?: '1080P' | '2K';
 }
 
 export interface EditParams {
@@ -13,6 +14,7 @@ export interface EditParams {
   referenceImages?: Array<{ data: string; mimeType: string }>;
   model?: string;
   regions?: Array<{ x: number; y: number; width: number; height: number; label?: string }>;
+  outputSize?: '1080P' | '2K';
 }
 
 export interface ChatParams {

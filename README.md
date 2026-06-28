@@ -1,4 +1,4 @@
-# GLM 图像编辑器
+# 光砚 (Lumen Ink)
 
 基于 React + TypeScript + Express 的多 Provider AI 图像编辑工作台，支持修脸、调色/追色、液化、穿帮修复、路人去除与导出等工具。
 

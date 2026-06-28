@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'gemini-image-editor-secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'lumen-ink-secret';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'changeme';
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {

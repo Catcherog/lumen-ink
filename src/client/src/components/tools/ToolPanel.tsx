@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Wand2, Eraser, Download, Play } from 'lucide-react';
 
 const IDENTITY_ANCHOR = '参考图中的同一人，严格保留其面部骨骼结构、五官比例与辨识度，仅作为身份识别参考';
-const LIGHTING_ANCHOR = '柔光箱45度主光，反光板补光，自然光比';
+const STYLE_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，反光板补光，自然光比';
 const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
 
 interface PanelWrapperProps extends ToolPanelProps {
@@ -22,9 +22,7 @@ function RepairToolPanel({ onSubmit }: ToolPanelProps) {
       `【身份锚定】${IDENTITY_ANCHOR}。`,
       '【保留】保留本人特征、五官辨识度、原始构图背景不变。',
       `【修改】局部修复：祛痘祛斑祛皱，频率分离修复，修复强度${strength}。`,
-      `【光影镜头】${LIGHTING_ANCHOR}。`,
-      '【风格】自然修复质感，85mm f/1.4人像镜头。',
-      `【限制】不要过度磨皮，不要改变五官比例，保持真实皮肤纹理。${QUALITY_ANCHOR}。`,
+      `【限制】${STYLE_ANCHOR}。不要过度磨皮，不要改变五官比例，保持真实皮肤纹理。${QUALITY_ANCHOR}。`,
     ].join('\n');
     onSubmit(prompt, {
       tool: 'repair',
@@ -70,9 +68,7 @@ function RemoveToolPanel({ onSubmit }: ToolPanelProps) {
       `【身份锚定】${IDENTITY_ANCHOR}。`,
       '【保留】保留主体人物特征、五官、姿势、构图不变。',
       '【修改】去除画面中的杂物、路人或水印，保持画面自然。',
-      `【光影镜头】${LIGHTING_ANCHOR}。`,
-      '【风格】自然修复，内容感知填充，85mm f/1.4人像镜头。',
-      `【限制】不要改变主体人物，不要扭曲背景纹理。${QUALITY_ANCHOR}。`,
+      `【限制】${STYLE_ANCHOR}。不要改变主体人物，不要扭曲背景纹理。${QUALITY_ANCHOR}。`,
     ].join('\n');
     onSubmit(prompt, {
       tool: 'remove',
@@ -110,9 +106,7 @@ function ExportToolPanel({ onSubmit }: ToolPanelProps) {
       `【身份锚定】${IDENTITY_ANCHOR}。`,
       '【保留】保留原图所有细节、构图、光影不变。',
       `【修改】导出优化：格式${format.toUpperCase()}，质量${quality}%，锐化输出。`,
-      `【光影镜头】${LIGHTING_ANCHOR}。`,
-      '【风格】高质量输出，85mm f/1.4人像镜头。',
-      `【限制】不要改变画面内容，不要压缩失真。${QUALITY_ANCHOR}。`,
+      `【限制】${STYLE_ANCHOR}。不要改变画面内容，不要压缩失真。${QUALITY_ANCHOR}。`,
     ].join('\n');
     onSubmit(prompt, {
       tool: 'export',

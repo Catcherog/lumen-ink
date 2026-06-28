@@ -12,7 +12,7 @@ function findProjectRoot(startDir: string): string {
   for (let i = 0; i < 6; i++) {
     if (fs.existsSync(path.join(dir, 'package.json'))) {
       const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-      if (pkg.name === 'gemini-image-editor') {
+      if (pkg.name === 'lumen-ink') {
         return dir;
       }
     }
@@ -25,7 +25,7 @@ function findProjectRoot(startDir: string): string {
 
 const projectRoot = findProjectRoot(__dirname);
 const DATA_DIR = process.env.VERCEL
-  ? path.join('/tmp', 'glm-image-editor-data')
+  ? path.join('/tmp', 'lumen-ink-data')
   : path.join(projectRoot, 'src', 'server', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'providers.json');
 
@@ -38,7 +38,7 @@ function getEncryptionKey(): Buffer {
   if (envKey) {
     return crypto.createHash('sha256').update(envKey).digest();
   }
-  const jwtSecret = process.env.JWT_SECRET || 'gemini-image-editor-secret';
+  const jwtSecret = process.env.JWT_SECRET || 'lumen-ink-secret';
   return crypto.createHash('sha256').update(jwtSecret).digest();
 }
 
