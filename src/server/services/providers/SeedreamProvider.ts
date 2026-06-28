@@ -6,7 +6,7 @@ const SEEDREAM_API_BASE = 'https://ark.cn-beijing.volces.com/api/v3';
 // Vercel maxDuration = 90s，超时阈值必须 < 90s 才能保证我们抛出友好错误而非被 Vercel 网关杀成空 504
 // 留 10s 余量给响应回传 + JSON 解析
 const FETCH_TIMEOUT = 80000;
-const FETCH_TIMEOUT_2K = 80000;
+const FETCH_TIMEOUT_HIGH_RES = 80000; // 4k 等高分辨率模式（Vercel 90s 上限封顶，无法延长）
 
 export class SeedreamProvider implements ImageProvider {
   readonly config: ProviderConfig;
@@ -97,13 +97,13 @@ export class SeedreamProvider implements ImageProvider {
     return prompt;
   }
 
-  private async callGenerations(body: Record<string, unknown>, size: '1080P' | '2K' = '1080P'): Promise<EditResult> {
+  private async callGenerations(body: Record<string, unknown>, size: '1k' | '2k' | '4k' = '1k'): Promise<EditResult> {
     const apiKey = this.apiKey;
     if (!apiKey) {
       throw Object.assign(new Error('未配置 Seedream API Key'), { status: 401 });
     }
 
-    const timeout = size === '2K' ? FETCH_TIMEOUT_2K : FETCH_TIMEOUT;
+    const timeout = size === '4k' ? FETCH_TIMEOUT_HIGH_RES : FETCH_TIMEOUT;
     const startTime = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -122,7 +122,7 @@ export class SeedreamProvider implements ImageProvider {
       clearTimeout(timeoutId);
       if ((err as Error).name === 'AbortError') {
         const elapsed = Date.now() - startTime;
-        throw Object.assign(new Error(`Seedream API 请求超时（耗时 ${elapsed}ms，size=${size}），建议切换为 1080P 出图或稍后重试`), { status: 504 });
+        throw Object.assign(new Error(`Seedream API 请求超时（耗时 ${elapsed}ms，size=${size}），建议切换为 1k 出图或稍后重试`), { status: 504 });
       }
       throw err;
     }
@@ -157,9 +157,9 @@ export class SeedreamProvider implements ImageProvider {
       fullPrompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
-    const size = params.outputSize || '1080P';
-    if (size === '2K') {
-      console.warn('[Seedream] 2K mode enabled, timeout extended to 120s');
+    const size = params.outputSize || '1k';
+    if (size === '4k') {
+      console.warn('[Seedream] 4k mode enabled, timeout extended to 80s (capped by Vercel)');
     }
 
     const body: Record<string, unknown> = {
@@ -180,9 +180,9 @@ export class SeedreamProvider implements ImageProvider {
       prompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
-    const size = params.outputSize || '1080P';
-    if (size === '2K') {
-      console.warn('[Seedream] 2K mode enabled, timeout extended to 120s');
+    const size = params.outputSize || '1k';
+    if (size === '4k') {
+      console.warn('[Seedream] 4k mode enabled, timeout extended to 80s (capped by Vercel)');
     }
 
     const body: Record<string, unknown> = {

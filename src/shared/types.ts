@@ -40,8 +40,8 @@ export interface EditRequest {
   history?: ConversationTurn[];
   // 可选：区域信息（用于穿帮修复/路人去除）
   regions?: Region[];
-  // 可选：出图尺寸，默认 1080P，可选 '2K'
-  outputSize?: '1080P' | '2K';
+  // 可选：出图尺寸，默认 1k，可选 '2k'/'4k'（火山方舟 API 规范）
+  outputSize?: '1k' | '2k' | '4k';
 }
 
 export interface ConversationTurn {
