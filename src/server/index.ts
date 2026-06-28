@@ -9,6 +9,7 @@ import authRouter from './routes/auth.js';
 import providersRouter from './routes/providers.js';
 import detectRouter from './routes/detect.js';
 import { authMiddleware } from './middleware/auth.js';
+import { providerStore } from './services/providers/ProviderStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,10 +34,10 @@ if (envPath) {
 }
 dotenv.config();
 
-process.env.JWT_SECRET ??= 'gemini-image-editor-secret';
+process.env.JWT_SECRET ??= 'lumen-ink-secret';
 process.env.AUTH_PASSWORD ??= 'changeme';
-if (!process.env.GLM_API_KEY && !process.env.ZHIPU_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
-  console.warn('[ENV] GLM_API_KEY / ZHIPU_API_KEY / DEFAULT_PROVIDER_ID 未配置，系统启动后可能没有可用的默认 Provider');
+if (!process.env.SEEDREAM_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
+  console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
 }
 
 const app = express();
@@ -45,7 +46,27 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok' });
+  const providers = providerStore.list().map((p) => ({
+    name: p.name,
+    type: p.type,
+    enabled: p.enabled,
+    isDefault: p.isDefault,
+    hasApiKey: p.hasApiKey,
+    defaultModel: p.defaultModel,
+  }));
+  res.json({
+    status: 'ok',
+    env: {
+      isVercel: !!process.env.VERCEL,
+      hasSeedreamKey: !!process.env.SEEDREAM_API_KEY,
+      hasOpenaiKey: !!process.env.OPENAI_API_KEY,
+      hasGlmKey: !!process.env.GLM_API_KEY,
+      hasGeminiKey: !!process.env.GEMINI_API_KEY,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      hasEncryptionKey: !!process.env.PROVIDER_ENCRYPTION_KEY,
+    },
+    providers,
+  });
 });
 
 app.use('/api/auth', authRouter);

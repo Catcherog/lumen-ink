@@ -82,13 +82,14 @@ router.post('/', async (req: Request, res: Response) => {
   } catch (error: unknown) {
     console.error('Edit error:', error);
 
-    const err = error as { status?: number; message?: string };
+    const err = error as { status?: number; message?: string; response?: { data?: { error?: string; message?: string } } };
+    const upstreamMsg = err.response?.data?.error || err.response?.data?.message || err.message || '';
 
     // API Key 无效或已过期
     if (err.status === 401 || err.status === 403) {
       res.status(401).json({
         success: false,
-        error: 'API Key 无效或已过期',
+        error: `API Key 无效或已过期${upstreamMsg ? `（${upstreamMsg}）` : '（请检查 Vercel 环境变量是否设置了 SEEDREAM_API_KEY）'}`,
       } as EditResponse);
       return;
     }
@@ -97,7 +98,7 @@ router.post('/', async (req: Request, res: Response) => {
     if (err.status === 429 || err.message?.includes('quota') || err.message?.includes('额度')) {
       res.status(429).json({
         success: false,
-        error: '额度已用尽',
+        error: `额度已用尽${upstreamMsg ? `（${upstreamMsg}）` : ''}`,
       } as EditResponse);
       return;
     }
@@ -106,14 +107,14 @@ router.post('/', async (req: Request, res: Response) => {
     if (err.status && err.status >= 500) {
       res.status(502).json({
         success: false,
-        error: '服务暂时不可用',
+        error: `服务暂时不可用${upstreamMsg ? `（${upstreamMsg}）` : ''}`,
       } as EditResponse);
       return;
     }
 
     res.status(500).json({
       success: false,
-      error: err.message || '编辑请求失败',
+      error: upstreamMsg || '编辑请求失败',
     } as EditResponse);
   }
 });

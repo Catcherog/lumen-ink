@@ -22,7 +22,7 @@ import { serializeError } from '../utils/error';
 interface ApiSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onProvidersChanged?: () => void;
+  onProvidersChanged?: (savedProviderId?: string) => void;
 }
 
 type FormData = {
@@ -72,8 +72,8 @@ export default function ApiSettingsModal({ isOpen, onClose, onProvidersChanged }
   const [showApiKey, setShowApiKey] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
 
-  const notifyChanged = () => {
-    onProvidersChanged?.();
+  const notifyChanged = (savedProviderId?: string) => {
+    onProvidersChanged?.(savedProviderId);
   };
 
   const loadProviders = async () => {
@@ -140,14 +140,17 @@ export default function ApiSettingsModal({ isOpen, onClose, onProvidersChanged }
       if (editingId && editingId !== 'new' && !payload.apiKey?.trim()) {
         delete payload.apiKey;
       }
+      let savedProviderId: string | undefined;
       if (editingId && editingId !== 'new') {
         await axios.put(`/api/providers/${editingId}`, payload);
+        savedProviderId = editingId;
       } else {
-        await axios.post('/api/providers', payload);
+        const res = await axios.post('/api/providers', payload);
+        savedProviderId = res.data?.id;
       }
       await loadProviders();
       resetForm();
-      notifyChanged();
+      notifyChanged(savedProviderId);
     } catch (err: unknown) {
       setError(serializeError(err) || '保存 Provider 失败');
     } finally {

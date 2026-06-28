@@ -103,12 +103,26 @@ export default function App() {
   }, [state.showApiSettings]);
 
   // Auto-select default/first enabled provider when list or selection changes
+  const prevDefaultRef = useRef<string | null>(null);
   useEffect(() => {
     const enabledProviders = providers.filter((p) => p.enabled);
     if (enabledProviders.length === 0) return;
     const currentId = state.selectedProvider;
-    if (currentId && enabledProviders.some((p) => p.id === currentId)) return;
     const defaultProvider = enabledProviders.find((p) => p.isDefault) || enabledProviders[0];
+    const newDefaultId = defaultProvider?.id || null;
+
+    // 检测默认 Provider 是否变更（兜底：即使没有显式回传 savedProviderId，也能切换到新默认）
+    if (newDefaultId && prevDefaultRef.current !== null && prevDefaultRef.current !== newDefaultId) {
+      prevDefaultRef.current = newDefaultId;
+      if (newDefaultId !== currentId) {
+        setProvider(newDefaultId);
+      }
+      return;
+    }
+    prevDefaultRef.current = newDefaultId;
+
+    // 当前未选或已失效时，选默认
+    if (currentId && enabledProviders.some((p) => p.id === currentId)) return;
     if (defaultProvider && defaultProvider.id !== currentId) {
       setProvider(defaultProvider.id);
     }
@@ -348,7 +362,12 @@ export default function App() {
       <ApiSettingsModal
         isOpen={state.showApiSettings}
         onClose={() => setShowApiSettings(false)}
-        onProvidersChanged={loadProviders}
+        onProvidersChanged={(savedProviderId?: string) => {
+          loadProviders();
+          if (savedProviderId) {
+            setProvider(savedProviderId);
+          }
+        }}
       />
 
       <ManualWorkflowDialog
