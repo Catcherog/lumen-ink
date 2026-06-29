@@ -97,6 +97,19 @@ export class SeedreamProvider implements ImageProvider {
     return prompt;
   }
 
+  /**
+   * 规范化输出尺寸：doubao-seedream-4-5 仅支持 2K/4K 档位（1K 只有 4.0 支持），
+   * 且 API 要求档位字符串大写。1K 自动升级到 2K。
+   * 返回 [用于请求体的 size 字段, 用于超时判定的内部标记]。
+   */
+  private normalizeSize(size: '1k' | '2k' | '4k' | undefined): { apiSize: '2K' | '4K'; internal: '1k' | '2k' | '4k' } {
+    const internal = size || '2k';
+    if (internal === '4k') {
+      return { apiSize: '4K', internal: '4k' };
+    }
+    return { apiSize: '2K', internal }; // '1k' / '2k' / undefined 都映射到 2K
+  }
+
   private async callGenerations(body: Record<string, unknown>, size: '1k' | '2k' | '4k' = '1k'): Promise<EditResult> {
     const apiKey = this.apiKey;
     if (!apiKey) {
@@ -157,21 +170,21 @@ export class SeedreamProvider implements ImageProvider {
       fullPrompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
-    const size = params.outputSize || '1k';
-    if (size === '4k') {
+    const { apiSize, internal } = this.normalizeSize(params.outputSize);
+    if (internal === '4k') {
       console.warn('[Seedream] 4k mode enabled, timeout extended to 80s (capped by Vercel)');
     }
 
     const body: Record<string, unknown> = {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt: fullPrompt,
-      size,
+      size: apiSize,
       response_format: 'url',
       watermark: false,
       stream: false,
     };
 
-    return this.callGenerations(body, size);
+    return this.callGenerations(body, internal);
   }
 
   async edit(params: EditParams): Promise<EditResult> {
@@ -180,15 +193,15 @@ export class SeedreamProvider implements ImageProvider {
       prompt += `\n\n（参考 ${params.referenceImages.length} 张参考图进行创作）`;
     }
 
-    const size = params.outputSize || '1k';
-    if (size === '4k') {
+    const { apiSize, internal } = this.normalizeSize(params.outputSize);
+    if (internal === '4k') {
       console.warn('[Seedream] 4k mode enabled, timeout extended to 80s (capped by Vercel)');
     }
 
     const body: Record<string, unknown> = {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt,
-      size,
+      size: apiSize,
       response_format: 'url',
       watermark: false,
       stream: false,
@@ -200,7 +213,7 @@ export class SeedreamProvider implements ImageProvider {
       body.image = this.base64ToDataUrl(compressed.image, compressed.mimeType);
     }
 
-    return this.callGenerations(body, size);
+    return this.callGenerations(body, internal);
   }
 
   async chat(_params: ChatParams): Promise<EditResult> {
