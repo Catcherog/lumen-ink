@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Loader2,
   Upload,
+  Copy,
 } from 'lucide-react';
 
 interface ResultViewerProps {
@@ -30,6 +31,7 @@ interface ResultViewerProps {
     model: string;
     operationType: string;
   } | null;
+  lastPrompt?: string | null; // 最近一次生成的提示词，用于"复制提示词"功能
 }
 
 type ViewMode = 'result' | 'original' | 'compare';
@@ -46,15 +48,18 @@ export default function ResultViewer({
   isLoading = false,
   onImageUpload,
   lastCallMeta,
+  lastPrompt,
 }: ResultViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('result');
   const [compareMode, setCompareMode] = useState<CompareMode>('slider');
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [imageMenu, setImageMenu] = useState<{ x: number; y: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDragging = useRef(false);
 
@@ -152,6 +157,57 @@ export default function ResultViewer({
     }
   };
 
+  const handleOpenInNewTab = () => {
+    if (displaySrc) {
+      window.open(displaySrc, '_blank');
+    }
+  };
+
+  const handleCopyPrompt = async () => {
+    if (lastPrompt) {
+      try {
+        await navigator.clipboard.writeText(lastPrompt);
+      } catch {
+        // Ignore clipboard errors
+      }
+    }
+  };
+
+  const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
+    // 仅在结果模式（非对比模式）下点击图片触发浮层菜单
+    if (effectiveViewMode !== 'result') return;
+    e.stopPropagation();
+    // 将视口坐标换算为相对画布容器的坐标，以便 absolute 定位浮层
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const x = rect ? e.clientX - rect.left : e.clientX;
+    const y = rect ? e.clientY - rect.top : e.clientY;
+    setImageMenu({ x, y });
+  };
+
+  // 点击浮层外部或按 ESC 关闭浮层
+  useEffect(() => {
+    if (!imageMenu) return;
+    const handleClickOutside = () => {
+      setImageMenu(null);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setImageMenu(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [imageMenu]);
+
+  const handleMenuClick = (action: () => void) => {
+    setImageMenu(null);
+    action();
+  };
+
   const handleOpenOriginal = () => {
     if (originalSrc) {
       window.open(originalSrc, '_blank');
@@ -190,26 +246,8 @@ export default function ResultViewer({
     return 'w-full h-full max-w-full max-h-full object-contain';
   })();
 
-  // 无内容时的空状态
-  if (!displaySrc && !resultText && !isLoading) {
-    return (
-      <div className="w-full h-full flex flex-col bg-white dark:bg-gray-900">
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
-          <div className="w-full max-w-md">
-            {onImageUpload ? (
-              <ImageUploader
-                onImageUpload={onImageUpload}
-                currentImage={null}
-                label="拖放图片到画布或点击上传"
-              />
-            ) : (
-              <div className="text-center text-gray-400 text-sm">画布为空</div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // 无内容时的空状态标志
+  const isEmptyState = !displaySrc && !resultText && !isLoading;
 
   return (
     <div
@@ -217,14 +255,14 @@ export default function ResultViewer({
       className="w-full h-full min-h-0 flex flex-col bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
     >
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex-wrap">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex-nowrap overflow-x-auto">
         {(hasResult || hasOriginal) && (
           <>
             {hasResult && (
               <button
                 onClick={() => setViewMode('result')}
                 title="生成结果"
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
                   effectiveViewMode === 'result'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -238,7 +276,7 @@ export default function ResultViewer({
               <button
                 onClick={() => setViewMode('original')}
                 title="原图"
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
                   effectiveViewMode === 'original'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -252,7 +290,7 @@ export default function ResultViewer({
               <button
                 onClick={() => setViewMode('compare')}
                 title="对比"
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
                   effectiveViewMode === 'compare'
                     ? 'bg-purple-600 text-white'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -266,11 +304,11 @@ export default function ResultViewer({
         )}
 
         {effectiveViewMode === 'compare' && hasOriginal && resultSrc && (
-          <div className="flex items-center gap-1 ml-1">
+          <div className="flex items-center gap-1 ml-1 flex-shrink-0">
             <button
               onClick={() => setCompareMode('slider')}
               title="滑块对比"
-              className={`p-1.5 rounded-md transition-colors ${
+              className={`flex-shrink-0 p-1.5 rounded-md transition-colors ${
                 compareMode === 'slider'
                   ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -281,7 +319,7 @@ export default function ResultViewer({
             <button
               onClick={() => setCompareMode('split')}
               title="分屏对比"
-              className={`p-1.5 rounded-md transition-colors ${
+              className={`flex-shrink-0 p-1.5 rounded-md transition-colors ${
                 compareMode === 'split'
                   ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -292,12 +330,12 @@ export default function ResultViewer({
           </div>
         )}
 
-        <div className="flex items-center gap-1 ml-auto">
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0">
           {onImageUpload && (
             <button
               onClick={handleUploadClick}
               title="上传/替换图片"
-              className="p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <Upload className="w-3.5 h-3.5" />
             </button>
@@ -305,7 +343,7 @@ export default function ResultViewer({
           <button
             onClick={() => setZoomMode(zoomMode === '1:1' ? 'fit' : '1:1')}
             title={zoomMode === '1:1' ? '适应屏幕' : '1:1 缩放'}
-            className={`p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+            className={`flex-shrink-0 p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 ${
               zoomMode === '1:1' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : ''
             }`}
           >
@@ -314,7 +352,7 @@ export default function ResultViewer({
           <button
             onClick={toggleFullscreen}
             title="全屏"
-            className={`p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+            className={`flex-shrink-0 p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 ${
               zoomMode === 'fullscreen' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : ''
             }`}
           >
@@ -324,7 +362,7 @@ export default function ResultViewer({
             <button
               onClick={handleOpenOriginal}
               title="在新标签页打开原图"
-              className="p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex-shrink-0 p-1.5 rounded-md transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <ExternalLink className="w-3.5 h-3.5" />
             </button>
@@ -333,7 +371,7 @@ export default function ResultViewer({
             <button
               onClick={handleDownload}
               title={resultImageUrl ? '查看原图' : '下载结果'}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
+              className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{resultImageUrl ? '查看原图' : '下载结果'}</span>
@@ -349,6 +387,7 @@ export default function ResultViewer({
 
       {/* Canvas */}
       <div
+        ref={canvasRef}
         className={`flex-1 min-h-0 relative overflow-hidden bg-gray-100 dark:bg-black ${onImageUpload ? 'cursor-default' : ''}`}
         onDrop={onImageUpload ? handleCanvasDrop : undefined}
         onDragOver={onImageUpload ? handleCanvasDragOver : undefined}
@@ -443,9 +482,26 @@ export default function ResultViewer({
             <img
               src={displaySrc || undefined}
               alt={effectiveViewMode === 'result' ? '生成结果' : '原图'}
-              className={imgContainerClasses}
+              className={`${imgContainerClasses} ${
+                effectiveViewMode === 'result' ? 'cursor-pointer' : ''
+              }`}
               draggable={false}
+              onClick={effectiveViewMode === 'result' ? handleImageClick : undefined}
             />
+          </div>
+        ) : isEmptyState ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-8">
+            <div className="w-full max-w-md">
+              {onImageUpload ? (
+                <ImageUploader
+                  onImageUpload={onImageUpload}
+                  currentImage={null}
+                  label="拖放图片到画布或点击上传"
+                />
+              ) : (
+                <div className="text-center text-gray-400 text-sm">画布为空</div>
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -456,6 +512,46 @@ export default function ResultViewer({
               <div className="h-full bg-white rounded-full animate-pulse" style={{ width: '40%' }} />
             </div>
             <p className="mt-3 text-sm text-white">处理中，请稍候…</p>
+          </div>
+        )}
+
+        {/* 图片点击交互菜单 */}
+        {imageMenu && (
+          <div
+            className="absolute z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 min-w-[160px]"
+            style={{ top: imageMenu.y, left: imageMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-700 dark:text-gray-200"
+              onClick={() => handleMenuClick(toggleFullscreen)}
+            >
+              <Fullscreen className="w-4 h-4" />
+              查看大图
+            </div>
+            <div
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-700 dark:text-gray-200"
+              onClick={() => handleMenuClick(handleDownload)}
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </div>
+            <div
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-700 dark:text-gray-200"
+              onClick={() => handleMenuClick(handleOpenInNewTab)}
+            >
+              <ExternalLink className="w-4 h-4" />
+              在新标签页打开
+            </div>
+            {lastPrompt && (
+              <div
+                className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-gray-700 dark:text-gray-200"
+                onClick={() => handleMenuClick(handleCopyPrompt)}
+              >
+                <Copy className="w-4 h-4" />
+                复制提示词
+              </div>
+            )}
           </div>
         )}
 

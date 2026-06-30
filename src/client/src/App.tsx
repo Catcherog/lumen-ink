@@ -46,6 +46,8 @@ export default function App() {
     uploadImage,
     submitEdit,
     restoreFromHistory,
+    viewHistory,
+    deleteHistory,
     setTool,
     setProvider,
     setModel,
@@ -313,6 +315,7 @@ export default function App() {
                 isLoading={state.isLoading}
                 onImageUpload={uploadImage}
                 lastCallMeta={state.lastCallMeta}
+                lastPrompt={state.history.length > 0 ? state.history[state.history.length - 1].prompt : null}
               />
 
               {/* Mobile right panel drawer */}
@@ -340,6 +343,8 @@ export default function App() {
                         onSubmit={submitEdit}
                         onSelectTemplate={handleSelectTemplate}
                         onRestoreHistory={restoreFromHistory}
+                        onViewHistory={viewHistory}
+                        onDeleteHistory={deleteHistory}
                         externalPrompt={templatePrompt}
                         onPromptConsumed={handlePromptConsumed}
                         onPromptChange={handlePromptChange}
@@ -359,6 +364,8 @@ export default function App() {
                 onSubmit={submitEdit}
                 onSelectTemplate={handleSelectTemplate}
                 onRestoreHistory={restoreFromHistory}
+                onViewHistory={viewHistory}
+                onDeleteHistory={deleteHistory}
                 externalPrompt={templatePrompt}
                 onPromptConsumed={handlePromptConsumed}
                 onPromptChange={handlePromptChange}

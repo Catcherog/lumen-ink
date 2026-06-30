@@ -85,6 +85,43 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         currentMimeType: action.payload.entry.resultMimeType || 'image/png',
         history: state.history.slice(0, action.payload.index),
       };
+    case 'VIEW_HISTORY': {
+      // 仅切换当前查看的图片，不修改 history 数组
+      return {
+        ...state,
+        currentImage: action.payload.entry.resultImage || null,
+        currentImageUrl: action.payload.entry.resultImageUrl || null,
+        currentMimeType: action.payload.entry.resultMimeType || 'image/png',
+      };
+    }
+    case 'DELETE_HISTORY': {
+      // 删除单条历史，若删除的是当前查看项则切换到最近一条
+      const newHistory = state.history.filter(h => h.id !== action.payload.id);
+      const deletedEntry = state.history.find(h => h.id === action.payload.id);
+      const isCurrentViewed = deletedEntry
+        ? (deletedEntry.resultImage === state.currentImage || deletedEntry.resultImageUrl === state.currentImageUrl)
+        : false;
+      let newCurrentImage = state.currentImage;
+      let newCurrentImageUrl = state.currentImageUrl;
+      let newCurrentMimeType = state.currentMimeType;
+      if (isCurrentViewed && newHistory.length > 0) {
+        const latest = newHistory[newHistory.length - 1];
+        newCurrentImage = latest.resultImage || null;
+        newCurrentImageUrl = latest.resultImageUrl || null;
+        newCurrentMimeType = latest.resultMimeType || 'image/png';
+      } else if (isCurrentViewed) {
+        newCurrentImage = state.originalImage;
+        newCurrentImageUrl = null;
+        newCurrentMimeType = state.originalMimeType;
+      }
+      return {
+        ...state,
+        history: newHistory,
+        currentImage: newCurrentImage,
+        currentImageUrl: newCurrentImageUrl,
+        currentMimeType: newCurrentMimeType,
+      };
+    }
     case 'LOAD_HISTORY':
       return { ...state, history: action.payload };
     case 'SET_TOOL':
@@ -253,6 +290,14 @@ export default function useEditor() {
     });
   }, []);
 
+  const viewHistory = useCallback((entry: HistoryEntry) => {
+    dispatch({ type: 'VIEW_HISTORY', payload: { entry } });
+  }, []);
+
+  const deleteHistory = useCallback((id: string) => {
+    dispatch({ type: 'DELETE_HISTORY', payload: { id } });
+  }, []);
+
   const importExternalResult = useCallback((data: { base64: string; mimeType: string; prompt: string }) => {
     const newHistoryEntry: HistoryEntry = {
       id: Date.now().toString(),
@@ -289,6 +334,8 @@ export default function useEditor() {
     setModel,
     submitEdit,
     restoreFromHistory,
+    viewHistory,
+    deleteHistory,
     setReferenceImages,
     setTool,
     setProvider,

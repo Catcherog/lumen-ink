@@ -207,4 +207,6 @@ export type EditorAction =
   | { type: 'LOAD_HISTORY'; payload: HistoryEntry[] }
   | { type: 'SET_TOOL'; payload: RetouchTool }
   | { type: 'SET_PROVIDER'; payload: string | null }
-  | { type: 'SET_SHOW_API_SETTINGS'; payload: boolean };
+  | { type: 'SET_SHOW_API_SETTINGS'; payload: boolean }
+  | { type: 'VIEW_HISTORY'; payload: { entry: HistoryEntry } }
+  | { type: 'DELETE_HISTORY'; payload: { id: string } };

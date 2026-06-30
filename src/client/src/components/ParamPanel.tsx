@@ -29,6 +29,8 @@ interface ParamPanelProps {
   }) => void;
   onSelectTemplate?: (prompt: string) => void;
   onRestoreHistory?: (entry: HistoryEntry, index: number) => void;
+  onViewHistory?: (entry: HistoryEntry) => void;
+  onDeleteHistory?: (id: string) => void;
   externalPrompt?: string;
   onPromptConsumed?: () => void;
   onPromptChange?: (prompt: string) => void;
@@ -41,6 +43,8 @@ export default function ParamPanel({
   onSubmit,
   onSelectTemplate,
   onRestoreHistory,
+  onViewHistory,
+  onDeleteHistory,
   externalPrompt,
   onPromptConsumed,
   onPromptChange,
@@ -129,6 +133,8 @@ export default function ParamPanel({
             <HistoryPanel
               history={state.history}
               onRestore={onRestoreHistory}
+              onView={onViewHistory}
+              onDelete={onDeleteHistory}
               currentImage={state.currentImage}
               currentImageUrl={state.currentImageUrl}
             />
