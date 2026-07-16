@@ -70,6 +70,18 @@ const secretPatterns = [
   /Authorization:\s*Bearer\s+[A-Za-z0-9._-]{16,}/i,
 ];
 
+const textExtensions = new Set([
+  '.md',
+  '.json',
+  '.txt',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.mjs',
+  '.yml',
+  '.yaml',
+]);
+
 // 只检查将被提交到仓库的文件（git 跟踪文件 + 未被 .gitignore 排除的新文件）
 // 这样本地运行与 CI 行为一致，不会误报已被 .gitignore 排除的本地敏感文件
 let committableFiles;
@@ -94,7 +106,9 @@ function walk(dir) {
       if (committableFiles && !committableFiles.has(rel)) continue;
       if (forbiddenNames.some((check) => check(entry.name))) errors.push(`Forbidden filename: ${rel}`);
       const ext = path.extname(entry.name).toLowerCase();
-      if (['.md', '.json', '.txt', '.ts', '.tsx', '.js', '.mjs', '.yml', '.yaml'].includes(ext)) {
+      const isEnvTemplate = /^\.env\.(example|sample|template)$/i.test(entry.name);
+      const shouldScanContent = textExtensions.has(ext) || isEnvTemplate;
+      if (shouldScanContent) {
         const text = fs.readFileSync(full, 'utf8');
         for (const pattern of secretPatterns) {
           if (pattern.test(text)) errors.push(`Possible secret in ${rel}: ${pattern}`);

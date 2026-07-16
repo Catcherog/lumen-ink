@@ -4,7 +4,7 @@
 
 - **任务 ID**: REPO-SEC-001
 - **提出者**: GPT
-- **状态**: ready_for_trae
+- **状态**: awaiting_gpt_acceptance
 - **日期**: 2026-07-16
 - **优先级**: 阻断合并（高于 BASE-001）
 

@@ -34,6 +34,9 @@ cloudbaserc.json
 # Provider 本地数据
 src/server/data/
 
+# .trae/knowledge 含用户画像和内部经营数据，不提交到公开仓库
+/.trae/knowledge/
+
 # 协作包临时文件（不应提交到仓库）
 _lumen-v12-extract/
 *.zip
