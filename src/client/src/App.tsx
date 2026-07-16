@@ -101,7 +101,7 @@ export default function App() {
     };
   }, [token]);
 
-  const loadProviders = async () => {
+  const loadProviders = useCallback(async () => {
     if (!token) return;
     try {
       const res = await axios.get('/api/providers');
@@ -110,11 +110,23 @@ export default function App() {
     } catch (err: unknown) {
       dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
     }
-  };
+  }, [token, dispatch]);
 
   useEffect(() => {
-    loadProviders();
-  }, [token]);
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.get('/api/providers');
+        if (cancelled) return;
+        setProviders(Array.isArray(res.data) ? res.data : []);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, dispatch]);
 
   const prevShowApiSettings = useRef(state.showApiSettings);
   useEffect(() => {
@@ -122,7 +134,7 @@ export default function App() {
       loadProviders();
     }
     prevShowApiSettings.current = state.showApiSettings;
-  }, [state.showApiSettings]);
+  }, [state.showApiSettings, loadProviders]);
 
   // Auto-select default/first enabled provider when list or selection changes
   const prevDefaultRef = useRef<string | null>(null);

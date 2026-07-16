@@ -5,6 +5,9 @@ import { OpenAIProvider } from './OpenAIProvider.js';
 import { GeminiProvider } from './GeminiProvider.js';
 import { SeedreamProvider } from './SeedreamProvider.js';
 import type { ProviderConfig, ProviderType } from 'shared/types.js';
+import { getProviderOperationType } from './operationType.js';
+
+export { getProviderOperationType };
 
 function createProvider(config: ProviderConfig): ImageProvider {
   switch (config.type) {
@@ -34,30 +37,4 @@ export function getProvider(providerId?: string): ImageProvider | null {
     return null;
   }
   return createProvider(config);
-}
-
-export function getProviderOperationType(
-  type: ProviderType,
-  model: string
-): 'generate' | 'edit' | 'chat' {
-  switch (type) {
-    case 'glm':
-      if (model === 'cogview-4-250304' || model === 'glm-image') return 'generate';
-      if (model === 'glm-4.6v') return 'chat';
-      return 'generate';
-    case 'openai':
-      if (model === 'gpt-image-2') return 'edit';
-      if (model.startsWith('dall-e') || model.startsWith('gpt-image')) return 'generate';
-      return 'chat';
-    case 'gemini':
-      // Gemini 图像模型同时支持生成和编辑，统一走 edit 路径（有图片则编辑，无图片则生成）
-      return 'edit';
-    case 'seedream':
-      // Seedream 统一走 edit 路径（有图片则编辑，无图片则生成）
-      return 'edit';
-    case 'jimeng':
-    case 'custom':
-    default:
-      return 'edit';
-  }
 }
