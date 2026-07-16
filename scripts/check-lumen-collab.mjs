@@ -50,8 +50,18 @@ if (state) {
   }
 }
 
-// .env.example 是安全的模板文件，不应禁止；只禁止真实的 .env 文件
-const forbiddenNames = [/^\.env$/i, /providers\.json$/i, /private.*key/i];
+// .env* 检查：默认阻止全部 .env*，只允许明确模板文件
+// 允许：.env.example、.env.sample、.env.template
+// 拒绝：.env、.env.local、.env.production、.env.development 及其他 .env.*
+const forbiddenNames = [
+  (name) => {
+    const isEnvFile = /^\.env(?:\..+)?$/i.test(name);
+    const isAllowedTemplate = /^\.env\.(example|sample|template)$/i.test(name);
+    return isEnvFile && !isAllowedTemplate;
+  },
+  (name) => /providers\.json$/i.test(name),
+  (name) => /private.*key/i.test(name),
+];
 const secretPatterns = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\bsk-[A-Za-z0-9_-]{20,}\b/,
@@ -82,7 +92,7 @@ function walk(dir) {
     } else {
       // 在 git 仓库中，只检查将被提交的文件
       if (committableFiles && !committableFiles.has(rel)) continue;
-      if (forbiddenNames.some((p) => p.test(entry.name))) errors.push(`Forbidden filename: ${rel}`);
+      if (forbiddenNames.some((check) => check(entry.name))) errors.push(`Forbidden filename: ${rel}`);
       const ext = path.extname(entry.name).toLowerCase();
       if (['.md', '.json', '.txt', '.ts', '.tsx', '.js', '.mjs', '.yml', '.yaml'].includes(ext)) {
         const text = fs.readFileSync(full, 'utf8');

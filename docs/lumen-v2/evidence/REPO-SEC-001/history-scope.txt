@@ -1,0 +1,87 @@
+History Scope Analysis | REPO-SEC-001
+=======================================
+Audit Date: 2026-07-16
+Auditor: Trae
+Scope: Git history exposure of .trae/knowledge/ files
+
+==============================================
+1. COMMIT HISTORY
+==============================================
+
+Total commits touching .trae/knowledge/: 1
+
+Commit: b53ac1a
+Message: "Initial commit: GLM image editor with React frontend and Express backend"
+Files affected: All 25 files under .trae/knowledge/ were added in this single commit.
+
+No subsequent commits modified or deleted these files.
+
+==============================================
+2. BRANCH EXPOSURE
+==============================================
+
+Branches containing the commit:
+  - main (default branch)
+  - Any branches forked from main after b53ac1a
+
+The initial commit is the root commit of the repository.
+All branches descended from this commit contain the knowledge files.
+
+==============================================
+3. FILES REQUIRING HISTORY CLEANUP
+==============================================
+
+Only the 2 PRIVATE_REMOVE files need history cleanup if GPT decides
+to purge them from git history:
+
+  1. .trae/knowledge/preference/preference-用户画像与偏好档案-20260514.md
+  2. .trae/knowledge/workflow/workflow-长期任务清单-Action-Items-20260514.md
+
+The other 23 files are classified PUBLIC_SAFE and do not require
+history cleanup.
+
+==============================================
+4. CLEANUP OPTIONS (for GPT decision)
+==============================================
+
+Option A: No history rewrite (recommended if no secrets found)
+  - Applicable because: No secrets/credentials found.
+  - Steps:
+    1. git rm --cached <2 PRIVATE_REMOVE files>
+    2. Add /.trae/knowledge/ to .gitignore
+    3. Commit the removal
+  - Risk: Old commit b53ac1a still contains the 2 files in history.
+    Since they contain only internal business planning (not credentials),
+    this risk is LOW.
+  - Advantage: No hash rewriting, no force-push, no coordination needed.
+
+Option B: Targeted history rewrite with git-filter-repo
+  - Applicable if GPT decides historical exposure is unacceptable.
+  - Steps:
+    1. Install git-filter-repo
+    2. git filter-repo --path <file1> --path <file2> --invert-paths
+    3. Force-push all refs
+    4. Coordinate with all clones/forks to re-clone
+  - Risk: Hash changes, requires force-push, all existing clones
+    must re-clone or clean. Old content may persist in GitHub caches.
+  - Note: Even after rewrite, GitHub may retain cached content.
+    Contact GitHub Support if complete removal is required.
+
+==============================================
+5. RECOMMENDATION
+==============================================
+
+Since no secrets or credentials were found, and the 2 PRIVATE_REMOVE
+files contain only internal business planning data (not customer PII
+or financial records), Option A is sufficient.
+
+The 23 PUBLIC_SAFE files can remain in history without concern.
+
+==============================================
+6. ADDITIONAL EXPOSURE NOTES
+==============================================
+
+- No GitHub PRs reference these files (repo is newly initialized).
+- No forks exist at time of audit (repo is private or newly public).
+- No GitHub Actions cache or artifacts reference knowledge files.
+- The 2 Bilibili URLs in reference files are public content, not sensitive.
