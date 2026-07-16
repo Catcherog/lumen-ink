@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "project": "lumen-ink-v2",
+  "repository": "https://github.com/Catcherog/lumen-ink.git",
+  "defaultBranch": "main",
+  "phase": "engineering-baseline",
+  "currentTask": "BASE-001",
+  "activeTaskPath": "docs/lumen-v2/tasks/active/BASE-001.md",
+  "status": "ready_for_trae",
+  "nextActor": "trae",
+  "lastAcceptedTask": "SCAN-001",
+  "latestTraeReport": "docs/lumen-v2/tasks/completed/SCAN-001-main-repo-report.md",
+  "latestGptReview": "docs/lumen-v2/reviews/SCAN-001-GPT-REVIEW.md",
+  "productionV2Flag": "off",
+  "lastUpdatedAt": "2026-07-16",
+  "lastUpdatedBy": "gpt",
+  "requiredReads": [
+    "AGENTS.md",
+    "docs/lumen-v2/state/STATE.json",
+    "docs/lumen-v2/state/PROJECT-MEMORY.md",
+    "docs/lumen-v2/state/DECISION-LOG.md",
+    "docs/lumen-v2/tasks/active/BASE-001.md",
+    "docs/lumen-v2/state/SESSION-HANDOFF.md"
+  ],
+  "blockedTasks": [
+    "UI-001",
+    "FLOW-001",
+    "STORAGE-001",
+    "VERSION-001",
+    "JOB-001"
+  ],
+  "publicRepoSafety": "required"
+}

@@ -1,0 +1,8 @@
+GPT 新窗口：
+请读取公开仓库 <REPO_URL> 的默认分支，并严格执行 docs/lumen-v2/prompts/NEW-WINDOW-GPT.md。本窗口不使用旧聊天记忆，只以仓库为准。
+
+Trae 新窗口：
+请在当前仓库根目录严格执行 docs/lumen-v2/prompts/NEW-WINDOW-TRAE.md。本窗口不使用旧聊天记忆，只以仓库为准。
+
+用户总控：
+请读取公开仓库 <REPO_URL> 的 AGENTS.md、docs/lumen-v2/state/STATE.json 和 docs/lumen-v2/CURRENT-TASK.md，告诉我现在应由谁执行，并引用对应启动词路径。

@@ -1,0 +1,103 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+
+const root = process.cwd();
+const statePath = path.join(root, 'docs/lumen-v2/state/STATE.json');
+const errors = [];
+
+function exists(rel) {
+  return fs.existsSync(path.join(root, rel));
+}
+
+if (!exists('AGENTS.md')) errors.push('Missing AGENTS.md');
+if (!fs.existsSync(statePath)) errors.push('Missing docs/lumen-v2/state/STATE.json');
+
+let state;
+try {
+  state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+} catch (error) {
+  errors.push(`STATE.json is invalid JSON: ${error.message}`);
+}
+
+if (state) {
+  const statuses = new Set([
+    'ready_for_trae',
+    'awaiting_gpt_acceptance',
+    'changes_requested',
+    'awaiting_user_decision',
+    'blocked',
+    'complete',
+  ]);
+  const actors = new Set(['trae', 'gpt', 'user', 'none']);
+  if (!statuses.has(state.status)) errors.push(`Invalid status: ${state.status}`);
+  if (!actors.has(state.nextActor)) errors.push(`Invalid nextActor: ${state.nextActor}`);
+  if (!state.currentTask) errors.push('STATE.currentTask is required');
+  if (!state.activeTaskPath || !exists(state.activeTaskPath)) {
+    errors.push(`Active task file does not exist: ${state.activeTaskPath}`);
+  }
+  if ((state.status === 'ready_for_trae' || state.status === 'changes_requested') && state.nextActor !== 'trae') {
+    errors.push(`${state.status} requires nextActor=trae`);
+  }
+  if (state.status === 'awaiting_gpt_acceptance' && state.nextActor !== 'gpt') {
+    errors.push('awaiting_gpt_acceptance requires nextActor=gpt');
+  }
+  if (state.status === 'awaiting_gpt_acceptance' && (!state.latestTraeReport || !exists(state.latestTraeReport))) {
+    errors.push('awaiting_gpt_acceptance requires an existing latestTraeReport');
+  }
+  if (state.status === 'awaiting_user_decision' && state.nextActor !== 'user') {
+    errors.push('awaiting_user_decision requires nextActor=user');
+  }
+}
+
+// .env.example 是安全的模板文件，不应禁止；只禁止真实的 .env 文件
+const forbiddenNames = [/^\.env$/i, /providers\.json$/i, /private.*key/i];
+const secretPatterns = [
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bghp_[A-Za-z0-9]{30,}\b/,
+  /Authorization:\s*Bearer\s+[A-Za-z0-9._-]{16,}/i,
+];
+
+// 只检查将被提交到仓库的文件（git 跟踪文件 + 未被 .gitignore 排除的新文件）
+// 这样本地运行与 CI 行为一致，不会误报已被 .gitignore 排除的本地敏感文件
+let committableFiles;
+try {
+  const tracked = execSync('git ls-files', { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+  const untracked = execSync('git ls-files --others --exclude-standard', { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+  committableFiles = new Set([...tracked, ...untracked]);
+} catch {
+  // 不在 git 仓库中时回退到扫描所有文件
+  committableFiles = null;
+}
+
+function walk(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (['.git', 'node_modules', 'dist', 'build'].includes(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    const rel = path.relative(root, full).replaceAll('\\', '/');
+    if (entry.isDirectory()) {
+      walk(full);
+    } else {
+      // 在 git 仓库中，只检查将被提交的文件
+      if (committableFiles && !committableFiles.has(rel)) continue;
+      if (forbiddenNames.some((p) => p.test(entry.name))) errors.push(`Forbidden filename: ${rel}`);
+      const ext = path.extname(entry.name).toLowerCase();
+      if (['.md', '.json', '.txt', '.ts', '.tsx', '.js', '.mjs', '.yml', '.yaml'].includes(ext)) {
+        const text = fs.readFileSync(full, 'utf8');
+        for (const pattern of secretPatterns) {
+          if (pattern.test(text)) errors.push(`Possible secret in ${rel}: ${pattern}`);
+        }
+      }
+    }
+  }
+}
+walk(root);
+
+if (errors.length) {
+  console.error('Lumen collaboration check failed:');
+  for (const error of errors) console.error(`- ${error}`);
+  process.exit(1);
+}
+console.log('Lumen collaboration state and basic public-repo safety checks passed.');

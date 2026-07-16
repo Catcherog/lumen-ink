@@ -33,3 +33,7 @@ cloudbaserc.json
 
 # Provider 本地数据
 src/server/data/
+
+# 协作包临时文件（不应提交到仓库）
+_lumen-v12-extract/
+*.zip

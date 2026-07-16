@@ -1,0 +1,8 @@
+{
+  "repositoryUrl": "https://github.com/Catcherog/lumen-ink.git",
+  "defaultBranch": "main",
+  "projectRoot": ".",
+  "collaborationRoot": "docs/lumen-v2",
+  "productionBranchProtected": true,
+  "notes": "合入仓库后将 repositoryUrl 替换为实际公开地址。"
+}

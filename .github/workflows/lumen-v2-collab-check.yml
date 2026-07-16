@@ -1,0 +1,28 @@
+name: Lumen V2 collaboration check
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'docs/lumen-v2/**'
+      - 'scripts/check-lumen-collab.mjs'
+      - '.github/workflows/lumen-v2-collab-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'AGENTS.md'
+      - 'docs/lumen-v2/**'
+      - 'scripts/check-lumen-collab.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-collaboration-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node scripts/check-lumen-collab.mjs
