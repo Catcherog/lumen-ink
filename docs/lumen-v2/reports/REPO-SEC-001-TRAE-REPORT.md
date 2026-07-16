@@ -68,7 +68,7 @@ if (shouldScanContent) {
 
 **验证**：
 - 测试项 1：安全 `.env.example` 通过（exit=0）
-- 测试项 2：含模拟 `sk-test-fake-key-1234567890abcdef` 的 `.env.example` 被拦截（exit=1）
+- 测试项 2：含模拟 `sk-test-fake-key-[REDACTED]` 的 `.env.example` 被拦截（exit=1）
 
 ### 2.2 STATE-CONSISTENCY-01：active task 状态错误
 
@@ -119,7 +119,7 @@ git rm --cached -- \
 | 8 | 生产代码 diff 为空 | PASS | changed_prod_files=[] |
 | 9 | BASE-001 仍未启动 | PASS | blocked=True, currentTask=REPO-SEC-001 |
 
-模拟密钥：`sk-test-fake-key-1234567890abcdef`（明确无效的测试字符串，非真实凭据）
+模拟密钥：`sk-test-fake-key-[REDACTED]`（明确无效的测试字符串，非真实凭据，实际测试中使用 28 字符的模拟 sk- 前缀字符串）
 
 ## 5. 原始审计结论（首轮，仍有效）
 

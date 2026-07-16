@@ -50,4 +50,4 @@ Results: 9/9 passed, 0 failed
 
 ## 模拟密钥说明
 
-测试使用的模拟密钥为 `sk-test-fake-key-1234567890abcdef`，这是明确无效的测试字符串，不是真实凭据。
+测试使用的模拟密钥为 `sk-test-fake-key-[REDACTED]`（实际为 28 字符的 sk- 前缀测试字符串），这是明确无效的测试字符串，不是真实凭据。
