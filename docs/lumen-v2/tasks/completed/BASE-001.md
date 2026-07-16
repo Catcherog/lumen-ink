@@ -194,3 +194,24 @@ npm run build
 3. VERIFY-BLOCK-01：evidence 中 7 条命令退出码（CI 覆盖不在 Trae 权限内）。
 4. ROLLBACK-01：报告第 9 节回滚说明。
 5. DF-RULES-01：基于本地工作区事实（`docs/ai/` 存在但未提交）重新判定。
+
+### 9.5 GPT 复核 → MVP_PASS_WITH_DEBT（2026-07-17, GPT）
+
+- 审查报告：`docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md`（已覆盖 9.2 节的 `MVP_FAIL` 版本）
+- 审查方式：GitHub 远端只读复核
+- 结论：`MVP_PASS_WITH_DEBT`（有条件通过）
+- 返工缺陷复核结果：
+  - EVIDENCE-BLOCK-01 (P0)：已修复
+  - REPORT-BIND-01 (P0)：已修复
+  - VERIFY-BLOCK-01 (P0)：已修复
+  - ROLLBACK-01 (P1)：已修复
+  - DF-RULES-01 (Disputed)：远端事实仍成立，降为流程债务
+- 验收命令结果（全部 EXIT_CODE=0）：client lint 0/0、client typecheck、client 5 tests、server typecheck、server 16 tests、root 21 tests、root build
+- 5 项 P2 / Process 债务清单：
+  - DEBT-REPORT-01：Trae report 前部 13/8 与 evidence 21/16 不一致（Trae 已在落库时修复）
+  - DEBT-REPORT-02：Trae report 返工 docs commit 字段缺 SHA（Trae 已在落库时修复）
+  - DEBT-STATE-01：GPT 称 `latestGptReview` 仍指向 REPO-SEC-001，但仓库现状已指向 BASE-001（Trae 在 SESSION-HANDOFF 记录差异）
+  - DEBT-EVIDENCE-01：evidence 在非 clean 工作区执行、UTF-16/BOM（已登记 TECH_DEBT.md，后续任务遵守 clean checkout + UTF-8）
+  - DF-RULES-01：`docs/ai/` 三个权威文件未提交到远端分支（已登记 TECH_DEBT.md，另建 docs-only 整理任务）
+- 状态处理：`BASE-001` 移至 `tasks/completed/`；`UI-001` 激活至 `tasks/active/`；`STATE.status=ready_for_trae`、`nextActor=trae`、`lastAcceptedTask=BASE-001`、`currentTask=UI-001`；从 `blockedTasks` 移除 UI-001。
+- 任务归档：本文件由 `tasks/active/` 移至 `tasks/completed/BASE-001.md`。

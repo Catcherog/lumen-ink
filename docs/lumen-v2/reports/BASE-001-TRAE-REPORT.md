@@ -11,11 +11,11 @@
 - **分支**: docs/lumen-v2-repo-collaboration
 - **implementation commit**: `a16734301b80891cf06b34e8d32a8ff5bc8f8032` (`feat(lumen-v2): BASE-001 implementation`)
 - **review-target commit（证据执行 commit）**: `a16734301b80891cf06b34e8d32a8ff5bc8f8032`
-- **返工 docs commit**: `docs(lumen-v2): review BASE-001`（本 commit 仅追加 evidence/review/state/handoff 等 docs 文件，不修改 `src/` 生产代码，故验收结果在 docs commit 后保持有效）
+- **返工 docs commit**: `b015531727714102a68d3dd359ed51c82e9cbec6` (`docs(lumen-v2): BASE-001 rework evidence and GPT review landing`，本 commit 仅追加 evidence/review/state/handoff 等 docs 文件，不修改 `src/` 生产代码，故验收结果在 docs commit 后保持有效）
 
 ## 1. 执行摘要
 
-完成工程基线修复：lint 0/0、typecheck 通过、13 个测试通过、build 通过。补充扫描 5 个面板和配置文件。
+完成工程基线修复：lint 0/0、typecheck 通过、21 个测试通过（client 5 + server 16）、build 通过。补充扫描 5 个面板和配置文件。
 
 ## 2. Lint 修复
 
@@ -58,7 +58,7 @@
 - `validateImageFile` 拒绝不支持格式
 - `validateImageFile` 拒绝超过 20MB 的文件
 
-**Server** - `src/server/services/providers/operationType.test.ts`（8 个测试）：
+**Server** - `src/server/services/providers/operationType.test.ts`（16 个测试，2 个文件）：
 - GLM 图像模型返回 `generate`
 - GLM 视觉模型返回 `chat`
 - OpenAI gpt-image-2 返回 `edit`
@@ -66,6 +66,8 @@
 - OpenAI 文本模型返回 `chat`
 - Gemini/Seedream 返回 `edit`
 - 不支持的类型返回 `edit`
+
+> 注：首次实施时报告记为 8 passed (1 file)，evidence 实际执行结果为 16 passed (2 files)。详见第 8.3 节更正说明。
 
 ### 3.4 最小重构
 
@@ -89,8 +91,8 @@
 | `npx tsc --noEmit -p src/client/tsconfig.json` | 通过 |
 | `npm test --prefix src/client` | 5 passed (1 file) |
 | `npx tsc --noEmit -p src/server/tsconfig.json` | 通过 |
-| `npm test --prefix src/server` | 8 passed (1 file) |
-| `npm test` | 13 passed (2 files) |
+| `npm test --prefix src/server` | 16 passed (2 files) |
+| `npm test` | 21 passed (3 files) |
 | `npm run build` | client + server 均成功 |
 
 ## 6. 修改文件清单

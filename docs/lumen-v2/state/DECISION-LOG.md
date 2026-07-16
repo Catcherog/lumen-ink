@@ -19,6 +19,7 @@
 | D-015 | 2026-07-16 | 冻结 | 不允许用伪进度百分比表示生成过程 | 当前无真实阶段数据 | JOB-001 仅展示真实状态 |
 | D-016 | 2026-07-16 | 冻结 | `AppV2` 通过 feature flag 与 Legacy 并存，旧代码暂不删除 | 降低改版回滚风险 | P0 放行后再清理 Legacy |
 | D-017 | 2026-07-16 | 冻结 | REPO-SEC-001 Option A：不重写 Git 历史，仅 `git rm --cached` + `.gitignore` | 未发现真实凭据泄露；2 个 PRIVATE_REMOVE 文件仅含内部经营计划 | 接受旧提交中文件的剩余风险；23 个 PUBLIC_SAFE 文件仍保持跟踪 |
+| D-018 | 2026-07-17 | 冻结 | BASE-001 验收结论 `MVP_PASS_WITH_DEBT`：5 项 P2/Process 债务登记到 `docs/ai/TECH_DEBT.md`，不在 UI-001 顺手修复 | 工程基线 7 条验收命令全部 EXIT_CODE=0；原 P0/P1 缺陷已修复；剩余 P2 债务不阻塞 MVP 推进 | UI-001 阻塞解除；`docs/ai/` 目录未提交到远端分支的问题由独立 docs-only 任务处理；后续任务在 clean checkout 执行验收命令、结果文件统一 UTF-8 |
 
 ## 新增决策格式
 
