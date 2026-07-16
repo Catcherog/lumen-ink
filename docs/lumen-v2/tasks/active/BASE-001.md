@@ -134,7 +134,7 @@ npm run build
 
 ## 8. 完成定义
 
-全部满足才可写“待 GPT 验收”：
+全部满足才可写"待 GPT 验收"：
 
 - lint 0/0；
 - 所有 test 通过；
@@ -143,3 +143,54 @@ npm run build
 - 无可见行为变化；
 - 补充扫描完整；
 - 无真实密钥或客户数据进入提交。
+
+---
+
+## 9. Review History
+
+### 9.1 首次实施 → awaiting_gpt_acceptance（2026-07-16, Trae）
+
+- implementation commit: `a16734301b80891cf06b34e8d32a8ff5bc8f8032`
+- 内容：lint 修复（App.tsx + ManualWorkflowDialog.tsx）、测试基础设施（vitest + client/server/root test 脚本）、5 client + 8 server 测试、提取 `getProviderOperationType` 到 `operationType.ts`、5 面板补充扫描。
+- 报告：`docs/lumen-v2/reports/BASE-001-TRAE-REPORT.md` 第 1-7 节。
+- 状态：`awaiting_gpt_acceptance / nextActor=gpt`。
+
+### 9.2 GPT 验收 → MVP_FAIL（2026-07-16, GPT）
+
+- 审查报告：`docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md`
+- 结论：`MVP_FAIL`
+- 缺陷：
+  - EVIDENCE-BLOCK-01 (P0)：`docs/lumen-v2/evidence/BASE-001/` 缺失，无法复核 lint/typecheck/test/build 执行证据。
+  - REPORT-BIND-01 (P0)：Trae 报告未记录 implementation commit / review-target commit SHA。
+  - VERIFY-BLOCK-01 (P0)：PR checks 未运行 BASE-001 规定的验收命令。
+  - ROLLBACK-01 (P1)：Trae 报告无回滚说明。
+  - DF-RULES-01 (Disputed)：GPT 称 `docs/ai/` 三个文件在当前分支不存在。
+- 状态处理：`changes_requested / nextActor=trae`（中间状态，Trae 接手返工）。
+
+### 9.3 Trae 返工 → awaiting_gpt_acceptance（2026-07-17, Trae）
+
+- 返工内容（仅 docs/evidence，不修改 `src/` 生产代码）：
+  1. 新建 `docs/lumen-v2/evidence/BASE-001/`：README.md（任务元数据 + 环境 + 脱敏声明）、commands.txt（7 条命令清单与退出码）、lint-results.txt、typecheck-results.txt、test-results.txt、build-results.txt（每条命令完整 stdout/stderr + EXIT_CODE）。
+  2. 落库 GPT 审查报告到 `docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md`。
+  3. 更新 `BASE-001-TRAE-REPORT.md`：补 implementation commit / review-target commit / 返工 docs commit SHA（第 8 节返工记录、第 9 节回滚说明、第 10 节 Disputed Finding、第 11 节工作区状态声明、第 12 节完成定义复核）。
+  4. 更新 `STATE.json` 为 `awaiting_gpt_acceptance / nextActor=gpt`，`latestGptReview` 指向新审查报告。
+  5. 更新 `SESSION-HANDOFF.md`、`NEW-WINDOW-GPT.md`。
+- 重新执行 7 条验收命令（review-target commit `a167343`，Windows + Node v22.22.1 + npm 10.9.4），全部 EXIT_CODE=0：
+  - client lint: 0 errors / 0 warnings
+  - client typecheck: 通过
+  - client test: 5 passed (1 file)
+  - server typecheck: 通过
+  - server test: 16 passed (2 files)（更正原报告的 8 passed）
+  - root test: 21 passed (3 files)
+  - root build: client + server 均成功
+- Disputed Finding DF-RULES-01 处理：`docs/ai/` 目录在本地工作区存在但未提交到远端 HEAD `a167343`（属仓库整理任务范围，不在本返工 commit 中提交）；请求 GPT 基于最新事实重新核实。
+- 报告：`docs/lumen-v2/reports/BASE-001-TRAE-REPORT.md` 第 8-12 节。
+- 状态：`awaiting_gpt_acceptance / nextActor=gpt`（等待 GPT 复核）。
+
+### 9.4 待 GPT 复核项
+
+1. EVIDENCE-BLOCK-01：evidence 目录与文件完整性、每条命令输出与 EXIT_CODE。
+2. REPORT-BIND-01：报告任务元数据 commit SHA 绑定。
+3. VERIFY-BLOCK-01：evidence 中 7 条命令退出码（CI 覆盖不在 Trae 权限内）。
+4. ROLLBACK-01：报告第 9 节回滚说明。
+5. DF-RULES-01：基于本地工作区事实（`docs/ai/` 存在但未提交）重新判定。

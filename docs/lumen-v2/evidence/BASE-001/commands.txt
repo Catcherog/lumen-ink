@@ -1,0 +1,57 @@
+# BASE-001 验收命令执行清单
+
+# 执行环境
+# OS: Microsoft Windows NT 10.0.26200.0 (AMD64)
+# Shell: PowerShell 5.1 (Trae IDE terminal)
+# Node: v22.22.1
+# npm: 10.9.4
+# Branch: docs/lumen-v2-repo-collaboration
+# HEAD (review-target): a16734301b80891cf06b34e8d32a8ff5bc8f8032
+# 执行时间: 2026-07-17 01:05 – 01:09 (Asia/Shanghai, UTC+8)
+# 执行者: Trae
+
+# 命令按 GPT 验收报告 "Trae 必须补充" 第 1 节顺序执行。
+# 每条命令的完整 stdout+stderr 输出见对应 *-results.txt 文件，末尾附 EXIT_CODE 标记。
+
+# === Command 1: client lint ===
+npm run lint --prefix src/client
+# EXIT_CODE=0
+# 证据: lint-results.txt
+
+# === Command 2: client typecheck ===
+npx tsc --noEmit -p src/client/tsconfig.json
+# EXIT_CODE=0
+# 证据: typecheck-results.txt (Command 1)
+
+# === Command 3: client test ===
+npm test --prefix src/client
+# EXIT_CODE=0
+# 结果: 5 passed (1 file)
+# 证据: test-results.txt (Command 1)
+
+# === Command 4: server typecheck ===
+npx tsc --noEmit -p src/server/tsconfig.json
+# EXIT_CODE=0
+# 证据: typecheck-results.txt (Command 2)
+
+# === Command 5: server test ===
+npm test --prefix src/server
+# EXIT_CODE=0
+# 结果: 16 passed (2 files)
+# 证据: test-results.txt (Command 2)
+
+# === Command 6: root test (统一执行两端) ===
+npm test
+# EXIT_CODE=0
+# 结果: 21 passed (3 files) = client 5 + server 16
+# 证据: test-results.txt (Command 3)
+
+# === Command 7: root build ===
+npm run build
+# EXIT_CODE=0
+# 结果: client (vite build, 1838 modules) + server (tsc) 均成功
+# 证据: build-results.txt
+
+# === 汇总 ===
+# 7 条命令全部 EXIT_CODE=0
+# 所有验收项通过

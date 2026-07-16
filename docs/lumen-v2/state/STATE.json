@@ -10,9 +10,9 @@
   "nextActor": "gpt",
   "lastAcceptedTask": "REPO-SEC-001",
   "latestTraeReport": "docs/lumen-v2/reports/BASE-001-TRAE-REPORT.md",
-  "latestGptReview": "docs/lumen-v2/reviews/REPO-SEC-001-GPT-REVIEW.md",
+  "latestGptReview": "docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md",
   "productionV2Flag": "off",
-  "lastUpdatedAt": "2026-07-16",
+  "lastUpdatedAt": "2026-07-17",
   "lastUpdatedBy": "trae",
   "requiredReads": [
     "AGENTS.md",
@@ -21,6 +21,8 @@
     "docs/lumen-v2/state/DECISION-LOG.md",
     "docs/lumen-v2/tasks/active/BASE-001.md",
     "docs/lumen-v2/reports/BASE-001-TRAE-REPORT.md",
+    "docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md",
+    "docs/lumen-v2/evidence/BASE-001/README.md",
     "docs/lumen-v2/state/SESSION-HANDOFF.md"
   ],
   "blockedTasks": [
