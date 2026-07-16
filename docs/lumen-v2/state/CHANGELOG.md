@@ -1,6 +1,18 @@
 # 10｜变更日志
 
-## 2026-07-16 — 协作包 1.1
+## 2026-07-16 - REPO-SEC-001 验收通过
+
+- GPT 第二轮验收通过 REPO-SEC-001，解除合并阻断；
+- 修复 SEC-BLOCK-01：`.env` 模板文件显式进入内容扫描；
+- 修复 STATE-CONSISTENCY-01：全部状态文件统一；
+- 修复 REPORT-CONSISTENCY-01：报告记录 commit SHA；
+- 执行 Option A：`git rm --cached` 2 个 PRIVATE_REMOVE 文件 + `.gitignore` 排除 `/.trae/knowledge/`；
+- 9 项返工验证全部通过；
+- REPO-SEC-001 归档至 `tasks/completed/`；
+- BASE-001 激活为 `ready_for_trae`；
+- 尚未修改光砚生产代码。
+
+## 2026-07-16 - 协作包 1.1
 
 - 收录 `SCAN-001` 主仓扫描原文；
 - GPT 验收 SCAN-001 为“通过，带后续约束”；
