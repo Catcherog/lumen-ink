@@ -21,7 +21,9 @@
 | D-017 | 2026-07-16 | 冻结 | REPO-SEC-001 Option A：不重写 Git 历史，仅 `git rm --cached` + `.gitignore` | 未发现真实凭据泄露；2 个 PRIVATE_REMOVE 文件仅含内部经营计划 | 接受旧提交中文件的剩余风险；23 个 PUBLIC_SAFE 文件仍保持跟踪 |
 | D-018 | 2026-07-17 | 冻结 | BASE-001 验收结论 `MVP_PASS_WITH_DEBT`：5 项 P2/Process 债务登记到 `docs/ai/TECH_DEBT.md`，不在 UI-001 顺手修复 | 工程基线 7 条验收命令全部 EXIT_CODE=0；原 P0/P1 缺陷已修复；剩余 P2 债务不阻塞 MVP 推进 | UI-001 阻塞解除；`docs/ai/` 目录未提交到远端分支的问题由独立 docs-only 任务处理；后续任务在 clean checkout 执行验收命令、结果文件统一 UTF-8 |
 | D-019 | 2026-07-17 | 冻结 | UI-001 保留旧 `ParamPanel` 与“应用/提交”按钮作为 FLOW-001 临时兼容区，不提前收敛为单一 CTA | 单一 CTA 依赖 EditRecipe 和面板状态收敛，UI-001 只做外壳；提前假收敛会制造虚假完成状态 | 右侧面板顶部显示临时债务提示条；FLOW-001 负责移除旧按钮并引入“生成预览” |
-| D-020 | 2026-07-17 | 冻结 | V2 任务栏当前所有标签映射到底层同一 `RetouchTool` 占位，不实现真实工具路由 | UI-001 目标为结构外壳，工具路由与参数语义在 FLOW-001 实现；避免为“看起来完成”而添加假状态 | 任务栏点击仅做高亮占位；FLOW-001 为每个任务分配真实工具与配方 |
+| D-020 | 2026-07-17 | 冻结（2026-07-17 P0 返工后修订） | V2 任务栏使用独立 `V2TaskId` 展示选择状态，与底层 `RetouchTool` 解耦；UI-001 不通过标签切换底层工具，真实「任务 → 工具 / Recipe」映射由 FLOW-001 实现 | UI-001 目标为结构外壳，工具路由与参数语义在 FLOW-001 实现；首轮实现让 TaskRail 调用 `setTool` 越界，被 GPT 验收 P0 驳回；返工后引入 `V2TaskId` 解耦 | 任务栏点击仅做 V2 展示高亮，不影响 `state.selectedTool`；ParamPanel 标题保持“修脸”不变；FLOW-001 为每个 V2TaskId 分配真实工具与配方 |
+| D-021 | 2026-07-17 | 冻结 | UI-001 首轮 GPT 验收结论为 `MVP_FAIL`，只返工 2 项关键 P0：顶栏真实入口、任务栏展示态解耦 | commit `9dd2835` 的基线验证与视觉外壳通过，但存在空按钮及越界工具路由/双高亮；PR/CI 缺口降为非阻塞流程提醒 | UI-001 进入 `changes_requested`；FLOW-001 继续阻塞；返工不得提前实现 Recipe 或单一生成 CTA |
+| D-022 | 2026-07-17 | 冻结 | UI-001 P0 返工方案：顶栏对比/导出接入 `ResultViewer` 真实能力 + 任务栏引入 `V2TaskId` 与 `RetouchTool` 解耦 | FIX_PACKET 要求「接入真实能力」+「独立 V2 展示选择状态」；不能用 DOM 查询、伪事件、空回调或“即将支持”弹窗假实现；不能越界改 `selectedTool` | `ResultViewer` 新增受控 `viewMode` props（兼容 Legacy）；`EditorHeader` 新增 `canCompare`/`canExport` 禁用态；`TaskRail` 移除 `setTool` 调用，改用 `V2TaskId`；D-020 同步修订；不实现 FLOW-001 范围内的内容 |
 
 ## 新增决策格式
 

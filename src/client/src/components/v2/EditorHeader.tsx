@@ -16,6 +16,10 @@ interface EditorHeaderProps {
   onCompare?: () => void;
   onExport?: () => void;
   onSettings?: () => void;
+  /** 无原图或无结果时为 false，按钮渲染为禁用态 */
+  canCompare?: boolean;
+  /** 无可导出结果（图片或文本）时为 false，按钮渲染为禁用态 */
+  canExport?: boolean;
 }
 
 export default function EditorHeader({
@@ -26,7 +30,19 @@ export default function EditorHeader({
   onCompare,
   onExport,
   onSettings,
+  canCompare = false,
+  canExport = false,
 }: EditorHeaderProps) {
+  const compareDisabled = !canCompare;
+  const exportDisabled = !canExport;
+
+  const baseBtnClass = (disabled: boolean) =>
+    `flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors ${
+      disabled
+        ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+    }`;
+
   return (
     <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 flex items-center justify-between flex-shrink-0">
       <div className="flex items-center gap-3 min-w-0">
@@ -54,8 +70,10 @@ export default function EditorHeader({
         <button
           type="button"
           onClick={onCompare}
-          title="对比"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          disabled={compareDisabled}
+          aria-disabled={compareDisabled}
+          title={compareDisabled ? '需要原图与生成结果才能对比' : '对比'}
+          className={baseBtnClass(compareDisabled)}
         >
           <Columns className="w-4 h-4" />
           <span className="hidden md:inline">对比</span>
@@ -64,8 +82,10 @@ export default function EditorHeader({
         <button
           type="button"
           onClick={onExport}
-          title="导出"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          disabled={exportDisabled}
+          aria-disabled={exportDisabled}
+          title={exportDisabled ? '暂无可导出的结果' : '导出'}
+          className={baseBtnClass(exportDisabled)}
         >
           <Download className="w-4 h-4" />
           <span className="hidden md:inline">导出</span>

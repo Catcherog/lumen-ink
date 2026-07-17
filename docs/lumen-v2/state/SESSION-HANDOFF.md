@@ -12,7 +12,7 @@
 | SCAN-001 | completed | GPT 已验收 |
 | REPO-SEC-001 | completed | GPT 已验收 |
 | BASE-001 | completed（`MVP_PASS_WITH_DEBT`，2026-07-17） | GPT 已验收 |
-| UI-001 | awaiting_gpt_acceptance（当前任务） | Trae 已实施，待 GPT 验收 |
+| UI-001 | awaiting_gpt_acceptance（第二轮，P0 返工后） | Trae 完成 2 项 P0 返工，待 GPT 二轮验收 |
 | FLOW-001 ~ HARDEN-001 | blocked/backlog | - |
 
 ## 本轮状态
@@ -21,68 +21,96 @@
 - 执行者：Trae
 - 当前任务：`UI-001`
 - 状态：`awaiting_gpt_acceptance / nextActor=gpt`
-- 生产代码状态：**已修改**（新增 V2 外壳相关 `src/` 文件，未改 Provider/API/Prompt/生成逻辑）
+- 生产代码状态：**已修改**（4 个文件改动覆盖在原 V2 外壳 commit 之上）
 
-## 本轮处理摘要：UI-001 V2 工作台外壳实施
+## 本轮处理摘要：UI-001 P0 返工（第二轮）
 
 ### 触发
 
-`BASE-001` 已通过 GPT 验收，`UI-001` 阻塞解除，Trae 在 `lumen/ui-001-trae` 分支实施 V2 工作台外壳。
+GPT 首轮验收结论为 `MVP_FAIL`，状态由 `awaiting_gpt_acceptance` 改为 `changes_requested / nextActor=trae`。`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md` 中 `FIX_PACKET` 列出 2 项 P0：
+
+- `UI001-P0-01`：顶栏“对比/导出”按钮在 `AppV2.tsx` 未传入 `onCompare`/`onExport`，渲染为空入口；
+- `UI001-P0-02`：`TaskRail` 越界调用 `setTool('color'/'remove'/'repair'/'export')`；“项目/人物”共享 `face` 导致双高亮；与 D-020 占位声明矛盾。
 
 ### 实施动作
 
-1. **Feature flag**：
-   - `.env.example` 新增 `VITE_EDITOR_V2=false`；
-   - `src/client/src/main.tsx` 根据 `import.meta.env.VITE_EDITOR_V2 === 'true'` 切换 `App` / `AppV2`。
+1. **UI001-P0-01 修复**：将顶栏对比/导出入口接入 `ResultViewer` 真实能力。
+   - `ResultViewer.tsx`：新增可选 `viewMode` / `onViewModeChange` 受控 props（受控/非受控兼容，Legacy `App.tsx` 行为不变）；
+   - `EditorHeader.tsx`：新增 `canCompare` / `canExport` 可选 props（默认 `false`），按钮根据状态切换 `disabled` / `aria-disabled` / `title`；
+   - `AppV2.tsx`：提升本地 `viewMode` 状态；`handleCompare` 调用 `setViewMode('compare')`；`handleExport` 走 `downloadImage` 或 `window.open`；`canCompare = hasOriginal && !!(resultImage || resultImageUrl)`，`canExport = !!(resultImage || resultImageUrl || resultText)`。
 
-2. **新增 V2 组件**：
-   - `src/client/src/AppV2.tsx`：V2 主布局；
-   - `src/client/src/components/v2/EditorHeader.tsx`：顶栏，展示项目上下文，不展示 Provider/模型/API Key；
-   - `src/client/src/components/v2/TaskRail.tsx`：左侧任务栏，固定文字标签（项目 / 人物 / 色彩 / 清理 / 局部 / 导出）；
-   - `src/client/src/components/v2/ContextPanel.tsx`：右侧 360px 上下文面板容器，复用 `ParamPanel`；
-   - `src/client/src/components/v2/VersionStripPlaceholder.tsx`：底部版本区占位。
+2. **UI001-P0-02 修复**：引入独立的 V2 展示选择状态 `V2TaskId`，与 `RetouchTool` 完全解耦。
+   - `TaskRail.tsx`：新增 `export type V2TaskId = 'project' | 'subject' | 'color' | 'cleanup' | 'local' | 'export'`；Props 改为 `activeTask?` / `onSelectTask?`；高亮判定改为 `active === task.id`；完全移除对 `useEditor` / `setTool` 的调用；
+   - `AppV2.tsx`：移除 `setTool` 解构；`<TaskRail />` 不再传入任何 props（使用内部状态）。
 
-3. **复用与不变**：
-   - 复用 `ResultViewer`、`ImageUploader`、`useEditor`、`ApiSettingsModal`、登录态；
-   - 未修改 Provider、API、Prompt 和生成结果逻辑。
+3. **文档同步**：D-020 修订为反映 `V2TaskId` 解耦事实；本报告及 Trae 报告相关章节同步更新。
 
-4. **临时债务标记**：
-   - `ContextPanel.tsx` 顶部提示条明确标注该区域为 FLOW-001 临时兼容区；
-   - 旧“应用/提交”按钮暂时保留，将在 FLOW-001 收敛为单一“生成预览”操作。
+### 验证
 
-5. **验证**：
-   - `npm run lint --prefix src/client`：0 errors / 0 warnings；
-   - `npm run test --prefix src/client`：1 file, 5 passed；
-   - `npm run test --prefix src/server`：2 files, 16 passed；
-   - `npm run build`：client / server build 均通过。
+- **基线命令**：返工后全部 `EXIT_CODE = 0`：
+  - `npm run lint --prefix src/client`：0 errors / 0 warnings；
+  - `npx tsc --noEmit -p src/client/tsconfig.json`：exit 0；
+  - `npm test --prefix src/client`：5 passed；
+  - `npx tsc --noEmit -p src/server/tsconfig.json`：exit 0；
+  - `npm test --prefix src/server`：16 passed；
+  - `npm test`：21 passed（5 client + 16 server）；
+  - `npm run build`：client + server build 通过；
+  - `node scripts/check-lumen-collab.mjs`：通过。
 
-6. **证据截图**：
-   - `docs/lumen-v2/evidence/UI-001/legacy-1440x900.png`
-   - `docs/lumen-v2/evidence/UI-001/v2-empty-1440x900.png`
-   - `docs/lumen-v2/evidence/UI-001/v2-ready-1440x900.png`
-   - `docs/lumen-v2/evidence/UI-001/v2-ready-1280x800.png`
+- **手工验证**（CDP 连接独立 Chrome 实例注入 dev token）：
+  - **P0-01 EMPTY 状态**：`对比`（`disabled=true`、`title="需要原图与生成结果才能对比"`）、`导出`（`disabled=true`、`title="暂无可导出的结果"`），`设置` / 主题切换 / 退出登录均 `disabled=false`；
+  - **P0-02 单一高亮**：初始 `navActive=['项目']`；点击 `人物` 后 `navActive=['人物']`；点击 `导出` 后 `navActive=['导出']`；任一时刻 `navActive.length === 1`；
+  - **P0-02 不污染底层工具**：在 TaskRail 点击各标签后，ParamPanel 顶部标题保持初始“修脸”，证明 `state.selectedTool` 未被修改。
 
-7. **落库报告与状态**：
-   - 新增 `docs/lumen-v2/reports/UI-001-TRAE-REPORT.md`；
-   - 更新 `STATE.json` 为 `awaiting_gpt_acceptance / nextActor=gpt`；
-   - 更新 `PROJECT-MEMORY.md`、`DECISION-LOG.md`、`CHANGELOG.md`；
-   - `NEW-WINDOW-GPT.md` 为固定模板，无需替换占位符。
+### 重新提交的证据
+
+`docs/lumen-v2/evidence/UI-001/` 下 4 张原始分辨率截图已重新捕获（覆盖首轮版本）：
+
+- `legacy-1440x900.png`（55 KB，Legacy 模式 `VITE_EDITOR_V2=false`）；
+- `v2-empty-1440x900.png`（61 KB，EMPTY 状态，顶栏两按钮 disabled）；
+- `v2-ready-1440x900.png`（194 KB，READY 状态，已上传测试图 + “人物”单高亮）；
+- `v2-ready-1280x800.png`（151 KB，READY 状态，1280×800）。
+
+截图使用脱敏测试图（`src/client/public/test-image.png`），不包含真实客户照片或敏感信息。
+
+### 范围约束遵守
+
+- ✅ 仅修复 2 项 P0，未触碰 P1/P2；
+- ✅ 未提前实现 FLOW-001 的 EditRecipe / 五档参数 / 单一生成 CTA；
+- ✅ 未修改 Provider、API、Prompt、生成结果或存储实现；
+- ✅ 未覆盖或提交工作区中与 UI-001 无关的既有修改（按 `FIX_PACKET.constraints[3]`，本次 commit 仅包含 UI-001 P0 返工相关文件）。
+
+### 落库报告与状态
+
+- 在 `docs/lumen-v2/reports/UI-001-TRAE-REPORT.md` 末尾新增第 10 节「P0 返工记录」；
+- 更新 `STATE.json` 为 `awaiting_gpt_acceptance / nextActor=gpt`；
+- 更新 `PROJECT-MEMORY.md` 第 5/6 节与 `DECISION-LOG.md` D-020；
+- 更新 `CHANGELOG.md` 顶部追加 UI-001 第二轮条目；
+- `NEW-WINDOW-GPT.md` 为固定模板，无需替换占位符。
 
 ### `docs/ai/` 文件本地更新（未纳入本次 commit）
 
-按 DF-RULES-01 债务约束，`docs/ai/` 目录仍由独立 docs-only 任务提交到远端，本次 UI-001 commit 不触碰该目录。
+按 DF-RULES-01 债务约束，`docs/ai/` 目录仍由独立 docs-only 任务提交到远端，本次 UI-001 P0 返工 commit 不触碰该目录。
+
+## GPT 验收结论（首轮）
+
+- 结论：`MVP_FAIL`；完整报告与 FIX_PACKET：`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`。
+- 已通过：4 张视觉证据、7 条基线命令、公开仓库安全扫描、Feature Flag 和主要布局。
+- 仅保留 2 项关键 P0：顶栏“对比/导出”连接真实能力；任务栏展示态与底层 `RetouchTool` 解耦并消除双高亮。
+- PR/CI 缺口为非阻塞流程提醒，不纳入最小返工范围。
+- 上述 2 项 P0 已在本轮全部修复，待 GPT 二轮验收。
 
 ## 下一任务
 
-等待 GPT 验收 UI-001。验收通过后由 GPT 推进 STATE、归档 UI-001、激活 FLOW-001；若驳回则生成 `FIX_PACKET`，Trae 按包修复。
+GPT 二轮验收 UI-001。Trae 在收到结论前不启动 FLOW-001。
 
 ## 当前阻塞
 
-- UI-001 通过前禁止 FLOW-001 及后续所有任务；
+- UI-001 二轮验收通过前禁止 FLOW-001 及后续所有任务；
 - FLOW-001 / STORAGE-001 / VERSION-001 / JOB-001 仍处于 `blockedTasks`。
 
 ## 新窗口启动摘要
 
-UI-001 实施完成，状态推进至 `awaiting_gpt_acceptance / nextActor=gpt`。Trae 已提交报告、证据与状态更新，等待 GPT 审查。
+UI-001 首轮 GPT 验收为 `MVP_FAIL`，状态已改为 `changes_requested / nextActor=trae`。Trae 已按 `UI-001-GPT-REVIEW.md` 中 `FIX_PACKET` 完成全部 2 项 P0 返工并通过基线命令与手工验证，状态推进至 `awaiting_gpt_acceptance / nextActor=gpt`。
 
 启动词见 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md`（固定模板，直接复制给新 GPT 窗口即可）。

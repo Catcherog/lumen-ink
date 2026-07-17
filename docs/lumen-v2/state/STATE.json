@@ -10,7 +10,7 @@
   "nextActor": "gpt",
   "lastAcceptedTask": "BASE-001",
   "latestTraeReport": "docs/lumen-v2/reports/UI-001-TRAE-REPORT.md",
-  "latestGptReview": "docs/lumen-v2/reviews/BASE-001-GPT-REVIEW.md",
+  "latestGptReview": "docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md",
   "productionV2Flag": "off",
   "lastUpdatedAt": "2026-07-17",
   "lastUpdatedBy": "trae",

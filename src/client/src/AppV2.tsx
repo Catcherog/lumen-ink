@@ -10,7 +10,10 @@ import ContextPanel from './components/v2/ContextPanel';
 import VersionStripPlaceholder from './components/v2/VersionStripPlaceholder';
 import useEditor from './hooks/useEditor';
 import { serializeError } from './utils/error';
+import { downloadImage } from './utils/image';
 import type { ProviderConfig } from '../../shared/types';
+
+type ViewMode = 'result' | 'original' | 'compare';
 
 function stripExtension(name: string): string {
   const lastDot = name.lastIndexOf('.');
@@ -23,6 +26,7 @@ export default function AppV2() {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [templatePrompt, setTemplatePrompt] = useState<string | undefined>(undefined);
   const [projectName, setProjectName] = useState('未命名项目');
+  const [viewMode, setViewMode] = useState<ViewMode>('result');
 
   const {
     state,
@@ -32,7 +36,6 @@ export default function AppV2() {
     restoreFromHistory,
     viewHistory,
     deleteHistory,
-    setTool,
     setProvider,
     setModel,
     setShowApiSettings,
@@ -162,6 +165,28 @@ export default function AppV2() {
     setTemplatePrompt(undefined);
   };
 
+  // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
+  const hasOriginal = !!state.originalImage;
+  const hasResult = !!(state.resultImage || state.resultImageUrl || state.resultText);
+  const canCompare = hasOriginal && !!(state.resultImage || state.resultImageUrl);
+  const canExport = hasResult;
+
+  const handleCompare = useCallback(() => {
+    if (!canCompare) return;
+    setViewMode('compare');
+  }, [canCompare]);
+
+  const handleExport = useCallback(() => {
+    if (!canExport) return;
+    // 与 ResultViewer.handleDownload 同源：base64 走 downloadImage，URL 走新标签页
+    if (state.resultImage) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      downloadImage(state.resultImage, state.resultMimeType, `lumen-ink-${timestamp}.png`);
+    } else if (state.resultImageUrl) {
+      window.open(state.resultImageUrl, '_blank');
+    }
+  }, [canExport, state.resultImage, state.resultImageUrl, state.resultMimeType]);
+
   if (!token) {
     return <LoginPage onLogin={handleLogin} />;
   }
@@ -178,13 +203,14 @@ export default function AppV2() {
             onToggleTheme={() => setDarkMode((v) => !v)}
             onLogout={handleLogout}
             onSettings={() => setShowApiSettings(true)}
+            onCompare={handleCompare}
+            onExport={handleExport}
+            canCompare={canCompare}
+            canExport={canExport}
           />
 
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <TaskRail
-              activeTool={state.selectedTool}
-              onToolChange={setTool}
-            />
+            <TaskRail />
 
             <main className="flex-1 min-w-0 min-h-0 relative flex flex-col bg-white dark:bg-gray-900">
               {state.error && (
@@ -208,6 +234,8 @@ export default function AppV2() {
                 onImageUpload={handleImageUpload}
                 lastCallMeta={state.lastCallMeta}
                 lastPrompt={state.history.length > 0 ? state.history[state.history.length - 1].prompt : null}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
               />
             </main>
 

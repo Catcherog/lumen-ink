@@ -1,5 +1,29 @@
 # 10｜变更日志
 
+## 2026-07-17 - UI-001 P0 返工完成（awaiting_gpt_acceptance，第二轮）
+
+- 触发：GPT 首轮验收结论 `MVP_FAIL`，`FIX_PACKET` 列出 2 项 P0：
+  - `UI001-P0-01`：顶栏“对比/导出”按钮在 `AppV2.tsx` 未传入 `onCompare`/`onExport`；
+  - `UI001-P0-02`：`TaskRail` 越界调用 `setTool('color'/'remove'/'repair'/'export')`；“项目/人物”共享 `face` 导致双高亮；
+- UI001-P0-01 修复：`ResultViewer.tsx` 新增受控 `viewMode` props（兼容 Legacy）；`EditorHeader.tsx` 新增 `canCompare`/`canExport` 禁用态；`AppV2.tsx` 提升 `viewMode` 状态并连接 `handleCompare`/`handleExport` 真实能力（`setViewMode('compare')` / `downloadImage` / `window.open`）；
+- UI001-P0-02 修复：`TaskRail.tsx` 引入 `export type V2TaskId = 'project' | 'subject' | 'color' | 'cleanup' | 'local' | 'export'`，与 `RetouchTool` 完全解耦；Props 改为 `activeTask?` / `onSelectTask?`；移除对 `useEditor` / `setTool` 的调用；单一高亮保证（`active === task.id`）；`AppV2.tsx` 移除 `setTool` 解构；
+- 文档同步：D-020 修订为反映 `V2TaskId` 解耦事实；新增 D-022 记录 P0 返工方案；
+- 基线命令重跑：lint 0/0、client typecheck、client test 5 passed、server typecheck、server test 16 passed、root test 21 passed、build 通过、`check-lumen-collab.mjs` 通过；
+- 手工验证（CDP + 独立 Chrome 实例）：EMPTY 状态顶栏两按钮 `disabled=true`；点击 `人物`/`导出` 后 `navActive` 数组长度恒为 1；点击 TaskRail 不影响 `state.selectedTool`；
+- 重新捕获 4 张原始分辨率截图，覆盖首轮版本：`legacy-1440x900.png`（55 KB）、`v2-empty-1440x900.png`（61 KB）、`v2-ready-1440x900.png`（194 KB）、`v2-ready-1280x800.png`（151 KB）；
+- 状态由 `changes_requested / nextActor=trae` 推进至 `awaiting_gpt_acceptance / nextActor=gpt`；
+- 范围约束遵守：仅修 2 项 P0 及直接回归，未提前实现 FLOW-001 范围内的 EditRecipe / 五档参数 / 单一生成 CTA；未修改 Provider/API/Prompt/存储实现；未覆盖工作区中与 UI-001 无关的既有修改。
+
+## 2026-07-17 - UI-001 GPT 首轮验收驳回（MVP_FAIL）
+
+- GPT 审查 commit `9dd28359d5c6386f4833fbcd01870eb617fcdadb`；
+- 4 张视觉证据已复核，7 条基线命令及公开仓库安全扫描均通过；
+- P0 `UI001-P0-01`：顶栏“对比/导出”未连接真实处理器；
+- P0 `UI001-P0-02`：任务栏越界改变底层工具，且“项目/人物”双高亮，与 D-020/报告不一致；
+- PR/CI 缺口降为非阻塞流程提醒，本轮关键验收以本地 commit、7 条命令与安全扫描为准；
+- 新增 `reviews/UI-001-GPT-REVIEW.md` 与 FIX_PACKET；
+- 状态改为 `changes_requested / nextActor=trae`，FLOW-001 继续阻塞。
+
 ## 2026-07-17 - UI-001 实施完成（awaiting_gpt_acceptance）
 
 - Trae 在 `lumen/ui-001-trae` 分支完成 V2 工作台外壳实施；

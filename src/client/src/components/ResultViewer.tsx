@@ -32,6 +32,13 @@ interface ResultViewerProps {
     operationType: string;
   } | null;
   lastPrompt?: string | null; // 最近一次生成的提示词，用于"复制提示词"功能
+  /**
+   * 受控视图模式（V2 顶栏对比入口使用）。
+   * 若提供，则与 `onViewModeChange` 一起接管内部 viewMode；
+   * 未提供时回退到内部 useState，保持 Legacy App.tsx 行为不变。
+   */
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }
 
 type ViewMode = 'result' | 'original' | 'compare';
@@ -49,8 +56,20 @@ export default function ResultViewer({
   onImageUpload,
   lastCallMeta,
   lastPrompt,
+  viewMode: controlledViewMode,
+  onViewModeChange,
 }: ResultViewerProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>('result');
+  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('result');
+  const isControlled = controlledViewMode !== undefined;
+  const viewMode = isControlled ? controlledViewMode : internalViewMode;
+  const setViewMode = (mode: ViewMode) => {
+    if (onViewModeChange) {
+      onViewModeChange(mode);
+    }
+    if (!isControlled) {
+      setInternalViewMode(mode);
+    }
+  };
   const [compareMode, setCompareMode] = useState<CompareMode>('slider');
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [sliderPosition, setSliderPosition] = useState(50);

@@ -6,11 +6,13 @@
 - **任务名**: V2 工作台外壳
 - **执行者**: Trae
 - **实施日期**: 2026-07-17
-- **状态**: awaiting_gpt_acceptance
+- **状态**: awaiting_gpt_acceptance（第二轮，P0 返工后）
 - **仓库**: https://github.com/Catcherog/lumen-ink.git
 - **分支**: `lumen/ui-001-trae`
 - **前置依赖**: BASE-001 已通过 GPT 验收（`MVP_PASS_WITH_DEBT`，2026-07-17）
 - **阻塞关系**: UI-001 通过前禁止 FLOW-001 / STORAGE-001 / VERSION-001 / JOB-001
+- **首轮审查报告**: `docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`（`MVP_FAIL`，2 项 P0）
+- **返工范围**: 仅修复 `FIX_PACKET` 列出的 2 项 P0 及直接回归，未提前实现 FLOW-001
 
 ## 1. 执行摘要
 
@@ -129,7 +131,7 @@ createRoot(document.getElementById('root')!).render(
 
 ## 8. 已知限制与回滚
 
-- 任务栏当前所有项映射到同一底层 `RetouchTool`（`face`），仅用于外壳占位；具体工具路由与参数收敛在 FLOW-001 实现；
+- 任务栏使用独立的 V2 展示选择状态（`V2TaskId`），与底层 `RetouchTool` 解耦；UI-001 不通过标签切换底层工具，真实「任务 → 工具 / Recipe」映射在 FLOW-001 实现；
 - 右侧面板仍为旧 `ParamPanel`，存在“应用/提交”双 CTA，已标记为 FLOW-001 临时债务；
 - 版本区为纯占位，无真实版本数据；
 - 回滚：将 `VITE_EDITOR_V2` 设为 `false` 或删除该变量，即可恢复 Legacy 界面。
@@ -142,3 +144,94 @@ createRoot(document.getElementById('root')!).render(
 - Prompt 构建逻辑
 - 图像生成/编辑结果逻辑
 - `docs/ai/` 目录（按 DF-RULES-01 债务约束，由独立 docs-only 任务处理）
+
+## 10. P0 返工记录（2026-07-17，第二轮）
+
+### 触发
+
+GPT 首轮验收结论 `MVP_FAIL`，`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md` 列出 2 项关键 P0：
+
+- `UI001-P0-01`：顶栏“对比/导出”按钮在 `AppV2.tsx` 未传入 `onCompare`/`onExport`，渲染为空入口；
+- `UI001-P0-02`：`TaskRail` 越界调用 `setTool('color'/'remove'/'repair'/'export')`；“项目/人物”共享 `face` 导致双高亮；与 D-020 占位声明矛盾。
+
+`FIX_PACKET` 约束：仅修 P0 及直接回归，不实现 FLOW-001 的 EditRecipe、五档参数或单一生成 CTA，不修改 Provider/API/Prompt/存储实现。
+
+### UI001-P0-01 修复
+
+**思路**：将顶栏对比/导出入口接入 `ResultViewer` 真实能力，不可用状态用禁用态表达。
+
+- `src/client/src/components/v2/EditorHeader.tsx`：新增 `canCompare` / `canExport` 可选 props（默认 `false`）；按钮根据状态切换 `disabled` / `aria-disabled` / `title`（"需要原图与生成结果才能对比" / "暂无可导出的结果"）；禁用态显示 `text-gray-300 dark:text-gray-600 cursor-not-allowed`。
+- `src/client/src/components/ResultViewer.tsx`：新增可选 `viewMode` / `onViewModeChange` 受控 props；通过 `controlledViewMode !== undefined` 判定受控/非受控，与 Legacy `App.tsx` 行为完全兼容。
+- `src/client/src/AppV2.tsx`：
+  - 提升本地 `viewMode` 状态（`useState<ViewMode>('result')`），同时传给 `EditorHeader` 与 `ResultViewer`；
+  - 计算 `canCompare = hasOriginal && !!(state.resultImage || state.resultImageUrl)`；`canExport = !!(state.resultImage || state.resultImageUrl || state.resultText)`；
+  - `handleCompare`：满足条件时调用 `setViewMode('compare')`；
+  - `handleExport`：`state.resultImage` 走 `downloadImage` 工具（与 `ResultViewer.handleDownload` 同源），`state.resultImageUrl` 走 `window.open`，无结果时直接 return。
+
+**未做**：不调用 DOM 查询、伪事件、空回调或“即将支持”弹窗，符合 `FIX_PACKET` 约束。
+
+### UI001-P0-02 修复
+
+**思路**：引入独立的 V2 展示选择状态 `V2TaskId`，与 `RetouchTool` 完全解耦；保证任一时刻最多一个标签高亮。
+
+- `src/client/src/components/v2/TaskRail.tsx`：
+  - 新增 `export type V2TaskId = 'project' | 'subject' | 'color' | 'cleanup' | 'local' | 'export'`；
+  - `TASKS` 常量定义六个独立 ID，每个 ID 唯一对应一个标签；
+  - Props 从 `activeTool` / `onToolChange` 改为 `activeTask?` / `onSelectTask?`，不再接收 `RetouchTool`；
+  - 内部 `useState<V2TaskId>('project')` 管理非受控态；受控/非受控兼容；
+  - 高亮判定改为 `active === task.id`（任一时刻最多一个匹配）；
+  - 完全移除对 `useEditor` / `setTool` 的调用。
+- `src/client/src/AppV2.tsx`：移除从 `useEditor` 解构出的 `setTool`；`<TaskRail />` 不再传入任何 props（使用内部状态）。
+- `src/client/src/components/v2/ContextPanel.tsx`：仍接收 `state.selectedTool`，但由 V2 `TaskRail` 的点击不再修改该值，ParamPanel 标题保持初始“修脸”不变。
+
+### 文档同步
+
+- `DECISION-LOG.md` D-020 修订为反映新事实：任务栏不再“映射到同一 `RetouchTool`”，而是引入独立 `V2TaskId` 展示层；真实工具路由仍由 FLOW-001 实现。
+- 本报告第 2、3、8 节同步更新以反映 `V2TaskId` 解耦事实。
+
+### 基线命令重跑
+
+返工后全部 `EXIT_CODE = 0`：
+
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
+| `npm test --prefix src/client` | 5 passed |
+| `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
+| `npm test --prefix src/server` | 16 passed |
+| `npm test` | 21 passed（5 client + 16 server） |
+| `npm run build` | client build + server build 通过 |
+| `node scripts/check-lumen-collab.mjs` | 通过 |
+
+### 手工验证
+
+通过 CDP（Chrome DevTools Protocol）连接独立 Chrome 实例注入 dev token 后验证：
+
+- **P0-01 EMPTY 状态**：`document.querySelectorAll('header button')` 返回 `对比`（`disabled=true`、`title="需要原图与生成结果才能对比"`）、`导出`（`disabled=true`、`title="暂无可导出的结果"`）、`设置`（`disabled=false`）、主题切换、退出登录。
+- **P0-02 单一高亮**：
+  - 初始：`navActive = ['项目']`；
+  - 点击 `人物` 后：`navActive = ['人物']`；
+  - 点击 `导出` 后：`navActive = ['导出']`；
+  - 任一时刻 `navActive` 数组长度恒为 1。
+- **P0-02 不污染底层工具**：在 TaskRail 点击各标签后，`ParamPanel` 顶部标题保持初始“修脸”，证明 `state.selectedTool` 未被修改。
+
+### 重新提交的证据
+
+`docs/lumen-v2/evidence/UI-001/` 下 4 张原始分辨率截图已重新捕获（覆盖首轮版本）：
+
+| 文件 | 大小 | 验证 |
+|------|------|------|
+| `legacy-1440x900.png` | 55 KB | Legacy 模式（`VITE_EDITOR_V2=false`） |
+| `v2-empty-1440x900.png` | 61 KB | EMPTY 状态，顶栏两按钮 disabled |
+| `v2-ready-1440x900.png` | 194 KB | READY 状态，已上传测试图 + “人物”单高亮 |
+| `v2-ready-1280x800.png` | 151 KB | READY 状态，1280×800 |
+
+截图使用脱敏测试图（`src/client/public/test-image.png`），不包含真实客户照片或敏感信息。
+
+### 范围约束遵守
+
+- ✅ 仅修复 2 项 P0，未触碰 P1/P2；
+- ✅ 未提前实现 FLOW-001 的 EditRecipe / 五档参数 / 单一生成 CTA；
+- ✅ 未修改 Provider、API、Prompt、生成结果或存储实现；
+- ✅ 未覆盖或提交工作区中与 UI-001 无关的既有修改（按 `FIX_PACKET.constraints[3]`，本次 commit 仅包含 UI-001 P0 返工相关文件）。
