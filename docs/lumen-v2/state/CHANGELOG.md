@@ -1,5 +1,25 @@
 # 10｜变更日志
 
+## 2026-07-17 - UI-001 R2 返工完成（awaiting_gpt_acceptance，第三轮）
+
+- 触发：GPT 二轮验收结论 `MVP_FAIL`，第二轮 `FIX_PACKET` 仅保留 1 项 P0 `UI001-P0-01-R2`：`canExport = !!(resultImage || resultImageUrl || resultText)` 将纯文本结果计为可导出，但 `handleExport` 无 `resultText` 分支，纯文本结果下顶栏“导出”按钮启用却无行为，仍属首轮 `UI001-P0-01` 同类空入口回归；
+- UI001-P0-01-R2 修复（最小方案）：`AppV2.tsx` 删除仅服务于 `canExport` 的 `hasResult` 中间变量，`canExport` 直接定义为 `!!(state.resultImage || state.resultImageUrl)`，与 `handleExport` 实际处理的两个分支 1:1 对齐；`EditorHeader.tsx` 同步 `canExport` JSDoc 注释；
+- 可达性确认：`useEditor.ts` `SET_RESULT` reducer 中 `resultImage` / `resultImageUrl` / `resultText` 三个字段独立赋值，纯文本结果（`response.data.text` 存在、`imageData` / `imageUrl` 为 undefined）时 `resultImage=null` / `resultImageUrl=null` 状态可达；
+- 4 种状态定向验证（EMPTY / 纯文本 / base64 图片 / 图片 URL）：`canExport` 与 `handleExport` 行为完全一致，禁用态下 `if (!canExport) return` 提前退出，启用态下分别走 `downloadImage` / `window.open` 真实路径；
+- 8 条门禁独立重跑均 `EXIT_CODE=0`：client lint 0/0、client typecheck、client test 5 passed、server typecheck、server test 16 passed、root test 21 passed、build 通过、`check-lumen-collab.mjs` 通过；
+- 状态由 `changes_requested / nextActor=trae` 推进至 `awaiting_gpt_acceptance / nextActor=gpt`；
+- 范围约束遵守：仅修 `UI001-P0-01-R2`，未重新扩展已关闭的 `UI001-P0-02`；未提前实现 FLOW-001；未修改 Provider/API/Prompt/存储；未覆盖或提交工作区中与 UI-001 无关的既有修改；
+- 决策日志追加 D-024。
+
+## 2026-07-17 - UI-001 GPT 二轮验收驳回（MVP_FAIL）
+
+- GPT 审查 commit `1f43d1f90844a1f572005f26e3faee05626ebed4`；
+- `UI001-P0-02` 已关闭：`V2TaskId` 与 `RetouchTool` 解耦，单一高亮成立且不再调用 `setTool`；
+- EMPTY 禁用态与图片结果的对比/导出静态路径成立，4 张目标截图复核通过；
+- 独立重跑 8 条门禁均 `EXIT_CODE=0`：client lint/typecheck/5 tests、server typecheck/16 tests、root 21 tests/build、公开仓库扫描；
+- P0 `UI001-P0-01-R2`：纯文本结果会令“导出”按钮启用，但 `handleExport` 没有文本分支，合法状态下仍为空入口；
+- 状态改为 `changes_requested / nextActor=trae`，仅修这一项直接回归；FLOW-001 继续阻塞。
+
 ## 2026-07-17 - UI-001 P0 返工完成（awaiting_gpt_acceptance，第二轮）
 
 - 触发：GPT 首轮验收结论 `MVP_FAIL`，`FIX_PACKET` 列出 2 项 P0：

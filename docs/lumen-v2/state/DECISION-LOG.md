@@ -24,6 +24,8 @@
 | D-020 | 2026-07-17 | 冻结（2026-07-17 P0 返工后修订） | V2 任务栏使用独立 `V2TaskId` 展示选择状态，与底层 `RetouchTool` 解耦；UI-001 不通过标签切换底层工具，真实「任务 → 工具 / Recipe」映射由 FLOW-001 实现 | UI-001 目标为结构外壳，工具路由与参数语义在 FLOW-001 实现；首轮实现让 TaskRail 调用 `setTool` 越界，被 GPT 验收 P0 驳回；返工后引入 `V2TaskId` 解耦 | 任务栏点击仅做 V2 展示高亮，不影响 `state.selectedTool`；ParamPanel 标题保持“修脸”不变；FLOW-001 为每个 V2TaskId 分配真实工具与配方 |
 | D-021 | 2026-07-17 | 冻结 | UI-001 首轮 GPT 验收结论为 `MVP_FAIL`，只返工 2 项关键 P0：顶栏真实入口、任务栏展示态解耦 | commit `9dd2835` 的基线验证与视觉外壳通过，但存在空按钮及越界工具路由/双高亮；PR/CI 缺口降为非阻塞流程提醒 | UI-001 进入 `changes_requested`；FLOW-001 继续阻塞；返工不得提前实现 Recipe 或单一生成 CTA |
 | D-022 | 2026-07-17 | 冻结 | UI-001 P0 返工方案：顶栏对比/导出接入 `ResultViewer` 真实能力 + 任务栏引入 `V2TaskId` 与 `RetouchTool` 解耦 | FIX_PACKET 要求「接入真实能力」+「独立 V2 展示选择状态」；不能用 DOM 查询、伪事件、空回调或“即将支持”弹窗假实现；不能越界改 `selectedTool` | `ResultViewer` 新增受控 `viewMode` props（兼容 Legacy）；`EditorHeader` 新增 `canCompare`/`canExport` 禁用态；`TaskRail` 移除 `setTool` 调用，改用 `V2TaskId`；D-020 同步修订；不实现 FLOW-001 范围内的内容 |
+| D-023 | 2026-07-17 | 冻结 | UI-001 二轮 GPT 验收仍为 `MVP_FAIL`，仅保留 `UI001-P0-01-R2`：统一导出能力判定与 handler 支持类型 | commit `1f43d1f` 已关闭任务栏 P0，8 条门禁全通过；但纯文本结果会启用“导出”而 handler 无文本分支，仍是合法状态下的空入口 | UI-001 回到 `changes_requested / nextActor=trae`；仅修该直接回归，FLOW-001 继续阻塞 |
+| D-024 | 2026-07-17 | 冻结 | UI-001 R2 返工方案：`canExport` 采用 FIX_PACKET 推荐的最小方案，仅当存在 `resultImage` 或 `resultImageUrl` 时启用“导出”；不实现文本导出 | 能力判定必须与 `handleExport` 实际支持类型 1:1 对齐；实现文本导出会越界扩展 UI-001 范围（UI-001 只做外壳，文本导出能力属于后续任务） | `AppV2.tsx` 删除 `hasResult`，`canExport = !!(state.resultImage \|\| state.resultImageUrl)`；4 种状态定向验证通过；UI-001 进入 `awaiting_gpt_acceptance / nextActor=gpt`；若后续任务要求支持文本结果导出，需在对应任务规格中显式声明并由该任务实现 |
 
 ## 新增决策格式
 

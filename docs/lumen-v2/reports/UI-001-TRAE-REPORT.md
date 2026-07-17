@@ -6,7 +6,7 @@
 - **任务名**: V2 工作台外壳
 - **执行者**: Trae
 - **实施日期**: 2026-07-17
-- **状态**: awaiting_gpt_acceptance（第二轮，P0 返工后）
+- **状态**: awaiting_gpt_acceptance（第三轮，R2 返工后）
 - **仓库**: https://github.com/Catcherog/lumen-ink.git
 - **分支**: `lumen/ui-001-trae`
 - **前置依赖**: BASE-001 已通过 GPT 验收（`MVP_PASS_WITH_DEBT`，2026-07-17）
@@ -235,3 +235,74 @@ GPT 首轮验收结论 `MVP_FAIL`，`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`
 - ✅ 未提前实现 FLOW-001 的 EditRecipe / 五档参数 / 单一生成 CTA；
 - ✅ 未修改 Provider、API、Prompt、生成结果或存储实现；
 - ✅ 未覆盖或提交工作区中与 UI-001 无关的既有修改（按 `FIX_PACKET.constraints[3]`，本次 commit 仅包含 UI-001 P0 返工相关文件）。
+
+## 11. R2 返工记录（2026-07-17，第三轮）
+
+### 触发
+
+GPT 二轮验收结论 `MVP_FAIL`，`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md` 第二轮 FIX_PACKET 仅保留 1 项 P0：
+
+- `UI001-P0-01-R2`：`canExport` 将 `resultText` 计为可导出（`hasResult = resultImage || resultImageUrl || resultText`，`canExport = hasResult`），但 `handleExport` 只处理 `resultImage` / `resultImageUrl`，无 `resultText` 分支。纯文本结果（由 `useEditor.ts:244` `text: response.data.text` 经 `SET_RESULT` 可达，`resultImage=null` / `resultImageUrl=null`）下顶栏“导出”按钮启用却无行为，仍属首轮 `UI001-P0-01` 的同类空入口回归。
+
+`FIX_PACKET.constraints`：只修 `UI001-P0-01-R2` 及直接回归；不修改 Provider/API/Prompt/存储；不提前实施 FLOW-001；不覆盖或提交工作区中与 UI-001 无关的既有修改；不重新扩展已关闭的 `UI001-P0-02`。
+
+### UI001-P0-01-R2 修复
+
+**思路**：能力判定与 handler 支持的结果类型 1:1 对齐。采用 FIX_PACKET 推荐的最小方案——仅当存在 `resultImage` 或 `resultImageUrl` 时启用“导出”；不实现文本导出（避免越界扩展 UI-001 范围）。
+
+**改动**：
+
+- `src/client/src/AppV2.tsx`（L168-L173）：
+  - 删除仅服务于 `canExport` 的 `hasResult` 中间变量（消除 lint unused 风险）；
+  - `canExport` 直接定义为 `!!(state.resultImage || state.resultImageUrl)`，与 `handleExport` 实际处理的两个分支完全一致；
+  - 在原 `hasResult` 位置补两行注释说明对齐原则，避免后续误把 `resultText` 重新加入判定。
+- `src/client/src/components/v2/EditorHeader.tsx`（L21）：同步 `canExport` 的 JSDoc 注释，从“无可导出结果（图片或文本）时为 false”改为“无可导出图片结果（base64 或 URL）时为 false；纯文本结果不计入”，与代码事实一致。
+
+**未做**：未新增文本导出分支、未触碰 `handleExport` 主体逻辑、未修改 `useEditor` 的 `SET_RESULT` reducer、未修改 `ResultViewer` 内部 `hasResult`（那是局部展示判定，与顶栏导出能力判定互不影响）。
+
+### 4 种状态定向验证
+
+依据 `useEditor.ts` 初始状态（L24-L26：`resultImage/resultImageUrl/resultText` 均为 `null`）与 `SET_RESULT` reducer（L58-L70：三个字段独立赋值），4 种合法结果状态可达，能力判定与 handler 行为 1:1 对齐：
+
+| 状态 | resultImage | resultImageUrl | resultText | canExport | handleExport 行为 | 一致性 |
+|------|-------------|----------------|------------|-----------|-------------------|--------|
+| EMPTY | null | null | null | `false` | `if (!canExport) return` 提前退出 | ✓ 禁用 + 无行为 |
+| 纯文本结果（GLM-4.6v 等） | null | null | `"..."` | `false` | `if (!canExport) return` 提前退出 | ✓ 禁用 + 无行为（修复点） |
+| base64 图片结果 | `"data:..."` | null | 任意 | `true` | `downloadImage(resultImage, ...)` | ✓ 启用 + 真实下载 |
+| 图片 URL 结果 | null | `"https://..."` | 任意 | `true` | `window.open(resultImageUrl, '_blank')` | ✓ 启用 + 真实新标签页 |
+
+按钮渲染层 `EditorHeader.tsx`：`exportDisabled = !canExport`，禁用态 `disabled` / `aria-disabled` / `title="暂无可导出的结果"` / `cursor-not-allowed`，与 `canExport` 同步。纯文本结果下顶栏按钮显示为禁用态，不再出现可点击但无行为的空入口。
+
+### 基线命令重跑（8 条门禁）
+
+全部 `EXIT_CODE = 0`，与 GPT 二轮独立重跑结果一致：
+
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
+| `npm test --prefix src/client` | 1 file / 5 passed |
+| `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
+| `npm test --prefix src/server` | 2 files / 16 passed |
+| `npm test` | 21 passed（5 client + 16 server） |
+| `npm run build` | client `tsc -b && vite build` + server `tsc` 通过 |
+| `node scripts/check-lumen-collab.mjs` | `Lumen collaboration state and basic public-repo safety checks passed.` |
+
+### R2 范围约束遵守
+
+- ✅ 仅修 `UI001-P0-01-R2`，未重新扩展已关闭的 `UI001-P0-02`；
+- ✅ 未修改 Provider、API、Prompt、生成结果或存储实现；
+- ✅ 未提前实现 FLOW-001 的 EditRecipe / 五档参数 / 单一生成 CTA；
+- ✅ 未覆盖或提交工作区中与 UI-001 无关的既有修改（按 `FIX_PACKET.constraints[3]`，本次 commit 仅包含 `AppV2.tsx`、`EditorHeader.tsx` 与 UI-001 状态机推进相关文档）。
+
+### R2 修改文件清单
+
+- `src/client/src/AppV2.tsx` — `canExport` 与 handler 对齐，删除冗余 `hasResult`
+- `src/client/src/components/v2/EditorHeader.tsx` — `canExport` JSDoc 注释同步
+- `docs/lumen-v2/reports/UI-001-TRAE-REPORT.md` — 本节（第 11 节）
+- `docs/lumen-v2/state/STATE.json` — 推进至 `awaiting_gpt_acceptance / nextActor=gpt`
+- `docs/lumen-v2/state/SESSION-HANDOFF.md` — 更新本轮摘要
+- `docs/lumen-v2/state/PROJECT-MEMORY.md` — 更新当前状态
+- `docs/lumen-v2/state/DECISION-LOG.md` — 追加 D-024 决策
+- `docs/lumen-v2/state/CHANGELOG.md` — 追加 R2 返工条目
+- `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` — 固定模板，无需替换占位符

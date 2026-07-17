@@ -1,5 +1,79 @@
 # UI-001 GPT 验收报告
 
+## 第二轮复审（P0 返工后）
+
+- 验收日期：2026-07-17（Asia/Shanghai）
+- 审查分支：`lumen/ui-001-trae`
+- 审查 commit：`1f43d1f90844a1f572005f26e3faee05626ebed4`
+- 结论：`MVP_FAIL`
+- 验收方式：P0 返工 diff 静态审查、4 张原始截图复核、8 条门禁命令独立重跑、结果状态边界复核
+
+### 第二轮验证结果
+
+- [x] `UI001-P0-02`：`TaskRail` 已引入独立 `V2TaskId`，不再引用 `RetouchTool` 或调用 `setTool`；六个标签 ID 唯一，任一时刻最多一个高亮。
+- [x] `UI001-P0-01` 基础路径：EMPTY 状态下“对比/导出”均为禁用态；图片结果路径已连接 `setViewMode('compare')`、`downloadImage` 与 `window.open`。
+- [x] 4 张截图：Legacy 1440×900、V2 EMPTY 1440×900、V2 READY 1440×900、V2 READY 1280×800 已按原始分辨率复核；未见横向溢出，READY 截图为“人物”单高亮。
+- [x] client lint：`EXIT_CODE=0`，0 errors / 0 warnings。
+- [x] client typecheck：`EXIT_CODE=0`。
+- [x] client test：1 file / 5 tests passed。
+- [x] server typecheck：`EXIT_CODE=0`。
+- [x] server test：2 files / 16 tests passed。
+- [x] root test：21 tests passed（client 5 + server 16）。
+- [x] root build：client 与 server 均通过。
+- [x] `node scripts/check-lumen-collab.mjs`：`EXIT_CODE=0`。
+- [ ] `UI001-P0-01` 全结果状态：纯文本结果仍会启用“导出”，但点击没有行为。
+
+### 第二轮 P0 阻塞问题
+
+#### UI001-P0-01-R2：纯文本结果下“导出”仍是空入口
+
+`AppV2.tsx` 将 `canExport` 定义为 `resultImage || resultImageUrl || resultText`，因此现有 GLM 文本结果会使顶栏“导出”按钮启用；但 `handleExport` 仅处理 `resultImage` 与 `resultImageUrl`，没有 `resultText` 分支。该状态可由现有 `useEditor` 的 `response.data.text` 到达，点击按钮会直接结束且没有任何可见行为。
+
+这属于首轮 `UI001-P0-01` 的直接回归：入口在一个合法结果状态下仍呈现为可用但实际为空，不满足“真实能力 + 不可用状态”的最低修复要求。
+
+最低修复要求：能力判定必须与 handler 支持的结果类型完全一致。最小方案是仅在存在 `resultImage` 或 `resultImageUrl` 时启用“导出”；若选择支持文本导出，则必须实现真实文本导出并提供验证证据。不要修改 Provider/API/Prompt/存储，也不要提前实施 FLOW-001。
+
+### 第二轮 FIX_PACKET
+
+```yaml
+packet_type: FIX_PACKET
+task_id: UI-001
+stage: MVP
+review_target: 1f43d1f90844a1f572005f26e3faee05626ebed4
+decision: MVP_FAIL
+fix_scope:
+  - id: UI001-P0-01-R2
+    requirement: 统一顶栏导出能力判定与实际 handler；纯文本结果不得出现可点击但无行为的导出入口。
+verification:
+  - npm run lint --prefix src/client
+  - npx tsc --noEmit -p src/client/tsconfig.json
+  - npm test --prefix src/client
+  - npx tsc --noEmit -p src/server/tsconfig.json
+  - npm test --prefix src/server
+  - npm test
+  - npm run build
+  - node scripts/check-lumen-collab.mjs
+  - 定向验证 EMPTY、纯文本结果、base64 图片结果、图片 URL 结果四种状态下导出按钮的 enabled/disabled 与点击行为一致
+  - 保留任务栏单一高亮且点击不改变底层 RetouchTool 的回归验证
+constraints:
+  - 只修复 UI001-P0-01-R2 及直接回归
+  - 不修改 Provider、API、Prompt、生成结果或存储实现
+  - 不提前实现 FLOW-001 的 EditRecipe、五档参数或单一生成 CTA
+  - 不覆盖或提交当前工作区中与 UI-001 无关的既有修改
+```
+
+### 第二轮裁决与状态处理
+
+- `UI-001` 保持在 `tasks/active/`；
+- `STATE.status` 改为 `changes_requested`；
+- `STATE.nextActor` 改为 `trae`；
+- FLOW-001 及后续任务继续阻塞；
+- `UI001-P0-02` 已关闭，不得重新扩展；Trae 仅处理 `UI001-P0-01-R2` 及直接回归。
+
+---
+
+## 首轮审查记录
+
 - 任务 ID：`UI-001`
 - 验收日期：2026-07-17（Asia/Shanghai）
 - 审查分支：`lumen/ui-001-trae`

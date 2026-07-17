@@ -18,7 +18,7 @@ interface EditorHeaderProps {
   onSettings?: () => void;
   /** 无原图或无结果时为 false，按钮渲染为禁用态 */
   canCompare?: boolean;
-  /** 无可导出结果（图片或文本）时为 false，按钮渲染为禁用态 */
+  /** 无可导出图片结果（base64 或 URL）时为 false，按钮渲染为禁用态；纯文本结果不计入 */
   canExport?: boolean;
 }
 

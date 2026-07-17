@@ -166,10 +166,11 @@ export default function AppV2() {
   };
 
   // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
+  // canExport 必须与 handleExport 支持的结果类型完全一致（仅 base64 / URL），
+  // 纯文本结果（response.data.text）不接入导出 handler，因此不计入 canExport。
   const hasOriginal = !!state.originalImage;
-  const hasResult = !!(state.resultImage || state.resultImageUrl || state.resultText);
   const canCompare = hasOriginal && !!(state.resultImage || state.resultImageUrl);
-  const canExport = hasResult;
+  const canExport = !!(state.resultImage || state.resultImageUrl);
 
   const handleCompare = useCallback(() => {
     if (!canCompare) return;

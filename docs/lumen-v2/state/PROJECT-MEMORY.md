@@ -104,25 +104,25 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] GPT 审核扫描报告并冻结下一阶段决策。
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
-- [ ] `UI-001` V2 外壳（首轮 GPT 验收 `MVP_FAIL` → Trae 完成 2 项 P0 返工，`awaiting_gpt_acceptance / nextActor=gpt`，待二轮验收）。
+- [ ] `UI-001` V2 外壳（三轮 R2 返工完成，`awaiting_gpt_acceptance / nextActor=gpt`；`canExport` 已与 `handleExport` 1:1 对齐，纯文本结果下导出按钮禁用）。
 - [ ] `FLOW-001` 配方和单一操作。
 - [ ] `STORAGE-001` 技术选型。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：UI-001（awaiting_gpt_acceptance，第二轮）
+### 6.1 当前任务：UI-001（awaiting_gpt_acceptance，三轮 R2 返工后）
 
 任务 ID：`UI-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（第二轮，待 GPT 二轮验收）
+状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（三轮 R2 返工完成）
 前置依赖：`BASE-001` 已通过 GPT 验收（`MVP_PASS_WITH_DEBT`，2026-07-17）。
 任务目标：建立可回滚的 V2 工作台外壳（`VITE_EDITOR_V2` feature flag），不改 Provider、API、Prompt 和生成结果；顶栏不显示 Provider/模型；左栏稳定文字标签；右侧 360px 上下文面板容器；底部版本区结构占位；EMPTY 与 READY 布局；1440×900 / 1280×800 可用。
 任务文件：`docs/lumen-v2/tasks/active/UI-001.md`。
 实施分支：`lumen/ui-001-trae`。
-Trae 报告：`docs/lumen-v2/reports/UI-001-TRAE-REPORT.md`（第 10 节为 P0 返工记录）。
+Trae 报告：`docs/lumen-v2/reports/UI-001-TRAE-REPORT.md`（第 10 节为二轮 P0 返工记录，第 11 节为 R2 返工记录）。
 证据目录：`docs/lumen-v2/evidence/UI-001/`（4 张截图已重新捕获）。
-GPT 审查：`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`（首轮 `MVP_FAIL`，2 项 P0）。
-返工实施：顶栏对比/导出接入 `ResultViewer` 真实能力（受控 `viewMode` + `canCompare`/`canExport` 禁用态）；任务栏引入 `V2TaskId` 与 `RetouchTool` 解耦（移除 `setTool` 调用，单一高亮）。7 条基线命令 + 手工验证全部通过。
+GPT 审查：`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`（二轮 `MVP_FAIL`；`UI001-P0-02` 已关闭，仅剩 `UI001-P0-01-R2`）。
+R2 返工事实：`AppV2.tsx` 删除仅服务于 `canExport` 的 `hasResult`，`canExport` 改为 `!!(state.resultImage || state.resultImageUrl)`，与 `handleExport` 1:1 对齐；`EditorHeader.tsx` 同步 JSDoc 注释；4 种合法结果状态（EMPTY / 纯文本 / base64 图片 / 图片 URL）定向验证通过；8 条门禁独立重跑均 `EXIT_CODE=0`。等待 GPT 三轮验收。
 
 #### BASE-001 验收结论摘要
 
@@ -188,7 +188,7 @@ BASE-001 (completed, MVP_PASS_WITH_DEBT, 2026-07-17)
 ### 6.4 当前阻塞
 
 - BASE-001 已通过验收，UI-001 阻塞已解除（`STATE.json.blockedTasks` 现仅列出 FLOW-001 / STORAGE-001 / VERSION-001 / JOB-001）。
-- UI-001 当前为 `awaiting_gpt_acceptance（第二轮）`；Trae 已完成 `UI-001-GPT-REVIEW.md` FIX_PACKET 中 2 项关键 P0 返工；GPT 二轮验收通过前，禁止 FLOW-001 及后续所有任务。
+- UI-001 当前为 `awaiting_gpt_acceptance / nextActor=gpt`（三轮 R2 返工完成）；`UI001-P0-01-R2` 已修复，等待 GPT 三轮验收；GPT 通过验收前，禁止 FLOW-001 及后续所有任务。
 - 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
 - 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 VERSION-001）。
 
