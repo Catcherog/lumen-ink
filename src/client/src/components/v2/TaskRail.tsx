@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import type { ElementType } from 'react';
+import { useState, type ElementType } from 'react';
 import {
   FolderOpen,
   User,
@@ -8,16 +7,20 @@ import {
   ScanFace,
   Download,
 } from 'lucide-react';
+import type { V2TaskId } from '../../../../shared/types';
+import { V2_TASK_META } from '../../../../shared/types';
 
 /**
- * V2 任务栏标签 ID。
+ * V2 任务栏（FLOW-001 起为受控组件）。
  *
- * 注意：这是 V2 展示层独立的选择状态，与底层 `RetouchTool` 解耦。
- * UI-001 仅做结构外壳，真实「任务 → 工具 / Recipe」映射在 FLOW-001 实现。
- * 任意时刻最多一个标签高亮，点击标签不会改变 `state.selectedTool`。
+ * 设计要点（D-020 / D-026）：
+ * - `V2TaskId` 与底层 `RetouchTool` 解耦；点击标签不会改变 `state.selectedTool`。
+ * - 真实「任务 → 工具 / Recipe」映射由 `V2_TASK_TOOL_MAP` 提供，AppV2 在 CTA 触发时使用。
+ * - 任意时刻最多一个标签高亮（由 `activeTask` 唯一决定）。
+ *
+ * 受控使用：父组件传入 `activeTask` + `onSelectTask`。
+ * 非受控兼容：未传 props 时回退到内部 `useState`（用于隔离测试）。
  */
-export type V2TaskId = 'project' | 'subject' | 'color' | 'cleanup' | 'local' | 'export';
-
 interface TaskItem {
   id: V2TaskId;
   label: string;
@@ -25,24 +28,23 @@ interface TaskItem {
 }
 
 const TASKS: TaskItem[] = [
-  { id: 'project', label: '项目', icon: FolderOpen },
-  { id: 'subject', label: '人物', icon: User },
-  { id: 'color', label: '色彩', icon: Palette },
-  { id: 'cleanup', label: '清理', icon: Sparkles },
-  { id: 'local', label: '局部', icon: ScanFace },
-  { id: 'export', label: '导出', icon: Download },
+  { id: 'project', label: V2_TASK_META.project.title, icon: FolderOpen },
+  { id: 'subject', label: V2_TASK_META.subject.title, icon: User },
+  { id: 'color', label: V2_TASK_META.color.title, icon: Palette },
+  { id: 'cleanup', label: V2_TASK_META.cleanup.title, icon: Sparkles },
+  { id: 'local', label: V2_TASK_META.local.title, icon: ScanFace },
+  { id: 'export', label: V2_TASK_META.export.title, icon: Download },
 ];
 
 interface TaskRailProps {
-  /**
-   * 可选的受控选中态。若不传，TaskRail 内部自管理。
-   * 任意时刻仅一个 V2TaskId 高亮，与底层 RetouchTool 无关。
-   */
+  /** 受控选中态；未传时使用内部状态 */
   activeTask?: V2TaskId;
   onSelectTask?: (task: V2TaskId) => void;
 }
 
 export default function TaskRail({ activeTask, onSelectTask }: TaskRailProps) {
+  // 非受控回退：仅在没有受控 props 时启用，保证测试与隔离使用可行。
+  // 受控时该 state 不参与渲染判定（active 优先取 activeTask）。
   const [internalActive, setInternalActive] = useState<V2TaskId>('project');
   const active = activeTask ?? internalActive;
 
@@ -55,7 +57,10 @@ export default function TaskRail({ activeTask, onSelectTask }: TaskRailProps) {
   };
 
   return (
-    <nav className="w-[72px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-3 gap-1 overflow-y-auto">
+    <nav
+      aria-label="V2 任务栏"
+      className="w-[72px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-3 gap-1 overflow-y-auto"
+    >
       {TASKS.map((task) => {
         const Icon = task.icon;
         const isActive = active === task.id;
@@ -65,6 +70,8 @@ export default function TaskRail({ activeTask, onSelectTask }: TaskRailProps) {
             type="button"
             onClick={() => handleClick(task.id)}
             aria-current={isActive ? 'true' : undefined}
+            aria-pressed={isActive}
+            data-v2-task-id={task.id}
             className={`
               w-full flex flex-col items-center justify-center gap-1 px-1 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-inset
               ${isActive

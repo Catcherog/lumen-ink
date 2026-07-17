@@ -1,5 +1,25 @@
 # 10｜变更日志
 
+## 2026-07-17 - FLOW-001 实施完成（awaiting_gpt_acceptance，端到端扩大执行包）
+
+- 触发：UI-001 第三轮 GPT 验收 `MVP_PASS`，FLOW-001 激活为 `ready_for_trae / nextActor=trae`；GPT 指令要求一次完成 EditRecipe、五档参数、Prompt 编译器 v1、单 CTA、`/api/edit` 接线、自动化测试、证据与状态回传，不得拆成 UI/类型/编译器小批次；
+- 实施范围（全部在同一任务 ID / 同一分支 `lumen/flow-001-trae` / 同一 PR 内完成）：
+  - 类型层（`src/shared/types.ts`）：新增 Tier / TIER_ORDER / TIER_LABELS / V2TaskId / V2_TASK_TOOL_MAP（1:1 映射，project=null）/ V2_TASK_EDITABLE / V2_TASK_META / ProtectionItems / PortraitParams / PORTRAIT_PARAM_LABELS / PROTECTION_LABELS / EditRecipe（schemaVersion=1）/ CompiledPrompt（version=1）；
+  - 纯函数模块（`src/client/src/utils/recipe.ts`）：legacyValueToTier（0→off / 1-29→light / 30-59→natural / 60-84→obvious / 85-100→strong）、tierToLegacyValue（off→0 / light→20 / natural→40 / obvious→70 / strong→90）、defaultRecipe（subject/local 启用 natural/light 人像参数，其他任务全 off）、defaultRecipeBook（六任务独立 Recipe）、canSubmitRecipe（project 禁用 / 无图禁用 / loading 禁用）、compilePrompt v1（首行 `# lumen-prompt v1`，次行 `# task=X tool=Y`，含身份锚定/保护/修改/补充要求/参考图/区域/限制七段）；
+  - V2 右栏收敛（`src/client/src/components/v2/ContextPanel.tsx` 完全重写）：删除旧 ParamPanel / PromptInput / "应用" / "提交" 入口与 UI-001 临时债务提示条；新增 RecipePanel 调度器、CompiledPromptPreview（默认折叠只读）、单一"生成预览"主 CTA（`data-cta="generate-preview"`，`aria-label` 动态切换"生成中"/"生成预览"）；`canSubmit = editable && hasCurrentImage && !state.isLoading`；移除 `dispatch` prop（lint unused）；
+  - 任务面板（`src/client/src/components/v2/recipe/`）：TierSelect（五档单选 chip）、ProtectionsPanel（5 项开关）、PortraitPanel（人物，6 五档参数）、LocalPanel（局部，复用人像参数）、ColorPanel（色彩，仅补充要求）、CleanupPanel（清理，仅目标描述）、ExportPanel（导出，jpeg/png/webp + 50-100% 质量）、ProjectPanel（项目，不发起编辑）、RecipePanel（taskId 分派）、CompiledPromptPreview（折叠只读）；
+  - AppV2 接线（`src/client/src/AppV2.tsx`）：提升 `activeTask` + `recipeBook` 状态；`compiled = useMemo(() => compilePrompt(currentRecipe), [currentRecipe])`；`handleGeneratePreview` 闭环（compilePrompt → submitEdit，附 `params.recipe` 与 `params.compiledVersion`）；
+  - TaskRail 改为受控组件（`activeTask` + `onSelectTask`，向后兼容非受控）；
+  - 测试配置：`vite.config.ts` 新增 Vitest（jsdom + globals + setupFiles）；`test-setup.ts` 引入 `@testing-library/jest-dom/vitest`；`package.json` 新增 `@testing-library/react@^16` / `@testing-library/jest-dom@^6` / `@testing-library/user-event@^14` / `jsdom@^25`；
+- 自动化测试：76 client tests（含 59 recipe.test.ts + 17 ContextPanel.test.tsx，覆盖 legacy/tier round-trip、defaultRecipe、canSubmitRecipe、compilePrompt v1 全分支、单 CTA、无隐藏提交入口、project 禁用、loading 状态、任务切换）+ 16 server tests = 92 tests passed，无既有测试回归；
+- 8 条门禁独立重跑全部 `EXIT_CODE=0`：client lint 0/0、client typecheck、client 76 tests、server typecheck、server 16 tests、root 92 tests、build 通过、`check-lumen-collab.mjs` 通过；
+- 范围约束遵守：未实施数据库 / 持久化 / 异步 Job / 不可变版本 / 伪进度；未修改 Provider/API/存储实现；保持 `submitEdit` 签名与 `useEditor` 调用链兼容；完整 Prompt 默认折叠只读；未覆盖或提交工作区中与 FLOW-001 无关的既有修改；
+- 状态由 `ready_for_trae / nextActor=trae` 推进至 `awaiting_gpt_acceptance / nextActor=gpt`；
+- 证据目录：`docs/lumen-v2/evidence/FLOW-001/`（8 条门禁脱敏输出，UTF-8 无 BOM）；
+- 按变更风险驱动验收约定，本轮未重复捕获 UI-001 视觉证据（已冻结）；
+- GPT 验收文档 `docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md` 按契约由 Trae 一并 commit/push；
+- 决策日志追加 D-026（V2_TASK_TOOL_MAP 1:1 映射）与 D-027（编译器 v1 自然语言输出）。
+
 ## 2026-07-17 - UI-001 R2 返工完成（awaiting_gpt_acceptance，第三轮）
 
 - 触发：GPT 二轮验收结论 `MVP_FAIL`，第二轮 `FIX_PACKET` 仅保留 1 项 P0 `UI001-P0-01-R2`：`canExport = !!(resultImage || resultImageUrl || resultText)` 将纯文本结果计为可导出，但 `handleExport` 无 `resultText` 分支，纯文本结果下顶栏“导出”按钮启用却无行为，仍属首轮 `UI001-P0-01` 同类空入口回归；
@@ -33,6 +53,14 @@
 - 重新捕获 4 张原始分辨率截图，覆盖首轮版本：`legacy-1440x900.png`（55 KB）、`v2-empty-1440x900.png`（61 KB）、`v2-ready-1440x900.png`（194 KB）、`v2-ready-1280x800.png`（151 KB）；
 - 状态由 `changes_requested / nextActor=trae` 推进至 `awaiting_gpt_acceptance / nextActor=gpt`；
 - 范围约束遵守：仅修 2 项 P0 及直接回归，未提前实现 FLOW-001 范围内的 EditRecipe / 五档参数 / 单一生成 CTA；未修改 Provider/API/Prompt/存储实现；未覆盖工作区中与 UI-001 无关的既有修改。
+
+## 2026-07-17 - UI-001 第三轮验收通过（MVP_PASS）
+
+- GPT 复核 commit `050c321`，确认 `canExport` 与 `handleExport` 支持类型 1:1 对齐，纯文本结果不再出现可点击空入口；
+- R2 未回改已关闭的任务栏 P0，未提前实施 FLOW-001；
+- 本轮独立重跑 8 条门禁全部 `EXIT_CODE=0`（client 5 tests、server 16 tests、root 21 tests）；
+- UI-001 归档，FLOW-001 激活为 `ready_for_trae / nextActor=trae`；
+- FLOW-001 扩大为同一任务 ID 下的端到端执行包，后续采用变更风险驱动验收以减少无效往返。
 
 ## 2026-07-17 - UI-001 GPT 首轮验收驳回（MVP_FAIL）
 

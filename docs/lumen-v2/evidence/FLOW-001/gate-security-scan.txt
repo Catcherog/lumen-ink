@@ -1,0 +1,9 @@
+﻿node : warning: could not open directory '.trae/skills/gpt-image-edit/': No such file or directory
+At line:15 char:6788
++ ... vscode\ripgrep\bin'; node scripts/check-lumen-collab.mjs 2>&1 | Out-F ...
++                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: could ...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Lumen collaboration state and basic public-repo safety checks passed.
+EXIT=0

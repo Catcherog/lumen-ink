@@ -210,3 +210,138 @@ export type EditorAction =
   | { type: 'SET_SHOW_API_SETTINGS'; payload: boolean }
   | { type: 'VIEW_HISTORY'; payload: { entry: HistoryEntry } }
   | { type: 'DELETE_HISTORY'; payload: { id: string } };
+
+// ===== FLOW-001: EditRecipe / 五档参数 / 保护项 / Prompt 编译器 =====
+
+/**
+ * 五档语义化参数（D-005 决策）。
+ * 旧值 0-100 数值通过 `legacyValueToTier` 映射到本类型。
+ */
+export type Tier = 'off' | 'light' | 'natural' | 'obvious' | 'strong';
+
+export const TIER_ORDER: readonly Tier[] = ['off', 'light', 'natural', 'obvious', 'strong'] as const;
+
+export const TIER_LABELS: Record<Tier, string> = {
+  off: '关闭',
+  light: '轻微',
+  natural: '自然',
+  obvious: '明显',
+  strong: '强烈',
+};
+
+/**
+ * V2 任务栏标签 ID。FLOW-001 起作为 EditRecipe.taskId 的来源。
+ * D-020 / D-026 落地：与底层 RetouchTool 解耦，由 V2_TASK_TOOL_MAP 提供 1:1 映射。
+ */
+export type V2TaskId = 'project' | 'subject' | 'color' | 'cleanup' | 'local' | 'export';
+
+/**
+ * V2 任务到底层修图工具的真实映射（FLOW-001 落地）。
+ * - `project` 不映射到任何工具（项目元信息，不发起编辑，CTA 应禁用）。
+ * - 其余五个 V2TaskId 1:1 对应一个 RetouchTool。
+ */
+export const V2_TASK_TOOL_MAP: Record<V2TaskId, RetouchTool | null> = {
+  project: null,
+  subject: 'face',
+  color: 'color',
+  cleanup: 'repair',
+  local: 'liquify',
+  export: 'export',
+};
+
+/**
+ * V2 任务可发起编辑的判定（project 任务不发起编辑）。
+ */
+export const V2_TASK_EDITABLE: Record<V2TaskId, boolean> = {
+  project: false,
+  subject: true,
+  color: true,
+  cleanup: true,
+  local: true,
+  export: true,
+};
+
+/** V2 任务展示元信息（标题、描述、图标 hint） */
+export interface V2TaskMeta {
+  title: string;
+  description: string;
+}
+
+export const V2_TASK_META: Record<V2TaskId, V2TaskMeta> = {
+  project: { title: '项目', description: '项目元信息与原图导入，不发起编辑' },
+  subject: { title: '人物', description: '人像精修：肤色、磨皮、瘦脸、大眼、去瑕疵、立体光影' },
+  color: { title: '色彩', description: '整体色调、光影与质感调整，可附参考图' },
+  cleanup: { title: '清理', description: '去除杂物、瑕疵、路人或水印' },
+  local: { title: '局部', description: '液化塑形：脸型、下颌线、鼻翼、肩部、身形' },
+  export: { title: '导出', description: '格式与质量优化后导出最终成片' },
+};
+
+/** 保护项（FLOW-001 任务规格：身份、构图、皮肤纹理、服装、背景，默认开启） */
+export interface ProtectionItems {
+  identity: boolean;
+  composition: boolean;
+  skinTexture: boolean;
+  clothing: boolean;
+  background: boolean;
+}
+
+/** 人像五档参数 */
+export interface PortraitParams {
+  skinBrightness: Tier;
+  smoothing: Tier;
+  faceSlim: Tier;
+  eyeEnlarge: Tier;
+  blemish: Tier;
+  sculptLight: Tier;
+}
+
+/** 人像参数中文名（用于 UI 展示与编译器输出） */
+export const PORTRAIT_PARAM_LABELS: Record<keyof PortraitParams, string> = {
+  skinBrightness: '肤色提亮',
+  smoothing: '磨皮',
+  faceSlim: '瘦脸',
+  eyeEnlarge: '大眼',
+  blemish: '去瑕疵',
+  sculptLight: '立体光影',
+};
+
+/** 保护项中文名（用于 UI 展示与编译器输出） */
+export const PROTECTION_LABELS: Record<keyof ProtectionItems, string> = {
+  identity: '身份（面部骨骼、五官比例、辨识度）',
+  composition: '构图（人物位置、画幅、裁切）',
+  skinTexture: '皮肤纹理（毛孔、质感、真实感）',
+  clothing: '服装（衣物、配饰、颜色）',
+  background: '背景（场景、光影、色调）',
+};
+
+/**
+ * EditRecipe：从 UI 参数到 Provider 请求的中间层（FLOW-001 首版，schemaVersion=1）。
+ * - `tool` 来自 `V2_TASK_TOOL_MAP[taskId]`，作为 `submitEdit` 的 `options.tool`。
+ * - `auxiliary.description` 取代旧 PromptInput 的独立提交，统一为"补充要求"。
+ */
+export interface EditRecipe {
+  schemaVersion: 1;
+  taskId: V2TaskId;
+  tool: RetouchTool | null;
+  portrait: PortraitParams;
+  protections: ProtectionItems;
+  auxiliary: {
+    /** 补充要求（原 PromptInput 文本，不再独立提交） */
+    description: string;
+    /** 参考图数量（参考图实际数据存于 useEditor.state.referenceImages） */
+    referenceImageCount: number;
+    /** 区域信息（用于穿帮修复/路人去除；FLOW-001 仅存储，UI 不强制构建） */
+    regions: Region[];
+    /** 导出格式（仅 export 任务使用） */
+    outputFormat: 'jpeg' | 'png' | 'webp';
+    /** 导出质量百分比（仅 export 任务使用） */
+    outputQuality: number;
+  };
+}
+
+/** 编译后的 Prompt（版本化，version=1 为 FLOW-001 首版编译器输出） */
+export interface CompiledPrompt {
+  version: 1;
+  prompt: string;
+  recipe: EditRecipe;
+}

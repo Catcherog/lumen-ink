@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -11,7 +11,8 @@ import VersionStripPlaceholder from './components/v2/VersionStripPlaceholder';
 import useEditor from './hooks/useEditor';
 import { serializeError } from './utils/error';
 import { downloadImage } from './utils/image';
-import type { ProviderConfig } from '../../shared/types';
+import { defaultRecipeBook, compilePrompt } from './utils/recipe';
+import type { ProviderConfig, V2TaskId, EditRecipe } from '../../shared/types';
 
 type ViewMode = 'result' | 'original' | 'compare';
 
@@ -24,9 +25,17 @@ export default function AppV2() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
   const [darkMode, setDarkMode] = useState(false);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
-  const [templatePrompt, setTemplatePrompt] = useState<string | undefined>(undefined);
   const [projectName, setProjectName] = useState('未命名项目');
   const [viewMode, setViewMode] = useState<ViewMode>('result');
+
+  // FLOW-001: activeTask + recipeBook 提升到 AppV2 顶层
+  // - 切换任务标签互不影响（每个任务独立 Recipe）
+  // - CTA 触发时统一 compilePrompt → submitEdit 闭环
+  const [activeTask, setActiveTask] = useState<V2TaskId>('project');
+  const [recipeBook, setRecipeBook] = useState<Record<V2TaskId, EditRecipe>>(() => defaultRecipeBook());
+
+  const currentRecipe = recipeBook[activeTask];
+  const compiled = useMemo(() => compilePrompt(currentRecipe), [currentRecipe]);
 
   const {
     state,
@@ -157,13 +166,25 @@ export default function AppV2() {
     uploadImage(data);
   }, [uploadImage]);
 
-  const handleSelectTemplate = (prompt: string) => {
-    setTemplatePrompt(prompt);
-  };
+  // FLOW-001: Recipe 变更写回 recipeBook[activeTask]
+  const handleRecipeChange = useCallback((next: EditRecipe) => {
+    setRecipeBook((prev) => ({ ...prev, [activeTask]: next }));
+  }, [activeTask]);
 
-  const handlePromptConsumed = () => {
-    setTemplatePrompt(undefined);
-  };
+  // FLOW-001: 单一 CTA → compilePrompt → submitEdit（只消费编译后的请求）
+  // - 不会绕过 recipe 直接调 /api/edit
+  // - tool 来自 V2_TASK_TOOL_MAP[taskId]，由 defaultRecipe 写入 recipe.tool
+  // - recipe 完整存入 params.recipe 供历史回放（不修改 /api/edit 协议）
+  const handleGeneratePreview = useCallback(() => {
+    const result = compilePrompt(currentRecipe);
+    submitEdit(result.prompt, {
+      tool: currentRecipe.tool ?? undefined,
+      params: { recipe: currentRecipe, compiledVersion: result.version },
+      regions: currentRecipe.auxiliary.regions.length > 0
+        ? currentRecipe.auxiliary.regions
+        : undefined,
+    });
+  }, [currentRecipe, submitEdit]);
 
   // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
   // canExport 必须与 handleExport 支持的结果类型完全一致（仅 base64 / URL），
@@ -211,7 +232,10 @@ export default function AppV2() {
           />
 
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <TaskRail />
+            <TaskRail
+              activeTask={activeTask}
+              onSelectTask={setActiveTask}
+            />
 
             <main className="flex-1 min-w-0 min-h-0 relative flex flex-col bg-white dark:bg-gray-900">
               {state.error && (
@@ -241,16 +265,14 @@ export default function AppV2() {
             </main>
 
             <ContextPanel
-              tool={state.selectedTool}
+              recipe={currentRecipe}
+              onRecipeChange={handleRecipeChange}
+              compiled={compiled}
               state={state}
-              dispatch={dispatch}
-              onSubmit={submitEdit}
-              onSelectTemplate={handleSelectTemplate}
+              onSubmit={handleGeneratePreview}
               onRestoreHistory={restoreFromHistory}
               onViewHistory={viewHistory}
               onDeleteHistory={deleteHistory}
-              externalPrompt={templatePrompt}
-              onPromptConsumed={handlePromptConsumed}
             />
           </div>
 

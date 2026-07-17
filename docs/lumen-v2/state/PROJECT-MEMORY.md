@@ -104,25 +104,31 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] GPT 审核扫描报告并冻结下一阶段决策。
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
-- [ ] `UI-001` V2 外壳（三轮 R2 返工完成，`awaiting_gpt_acceptance / nextActor=gpt`；`canExport` 已与 `handleExport` 1:1 对齐，纯文本结果下导出按钮禁用）。
-- [ ] `FLOW-001` 配方和单一操作。
+- [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
+- [x] `FLOW-001` 配方和单一操作（Trae 端到端实施完成，`awaiting_gpt_acceptance / nextActor=gpt`，2026-07-17；92 tests passed）。
 - [ ] `STORAGE-001` 技术选型。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：UI-001（awaiting_gpt_acceptance，三轮 R2 返工后）
+### 6.1 当前任务：FLOW-001（awaiting_gpt_acceptance）
 
-任务 ID：`UI-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（三轮 R2 返工完成）
-前置依赖：`BASE-001` 已通过 GPT 验收（`MVP_PASS_WITH_DEBT`，2026-07-17）。
-任务目标：建立可回滚的 V2 工作台外壳（`VITE_EDITOR_V2` feature flag），不改 Provider、API、Prompt 和生成结果；顶栏不显示 Provider/模型；左栏稳定文字标签；右侧 360px 上下文面板容器；底部版本区结构占位；EMPTY 与 READY 布局；1440×900 / 1280×800 可用。
-任务文件：`docs/lumen-v2/tasks/active/UI-001.md`。
-实施分支：`lumen/ui-001-trae`。
-Trae 报告：`docs/lumen-v2/reports/UI-001-TRAE-REPORT.md`（第 10 节为二轮 P0 返工记录，第 11 节为 R2 返工记录）。
-证据目录：`docs/lumen-v2/evidence/UI-001/`（4 张截图已重新捕获）。
-GPT 审查：`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`（二轮 `MVP_FAIL`；`UI001-P0-02` 已关闭，仅剩 `UI001-P0-01-R2`）。
-R2 返工事实：`AppV2.tsx` 删除仅服务于 `canExport` 的 `hasResult`，`canExport` 改为 `!!(state.resultImage || state.resultImageUrl)`，与 `handleExport` 1:1 对齐；`EditorHeader.tsx` 同步 JSDoc 注释；4 种合法结果状态（EMPTY / 纯文本 / base64 图片 / 图片 URL）定向验证通过；8 条门禁独立重跑均 `EXIT_CODE=0`。等待 GPT 三轮验收。
+任务 ID：`FLOW-001`
+状态：`awaiting_gpt_acceptance`，`nextActor=gpt`。
+前置依赖：`UI-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-17）。
+任务目标：一次完成 EditRecipe、五档参数与保护项、Prompt 编译器 v1、V2 单一"生成预览"CTA、现有 `/api/edit` 请求接线、自动化测试和脱敏证据。
+任务文件：`docs/lumen-v2/tasks/active/FLOW-001.md`。
+实施约束：继续使用同步 `/api/edit`；不做 STORAGE/JOB/VERSION；保持 Provider 输出兼容；完整 Prompt 默认折叠只读。
+验收策略：变更风险驱动，只复核 FLOW-001 diff、关键行为与统一门禁；不重复未变更的 UI-001 视觉证据。
+
+#### FLOW-001 实施摘要（2026-07-17）
+
+- Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`
+- 证据目录：`docs/lumen-v2/evidence/FLOW-001/`（8 条门禁脱敏输出）
+- 实施范围：EditRecipe（schemaVersion=1）、五档参数（Tier）、5 项保护项、旧值映射（legacyValueToTier / tierToLegacyValue，round-trip 稳定）、Prompt 编译器 v1（version=1，显式版本标记 `# lumen-prompt v1`）、V2_TASK_TOOL_MAP 1:1 映射、V2 右栏单 CTA（删除旧 ParamPanel/PromptInput/应用/提交）、`/api/edit` 接线（handleGeneratePreview → compilePrompt → submitEdit）、自动化测试（76 client + 16 server = 92 tests passed）。
+- 8 条门禁独立重跑全部 `EXIT_CODE=0`：client lint 0/0、client/server typecheck、client 76 tests、server 16 tests、root 92 tests、build、安全扫描。
+- 未实施 STORAGE/JOB/VERSION；未修改 Provider/API/存储实现；未覆盖工作区中与 FLOW-001 无关的既有修改。
+- 决策日志追加 D-026（V2TaskId 与 RetouchTool 1:1 映射落地）。
 
 #### BASE-001 验收结论摘要
 
@@ -144,8 +150,8 @@ R2 返工事实：`AppV2.tsx` 删除仅服务于 `canExport` 的 `hasResult`，`
 主线任务依赖图（文本表示）：
 
 ```text
-BASE-001 (completed, MVP_PASS_WITH_DEBT, 2026-07-17)
-  → UI-001 (changes_requested, 当前) → FLOW-001 → STORAGE-001 → VERSION-001 → JOB-001 → HARDEN-001
+BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
+  → FLOW-001 (awaiting_gpt_acceptance, 当前) → STORAGE-001 → VERSION-001 → JOB-001 → HARDEN-001
 支线: ROUTING-001 (前置 JOB-001)
 模板: ACCEPTANCE-FIX (按需插入任意任务驳回场景)
 ```
@@ -187,8 +193,8 @@ BASE-001 (completed, MVP_PASS_WITH_DEBT, 2026-07-17)
 
 ### 6.4 当前阻塞
 
-- BASE-001 已通过验收，UI-001 阻塞已解除（`STATE.json.blockedTasks` 现仅列出 FLOW-001 / STORAGE-001 / VERSION-001 / JOB-001）。
-- UI-001 当前为 `awaiting_gpt_acceptance / nextActor=gpt`（三轮 R2 返工完成）；`UI001-P0-01-R2` 已修复，等待 GPT 三轮验收；GPT 通过验收前，禁止 FLOW-001 及后续所有任务。
+- FLOW-001 已完成端到端实施并提交 `awaiting_gpt_acceptance / nextActor=gpt`；GPT 验收通过前 STORAGE-001 / VERSION-001 / JOB-001 保持阻塞。
+- `STATE.json.blockedTasks` 仍列 STORAGE-001 / VERSION-001 / JOB-001；FLOW-001 验收通过后由 GPT 激活 STORAGE-001。
 - 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
 - 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 VERSION-001）。
 

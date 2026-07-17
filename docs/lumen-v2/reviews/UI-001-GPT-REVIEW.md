@@ -1,5 +1,30 @@
 # UI-001 GPT 验收报告
 
+## 第三轮复审（R2 最终验收）
+
+- 验收日期：2026-07-17（Asia/Shanghai）
+- 审查分支：`lumen/ui-001-trae`
+- 审查 commit：`050c321`
+- 结论：`MVP_PASS`
+- 验收范围：仅复核 `UI001-P0-01-R2`、已关闭 P0 的非回归及约定门禁；未重复无关视觉审计
+
+### 最终裁决
+
+- `canExport = !!(state.resultImage || state.resultImageUrl)`，与 `handleExport` 的 base64 图片和图片 URL 两个真实分支 1:1 对齐；纯文本结果下按钮禁用。
+- R2 未改动 `TaskRail`；`V2TaskId` 仍与 `RetouchTool` 解耦，单一高亮约束保持成立。
+- R2 生产 diff 仅涉及 `AppV2.tsx` 的能力判定与 `EditorHeader.tsx` 的事实注释，未提前实施 FLOW-001。
+- 本轮独立重跑 8 条门禁全部 `EXIT_CODE=0`：client lint、client/server typecheck、client 5 tests、server 16 tests、root 21 tests、build、安全扫描。
+- 工作区存在既有无关修改，但 UI-001 的 3 个相关生产文件无未提交差异；未覆盖或误提交无关修改。
+
+### 状态推进
+
+- UI-001 归档至 `tasks/completed/`；
+- FLOW-001 激活至 `tasks/active/`，状态为 `ready_for_trae / nextActor=trae`；
+- 从 `blockedTasks` 移除 FLOW-001；
+- 后续验收采用“变更风险驱动”：优先审任务 diff、关键行为测试和统一门禁，不重复已冻结且未变更的证据。
+
+---
+
 ## 第二轮复审（P0 返工后）
 
 - 验收日期：2026-07-17（Asia/Shanghai）

@@ -1,0 +1,23 @@
+﻿
+> lumen-ink@0.1.0 build
+> npm run build --prefix src/client && npm run build --prefix src/server
+
+
+> client@0.0.0 build
+> tsc -b && vite build
+
+[36mvite v8.0.16 [32mbuilding client environment for production...[36m[39m
+[2K
+transforming...✓ 1854 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.45 kB │ gzip:   0.30 kB
+dist/assets/index-CCwoNV0P.css   43.58 kB │ gzip:   8.45 kB
+dist/assets/index-BTgP9B6K.js   346.64 kB │ gzip: 105.90 kB
+
+[32m✓ built in 355ms[39m
+
+> lumen-ink-server@0.1.0 build
+> tsc
+
+EXIT=0
