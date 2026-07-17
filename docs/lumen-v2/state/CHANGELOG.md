@@ -1,5 +1,20 @@
 # 10｜变更日志
 
+## 2026-07-17 - UI-001 实施完成（awaiting_gpt_acceptance）
+
+- Trae 在 `lumen/ui-001-trae` 分支完成 V2 工作台外壳实施；
+- 新增 `VITE_EDITOR_V2` feature flag，Legacy 与 `AppV2` 并存；
+- 新增 V2 组件：`AppV2.tsx`、`EditorHeader.tsx`、`TaskRail.tsx`、`ContextPanel.tsx`、`VersionStripPlaceholder.tsx`；
+- 顶栏展示项目上下文，不展示 Provider/模型/API Key；
+- 左栏任务栏固定文字标签；右侧 360px 上下文面板容器；底部版本区占位；
+- 复用 `ResultViewer`、`ImageUploader`、`useEditor`、`ApiSettingsModal`、登录态；
+- 未修改 Provider、API、Prompt 和生成结果逻辑；
+- `ContextPanel.tsx` 顶部提示条标记 FLOW-001 临时兼容区；
+- 验证全部通过：client lint 0/0、client test 5 passed、server test 16 passed、root build 通过；
+- 截图证据：`legacy-1440x900.png`、`v2-empty-1440x900.png`、`v2-ready-1440x900.png`、`v2-ready-1280x800.png`；
+- 状态推进至 `awaiting_gpt_acceptance / nextActor=gpt`；
+- 决策日志追加 D-019、D-020。
+
 ## 2026-07-17 - BASE-001 验收通过（MVP_PASS_WITH_DEBT）
 
 - GPT 远端只读复核结论 `MVP_PASS_WITH_DEBT`，BASE-001 工程基线修复正式通过验收；

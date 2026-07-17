@@ -104,21 +104,23 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] GPT 审核扫描报告并冻结下一阶段决策。
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
-- [ ] `UI-001` V2 外壳（当前 `ready_for_trae / nextActor=trae`）。
+- [x] `UI-001` V2 外壳（Trae 已实施，`awaiting_gpt_acceptance / nextActor=gpt`，2026-07-17）。
 - [ ] `FLOW-001` 配方和单一操作。
 - [ ] `STORAGE-001` 技术选型。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：UI-001（ready_for_trae）
+### 6.1 当前任务：UI-001（awaiting_gpt_acceptance）
 
 任务 ID：`UI-001`
-状态：`ready_for_trae`，`nextActor=trae`
+状态：`awaiting_gpt_acceptance`，`nextActor=gpt`
 前置依赖：`BASE-001` 已通过 GPT 验收（`MVP_PASS_WITH_DEBT`，2026-07-17）。
 任务目标：建立可回滚的 V2 工作台外壳（`VITE_EDITOR_V2` feature flag），不改 Provider、API、Prompt 和生成结果；顶栏不显示 Provider/模型；左栏稳定文字标签；右侧 360px 上下文面板容器；底部版本区结构占位；EMPTY 与 READY 布局；1440×900 / 1280×800 可用。
 任务文件：`docs/lumen-v2/tasks/active/UI-001.md`。
-分支建议：`lumen/ui-001-trae`。
+实施分支：`lumen/ui-001-trae`。
+Trae 报告：`docs/lumen-v2/reports/UI-001-TRAE-REPORT.md`。
+证据目录：`docs/lumen-v2/evidence/UI-001/`。
 
 #### BASE-001 验收结论摘要
 
@@ -141,7 +143,7 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 
 ```text
 BASE-001 (completed, MVP_PASS_WITH_DEBT, 2026-07-17)
-  → UI-001 (ready_for_trae, 当前) → FLOW-001 → STORAGE-001 → VERSION-001 → JOB-001 → HARDEN-001
+  → UI-001 (awaiting_gpt_acceptance, 当前) → FLOW-001 → STORAGE-001 → VERSION-001 → JOB-001 → HARDEN-001
 支线: ROUTING-001 (前置 JOB-001)
 模板: ACCEPTANCE-FIX (按需插入任意任务驳回场景)
 ```
@@ -150,7 +152,7 @@ BASE-001 (completed, MVP_PASS_WITH_DEBT, 2026-07-17)
 
 | 顺序 | 任务 ID | 任务名 | 前置依赖 | 预计验收口径 | MVP 收尾判定 |
 |------|---------|--------|---------|-------------|-------------|
-| 1 | UI-001 | V2 工作台外壳 | BASE-001 通过 | Gate UI-001：`VITE_EDITOR_V2` flag、顶栏不显示 Provider/模型、左栏文字标签、EMPTY/READY 布局、版本条仅占位、Legacy 不变 | 1440×900/1280×800 无横向溢出；切换可回滚；旧 CTA 已记录为 FLOW-001 待办 |
+| 1 | UI-001 | V2 工作台外壳 | BASE-001 通过 | Gate UI-001：`VITE_EDITOR_V2` flag、顶栏不显示 Provider/模型、左栏文字标签、EMPTY/READY 布局、版本条仅占位、Legacy 不变 | Trae 已实施，awaiting GPT 验收；1440×900/1280×800 无横向溢出；切换可回滚；旧 CTA 已记录为 FLOW-001 待办 |
 | 2 | FLOW-001 | 配方模型与单一生成操作 | UI-001 通过 | Gate FLOW-001：单一"生成预览"CTA、EditRecipe、五档参数、保护项默认开启、补充要求无独立提交、Prompt 编译器 v1 | 页面只剩一个模型调用主按钮；旧"应用/提交"全部移除或降级；Recipe 与编译器有单元测试 |
 | 3 | STORAGE-001 | 持久化与任务基础设施技术选型 | FLOW-001 通过 | Gate STORAGE-001：至少 2 个方案对比、PoC 证据、成本/迁移/备份/删除/回滚、Vercel 适配、本地开发替代 | GPT/用户冻结方案并输出 `docs/lumen-v2/storage-options.md`；不接入生产数据；IndexedDB 仅作缓存/PoC |
 | 4 | VERSION-001 | 项目、资产与不可变版本 | STORAGE-001 方案冻结 | 上传创建 Project+原图 Asset+V0；成功生成创建子 Version；版本条显示真实版本；查看/对比/激活/采用；刷新恢复；删除级联清理；旧 `edit_history` 先备份再显式导入 | history 不再被改名冒充 Version；旧数据不静默丢弃；不自动导入失效 URL |
