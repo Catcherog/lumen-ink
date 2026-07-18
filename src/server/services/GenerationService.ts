@@ -143,6 +143,23 @@ export class GenerationService {
   ) {}
 
   /**
+   * Read-only fetch for a Job by id. Returns null when not found so route
+   * handlers can produce a 404 with a stable errorCode.
+   */
+  async getJob(jobId: string): Promise<GenerationJob | null> {
+    return this.deps.jobs.get(jobId);
+  }
+
+  /**
+   * Read-only fetch for all active Jobs of a Project. Used by the
+   * `/api/projects/:id/jobs` listing endpoint so the UI can show an
+   * in-flight Job indicator.
+   */
+  async listJobsByProject(projectId: string): Promise<GenerationJob[]> {
+    return this.deps.jobs.listActiveByProject(projectId);
+  }
+
+  /**
    * Create a Job with idempotent semantics. A duplicate (projectId,
    * idempotencyKey) returns the original Job without enqueuing twice.
    */
