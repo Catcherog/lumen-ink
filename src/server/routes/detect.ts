@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import type { Region } from 'shared/types.js';
+import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
 
 const router = Router();
 
@@ -12,97 +13,6 @@ interface DetectPeopleResponse {
   success: boolean;
   regions: Region[];
   error?: string;
-}
-
-function getImageDimensions(base64: string): { width: number; height: number } | null {
-  try {
-    const buffer = Buffer.from(base64, 'base64');
-    if (buffer.length < 24) return null;
-
-    // PNG: IHDR chunk starts at offset 16, width/height are big-endian 4 bytes each
-    if (
-      buffer[0] === 0x89 &&
-      buffer[1] === 0x50 &&
-      buffer[2] === 0x4e &&
-      buffer[3] === 0x47
-    ) {
-      const width = buffer.readUInt32BE(16);
-      const height = buffer.readUInt32BE(20);
-      return { width, height };
-    }
-
-    // JPEG: scan SOF markers
-    if (buffer[0] === 0xff && buffer[1] === 0xd8) {
-      let offset = 2;
-      while (offset < buffer.length - 9) {
-        if (buffer[offset] !== 0xff) {
-          offset++;
-          continue;
-        }
-
-        const marker = buffer[offset + 1];
-        if (marker === 0xd9 || marker === 0xda) break;
-        if (marker === 0xd8 || marker === 0x00) {
-          offset++;
-          continue;
-        }
-
-        const length = buffer.readUInt16BE(offset + 2);
-        if (length < 2 || offset + length >= buffer.length) break;
-
-        if (
-          (marker >= 0xc0 && marker <= 0xc3) ||
-          (marker >= 0xc5 && marker <= 0xc7) ||
-          (marker >= 0xc9 && marker <= 0xcb) ||
-          (marker >= 0xcd && marker <= 0xcf)
-        ) {
-          const height = buffer.readUInt16BE(offset + 5);
-          const width = buffer.readUInt16BE(offset + 7);
-          return { width, height };
-        }
-
-        offset += 2 + length;
-      }
-    }
-
-    // WebP (VP8)
-    if (
-      buffer[0] === 0x52 &&
-      buffer[1] === 0x49 &&
-      buffer[2] === 0x46 &&
-      buffer[3] === 0x46 &&
-      buffer[8] === 0x57 &&
-      buffer[9] === 0x45 &&
-      buffer[10] === 0x42 &&
-      buffer[11] === 0x50
-    ) {
-      if (
-        buffer[12] === 0x56 &&
-        buffer[13] === 0x50 &&
-        buffer[14] === 0x38 &&
-        buffer[15] === 0x20
-      ) {
-        const width = buffer.readUInt32LE(26) & 0x3fff;
-        const height = buffer.readUInt32LE(30) & 0x3fff;
-        return { width, height };
-      }
-      if (
-        buffer[12] === 0x56 &&
-        buffer[13] === 0x50 &&
-        buffer[14] === 0x38 &&
-        buffer[15] === 0x4c
-      ) {
-        const bits = buffer.readUInt32LE(21);
-        const width = (bits & 0x3fff) + 1;
-        const height = ((bits >> 14) & 0x3fff) + 1;
-        return { width, height };
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -147,7 +57,7 @@ function generateMockRegions(width: number, height: number): Region[] {
     .filter((r) => r.width > 0 && r.height > 0);
 }
 
-router.post('/people', (req: Request, res: Response) => {
+router.post('/people', async (req: Request, res: Response) => {
   try {
     const { image, mimeType } = req.body as DetectPeopleRequest;
 
@@ -160,9 +70,26 @@ router.post('/people', (req: Request, res: Response) => {
       return;
     }
 
-    const dims = getImageDimensions(image);
-    const width = dims?.width ?? 1920;
-    const height = dims?.height ?? 1080;
+    // D-034 Task 6: validate the base64 image with sharp before using its
+    // dimensions. This subsumes the hand-rolled PNG/JPEG/WebP header
+    // parsers and rejects malformed/oversized/spoofed payloads.
+    let width: number;
+    let height: number;
+    try {
+      const imageBytes = Buffer.from(image, 'base64');
+      const validated = await validateImageBytes(imageBytes, mimeType || 'image/jpeg');
+      width = validated.width;
+      height = validated.height;
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'INVALID_IMAGE_MALFORMED';
+      const httpStatus = imageValidationHttpStatus(code);
+      res.status(httpStatus).json({
+        success: false,
+        regions: [],
+        error: `图片校验失败: ${code}`,
+      } as DetectPeopleResponse);
+      return;
+    }
 
     const regions = generateMockRegions(width, height);
 

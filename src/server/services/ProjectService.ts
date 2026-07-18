@@ -15,14 +15,12 @@
  *    metadata deletion — the metadata is already gone, and the orphaned
  *    bytes remain retryable by a future sweeper.
  *
- * Conforms to D-034 internal security floor: only image MIME types are
- * accepted; dimensions are inspected with `sharp` so callers cannot lie
- * about size. The actual size/pixel-limit enforcement lives in the
- * Internal Security Task 6 middleware; ProjectService only rejects
- * obviously-invalid inputs here.
+ * Conforms to D-034 internal security floor (Task 6): every upload passes
+ * through `validateImageBytes` which decodes with sharp and rejects MIME
+ * spoofing, decompression bombs, oversized payloads, malformed/truncated
+ * bytes, and unsupported formats.
  */
 
-import sharp from 'sharp';
 import type {
   PersistenceDependencies,
   Project,
@@ -31,6 +29,7 @@ import type {
 } from '../domain/persistence.js';
 import type { JobExecutor } from '../domain/persistence.js';
 import { DomainError } from '../domain/errors.js';
+import { validateImageBytes } from '../security/imageValidation.js';
 
 export interface CreateProjectInput {
   workspaceId: string;
@@ -60,13 +59,6 @@ export interface DeleteProjectResult {
   /** Storage keys whose object deletion failed; metadata is already gone. */
   cleanupFailures: string[];
 }
-
-const ALLOWED_MIME_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'image/gif',
-]);
 
 function generateId(prefix: string): string {
   // Use crypto.randomUUID when available (Node 19+); fall back to a
@@ -100,30 +92,48 @@ export class ProjectService {
         message: 'UPLOAD_INVALID: 上传数据为空',
       });
     }
-    if (!ALLOWED_MIME_TYPES.has(input.mimeType)) {
+
+    // D-034 Task 6: full decode + size/pixel guard via validateImageBytes.
+    // This subsumes the MIME allowlist, sharp metadata check, and dimension
+    // inspection in one security-bounded call. Throws INVALID_IMAGE_* codes.
+    let validated: { bytes: Uint8Array; mimeType: string; width: number; height: number; sizeBytes: number };
+    try {
+      validated = await validateImageBytes(input.bytes, input.mimeType);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : 'INVALID_IMAGE_MALFORMED';
+      // Map INVALID_IMAGE_TOO_LARGE → UPLOAD_TOO_LARGE, others → UPLOAD_DECODE_FAILED
+      // so existing DomainError routes can handle them consistently.
+      if (code === 'INVALID_IMAGE_TOO_LARGE') {
+        throw new DomainError({
+          code: 'UPLOAD_TOO_LARGE',
+          message: `UPLOAD_TOO_LARGE: 图片体积超过 20 MiB 限制`,
+          cause: code,
+        });
+      }
+      if (code === 'INVALID_IMAGE_TOO_MANY_PIXELS') {
+        throw new DomainError({
+          code: 'UPLOAD_PIXEL_LIMIT',
+          message: `UPLOAD_PIXEL_LIMIT: 图片像素数超过 40,000,000 限制`,
+          cause: code,
+        });
+      }
+      if (code === 'INVALID_IMAGE_UNSUPPORTED_FORMAT') {
+        throw new DomainError({
+          code: 'UPLOAD_INVALID',
+          message: `UPLOAD_INVALID: 不支持的图片格式 ${input.mimeType}`,
+          cause: code,
+        });
+      }
       throw new DomainError({
-        code: 'UPLOAD_INVALID',
-        message: `UPLOAD_INVALID: 不支持的 MIME 类型 ${input.mimeType}`,
+        code: 'UPLOAD_DECODE_FAILED',
+        message: `UPLOAD_DECODE_FAILED: 无法解码图像 (${code})`,
+        cause: code,
       });
     }
 
-    // Inspect dimensions with sharp to ensure the bytes are a real image.
-    let pixelWidth: number;
-    let pixelHeight: number;
-    try {
-      const meta = await sharp(Buffer.from(input.bytes)).metadata();
-      pixelWidth = meta.width ?? 0;
-      pixelHeight = meta.height ?? 0;
-      if (pixelWidth === 0 || pixelHeight === 0) {
-        throw new Error('missing dimensions');
-      }
-    } catch (err) {
-      throw new DomainError({
-        code: 'UPLOAD_DECODE_FAILED',
-        message: 'UPLOAD_DECODE_FAILED: 无法解码图像',
-        cause: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Use the re-encoded (sanitized) bytes for storage — sharp may rotate
+    // or normalize the image, and the validated bytes are guaranteed decodable.
+    const storageBytes = Buffer.from(validated.bytes);
 
     // Allocate IDs.
     const projectId = input.__testForceProjectId ?? generateId('proj');
@@ -143,8 +153,8 @@ export class ProjectService {
       id: assetId,
       projectId,
       storageKey,
-      mimeType: input.mimeType,
-      sizeBytes: input.bytes.byteLength,
+      mimeType: validated.mimeType,
+      sizeBytes: storageBytes.length,
       createdAt: now,
     };
     const version: Version = {
@@ -157,7 +167,7 @@ export class ProjectService {
 
     // Step 1: upload object bytes FIRST so the DB transaction can reference
     // a storage key that already exists.
-    await this.deps.objects.put(storageKey, Buffer.from(input.bytes), input.mimeType);
+    await this.deps.objects.put(storageKey, storageBytes, validated.mimeType);
 
     // Step 2: DB transaction. On failure, compensate by deleting the
     // uploaded object.

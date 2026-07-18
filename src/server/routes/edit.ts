@@ -35,6 +35,7 @@ import type { EditRequest, EditResponse, EditResult } from 'shared/types.js';
 import type { GenerationService } from '../services/GenerationService.js';
 import { DomainError, isDomainError } from '../domain/errors.js';
 import type { DomainErrorCode } from '../domain/errors.js';
+import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
 
 function statusForCode(code: DomainErrorCode): number {
   switch (code) {
@@ -203,6 +204,30 @@ export function createEditRouter(generationService: GenerationService): Router {
         return;
       }
 
+      // D-034 Task 6: validate any base64 image before forwarding to Provider.
+      // This guards against MIME spoofing, decompression bombs, oversized
+      // payloads, and malformed/truncated bytes that could crash downstream.
+      let validatedImageBase64 = image;
+      let validatedMimeType = mimeType;
+      if (image) {
+        try {
+          const imageBytes = Buffer.from(image, 'base64');
+          const validated = await validateImageBytes(imageBytes, mimeType || 'image/jpeg');
+          // Re-encode validated (sanitized) bytes for the Provider — sharp
+          // may rotate/normalize, so we pass the cleaned bytes forward.
+          validatedImageBase64 = Buffer.from(validated.bytes).toString('base64');
+          validatedMimeType = validated.mimeType;
+        } catch (err) {
+          const code = err instanceof Error ? err.message : 'INVALID_IMAGE_MALFORMED';
+          const httpStatus = imageValidationHttpStatus(code);
+          res.status(httpStatus).json({
+            success: false,
+            error: `图片校验失败: ${code}`,
+          } as EditResponse);
+          return;
+        }
+      }
+
       let result: EditResult;
       switch (operationType) {
         case 'generate':
@@ -211,8 +236,8 @@ export function createEditRouter(generationService: GenerationService): Router {
         case 'edit':
           result = await provider.edit({
             prompt,
-            image: image || '',
-            mimeType: mimeType || 'image/jpeg',
+            image: validatedImageBase64 || '',
+            mimeType: validatedMimeType || 'image/jpeg',
             referenceImages,
             model: selectedModel,
             regions,
@@ -222,8 +247,8 @@ export function createEditRouter(generationService: GenerationService): Router {
         case 'chat':
           result = await provider.chat({
             prompt,
-            image,
-            mimeType,
+            image: validatedImageBase64,
+            mimeType: validatedMimeType,
             referenceImages,
             history,
             model: selectedModel,
