@@ -36,6 +36,7 @@ import type { GenerationService } from '../services/GenerationService.js';
 import { DomainError, isDomainError } from '../domain/errors.js';
 import type { DomainErrorCode } from '../domain/errors.js';
 import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
+import { redactError, redactString } from '../security/redaction.js';
 
 function statusForCode(code: DomainErrorCode): number {
   switch (code) {
@@ -162,10 +163,12 @@ export function createEditRouter(generationService: GenerationService): Router {
           sendDomainError(res, err);
           return;
         }
-        console.error('[routes.edit] V2 compat failed', err);
+        const redacted = redactError(err, { errorCode: 'V2_COMPAT_FAILED' });
+        console.error('[routes.edit] V2 compat failed', redacted.log);
         res.status(500).json({
           success: false,
-          error: err instanceof Error ? err.message : 'unknown error',
+          error: redacted.publicMessage,
+          diagnosticId: redacted.diagnosticId,
         } as EditResponse);
       }
       return;
@@ -272,10 +275,14 @@ export function createEditRouter(generationService: GenerationService): Router {
         },
       } as EditResponse);
     } catch (error: unknown) {
-      console.error('Edit error:', error);
+      const redacted = redactError(error, { errorCode: 'LEGACY_EDIT_FAILED' });
+      console.error('[routes.edit] legacy path failed', redacted.log);
 
       const err = error as { status?: number; message?: string; response?: { data?: { error?: string; message?: string } } };
-      const upstreamMsg = err.response?.data?.error || err.response?.data?.message || err.message || '';
+      // upstreamMsg is scrubbed via redactString before being shown to the
+      // client — never echo raw upstream error text.
+      const rawUpstream = err.response?.data?.error || err.response?.data?.message || err.message || '';
+      const upstreamMsg = rawUpstream ? redactString(rawUpstream) : '';
 
       // API Key 无效或已过期
       if (err.status === 401 || err.status === 403) {

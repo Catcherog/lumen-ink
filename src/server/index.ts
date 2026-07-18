@@ -105,31 +105,13 @@ app.use(
 );
 app.use(express.json({ limit: runtimeConfig.maxUploadBytes }));
 
+// D-034 Task 7: Health endpoint returns ONLY {"status":"ok"}.
+// No environment-variable presence, Provider names/configuration, model
+// names, default flags, or key presence. Internal diagnostics should
+// use authenticated admin endpoints or server logs — never the public
+// health probe.
 app.get('/api/health', (_req, res) => {
-  const providers = providerStore.list().map((p) => ({
-    name: p.name,
-    type: p.type,
-    enabled: p.enabled,
-    isDefault: p.isDefault,
-    hasApiKey: p.hasApiKey,
-    defaultModel: p.defaultModel,
-  }));
-  res.json({
-    status: 'ok',
-    env: {
-      isVercel: !!process.env.VERCEL,
-      isDeployed: runtimeConfig.isDeployed,
-      providerEnvManaged: runtimeConfig.providerEnvManaged,
-      hasSeedreamKey: !!process.env.SEEDREAM_API_KEY,
-      hasOpenaiKey: !!process.env.OPENAI_API_KEY,
-      hasGlmKey: !!process.env.GLM_API_KEY,
-      hasGeminiKey: !!process.env.GEMINI_API_KEY,
-      hasJwtSecret: !!runtimeConfig.jwtSecret,
-      hasEncryptionKey: !!runtimeConfig.providerEncryptionKey,
-      corsAllowlistConfigured: runtimeConfig.corsAllowlist.length > 0,
-    },
-    providers,
-  });
+  res.json({ status: 'ok' });
 });
 
 // Auth router does NOT use authMiddleware (it issues tokens, not verifies them).

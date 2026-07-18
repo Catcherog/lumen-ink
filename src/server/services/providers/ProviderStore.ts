@@ -18,6 +18,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import type { ProviderConfig } from 'shared/types.js';
+import { redactError } from '../../security/redaction.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -203,7 +204,10 @@ export class ProviderStore {
         const data = JSON.parse(fs.readFileSync(dataFile, 'utf8')) as StoreData;
         this.providers = data.providers || [];
       } catch (error) {
-        console.error('[ProviderStore] Failed to load providers.json:', error);
+        // D-034 Task 7: use redactError so the log never echoes file
+        // contents (which may contain encrypted apiKeys or paths).
+        const redacted = redactError(error, { errorCode: 'PROVIDER_STORE_LOAD_FAILED' });
+        console.error('[ProviderStore] Failed to load providers.json', redacted.log);
         this.providers = [];
       }
     }

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { Region } from 'shared/types.js';
 import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
+import { redactError } from '../security/redaction.js';
 
 const router = Router();
 
@@ -100,12 +101,13 @@ router.post('/people', async (req: Request, res: Response) => {
       regions,
     } as DetectPeopleResponse);
   } catch (error: unknown) {
-    console.error('Detect people error:', error);
-    const err = error as { message?: string };
+    const redacted = redactError(error, { errorCode: 'DETECT_FAILED' });
+    console.error('[routes.detect] people failed', redacted.log);
     res.status(500).json({
       success: false,
       regions: [],
-      error: err.message || '路人检测失败',
+      error: redacted.publicMessage,
+      diagnosticId: redacted.diagnosticId,
     } as DetectPeopleResponse);
   }
 });

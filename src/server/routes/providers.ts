@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { providerStore } from '../services/providers/ProviderStore.js';
 import type { ProviderConfig } from 'shared/types.js';
+import { redactError } from '../security/redaction.js';
 
 const router = Router();
 
@@ -22,8 +23,9 @@ router.get('/', (_req: Request, res: Response) => {
   try {
     res.json(providerStore.list().map(sanitize));
   } catch (error) {
-    console.error('List providers error:', error);
-    res.status(500).json({ error: '获取 Provider 列表失败' });
+    const redacted = redactError(error, { errorCode: 'PROVIDER_LIST_FAILED' });
+    console.error('[routes.providers] list failed', redacted.log);
+    res.status(500).json({ error: redacted.publicMessage, diagnosticId: redacted.diagnosticId });
   }
 });
 
@@ -49,9 +51,9 @@ router.post('/', (req: Request, res: Response) => {
 
     res.status(201).json(sanitize(provider));
   } catch (error: unknown) {
-    console.error('Create provider error:', error);
-    const err = error as { message?: string };
-    res.status(500).json({ error: err.message || '创建 Provider 失败' });
+    const redacted = redactError(error, { errorCode: 'PROVIDER_CREATE_FAILED' });
+    console.error('[routes.providers] create failed', redacted.log);
+    res.status(500).json({ error: redacted.publicMessage, diagnosticId: redacted.diagnosticId });
   }
 });
 
@@ -78,9 +80,9 @@ router.put('/:id', (req: Request, res: Response) => {
 
     res.json(sanitize(updated));
   } catch (error: unknown) {
-    console.error('Update provider error:', error);
-    const err = error as { message?: string };
-    res.status(500).json({ error: err.message || '更新 Provider 失败' });
+    const redacted = redactError(error, { errorCode: 'PROVIDER_UPDATE_FAILED' });
+    console.error('[routes.providers] update failed', redacted.log);
+    res.status(500).json({ error: redacted.publicMessage, diagnosticId: redacted.diagnosticId });
   }
 });
 
@@ -94,9 +96,9 @@ router.delete('/:id', (req: Request, res: Response) => {
     }
     res.json({ success: true });
   } catch (error: unknown) {
-    console.error('Delete provider error:', error);
-    const err = error as { message?: string };
-    res.status(500).json({ error: err.message || '删除 Provider 失败' });
+    const redacted = redactError(error, { errorCode: 'PROVIDER_DELETE_FAILED' });
+    console.error('[routes.providers] delete failed', redacted.log);
+    res.status(500).json({ error: redacted.publicMessage, diagnosticId: redacted.diagnosticId });
   }
 });
 
@@ -110,9 +112,9 @@ router.patch('/:id/default', (req: Request, res: Response) => {
     }
     res.json(sanitize(updated));
   } catch (error: unknown) {
-    console.error('Set default provider error:', error);
-    const err = error as { message?: string };
-    res.status(500).json({ error: err.message || '设置默认 Provider 失败' });
+    const redacted = redactError(error, { errorCode: 'PROVIDER_SET_DEFAULT_FAILED' });
+    console.error('[routes.providers] set default failed', redacted.log);
+    res.status(500).json({ error: redacted.publicMessage, diagnosticId: redacted.diagnosticId });
   }
 });
 
