@@ -29,7 +29,7 @@ function makeSnapshot(
       updatedAt: '2026-07-18T10:00:00.000Z',
       activeVersionId: activeVersion?.id,
     },
-    assets: versions.map((v, i) => ({
+    assets: versions.map((_, i) => ({
       id: `asset_${i}`,
       projectId: 'proj_test',
       storageKey: `redacted://asset_${i}.bin`,

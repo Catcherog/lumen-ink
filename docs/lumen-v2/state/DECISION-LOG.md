@@ -52,6 +52,14 @@
 | D-040 | 2026-07-18 | 冻结 | 候选 A 与抽象职责边界冻结，但 D-036 的 PoC 级精确签名由 PERSIST 首门一次性收敛 | PoC 实体/Job 状态、事务上下文、lease 所有权与幂等表面低于 PERSIST 恢复模型；退回新一轮 STORAGE 不改变供应商结论 | PERSIST Tasks 1—3 先以红→绿测试锁定完整字段、唯一约束、两 worker 接管、stale worker 拒写和同事务上下文；随后再次冻结 |
 | D-041 | 2026-07-18 | 冻结 | STORAGE-001 验收 `MVP_PASS_WITH_DEBT`，激活 PERSIST-001 扩大执行包 | 官方主源支持关键事实，CloudBase mock 6 用例独立通过，无供应商选择 P0；用户要求减少非必要审计和增加 Trae 单次执行量 | STORAGE 归档；PERSIST `ready_for_trae / nextActor=trae`；契约收敛、生产适配、核心闭环与内部安全底线连续执行 |
 
+| D-042 | 2026-07-18 | 冻结 | PERSIST-001 D-040 契约收敛完成：完整 Project/Asset/Version/GenerationJob 字段 + 9 阶段 Job 状态机 + `(projectId, idempotencyKey)` 唯一性 + lease/heartbeat/原子 claim + stale worker 拒写 + 同事务上下文；接口再次冻结 | PoC 级简化签名低于 PERSIST 恢复模型；红→绿测试锁定完整字段、约束和语义 | `PersistenceDependencies`（7 repositories + ObjectStore + UnitOfWork）+ `JobExecutor` 接口签名不得在后续任务中重命名/删除/扩宽；新增字段必须可选且不破坏现有合约测试 |
+
+| D-043 | 2026-07-18 | 冻结 | PERSIST-001 原子成功边界：Object upload → DB 事务 → 条件完成；失败时补偿删除孤儿对象；metadata 级联删除事务化，object 删除 best-effort | 保证不会出现"错误成功 Version"或"孤儿对象"；失败不污染已有结果 | `ProjectService.createProject` 和 `GenerationService.executeJob` 均遵守此边界；补偿失败记录 diagnosticId 但不回滚 metadata |
+
+| D-044 | 2026-07-18 | 冻结 | PERSIST-001 内部安全底线（D-034）落地：runtime secret fail-fast + durable auth throttle (HMAC-derived key) + CORS allowlist + 7-step image validation + allowlist redaction | S0/S1 安全要求不得延期；3 人内部团队稳定使用需要基本安全边界 | `loadRuntimeConfig` 部署模式 fail-fast；`createAuthMiddleware`/`createLogin`/`createAuthRouter` 工厂模式；`validateImageBytes` 7-step；`redactError` allowlist + 5 sensitive patterns |
+
+| D-045 | 2026-07-18 | 冻结 | PERSIST-001 legacy history 显式导入而非静默迁移（D-009 落地） | 旧 `edit_history` 元数据无法保证图片可恢复；静默迁移会造成数据丢失假象 | `inspectLegacyHistory` 只读 → `exportLegacyBackup` JSON 下载 → `importRecoverableEntries` 逐条确认 + 失败恢复 + 备份保留 |
+
 ## 新增决策格式
 
 ```text

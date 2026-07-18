@@ -107,6 +107,10 @@ export function useProject(
   const [activeJob, setActiveJob] = useState<GenerationJobDto | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // Track the previous projectId so we can reset snapshot/job state during
+  // render when the id changes (React-recommended pattern for adjusting
+  // state on prop changes without setState-in-effect).
+  const [prevProjectId, setPrevProjectId] = useState<string | undefined>(projectId);
 
   // Abort flags for polling and async ops. Refs survive re-renders without
   // re-triggering effects.
@@ -121,18 +125,12 @@ export function useProject(
     };
   }, []);
 
-  // When projectId changes, auto-refresh so consumers can pass a route
-  // param directly. Skip when projectId is undefined (upload-first flow).
-  useEffect(() => {
-    if (!projectId) {
-      setSnapshot(null);
-      setActiveJob(null);
-      return;
-    }
-    pollAbortRef.current = true; // cancel any in-flight poll from prev id
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  // Reset state during render when projectId changes (React pattern).
+  if (projectId !== prevProjectId) {
+    setPrevProjectId(projectId);
+    setSnapshot(null);
+    setActiveJob(null);
+  }
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!projectId) return;
@@ -152,6 +150,15 @@ export function useProject(
       if (!unmountedRef.current) setIsLoading(false);
     }
   }, [projectId]);
+
+  // When projectId changes, auto-refresh so consumers can pass a route
+  // param directly. Skip when projectId is undefined (upload-first flow).
+  useEffect(() => {
+    if (!projectId) return;
+    pollAbortRef.current = true; // cancel any in-flight poll from prev id
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh sets isLoading synchronously but this is the standard data-fetching pattern
+    void refresh();
+  }, [projectId, refresh]);
 
   const upload = useCallback(async (file: File, name: string): Promise<void> => {
     setError(null);

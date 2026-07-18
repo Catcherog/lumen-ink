@@ -1,5 +1,35 @@
 # 10｜变更日志
 
+## 2026-07-18 - PERSIST-001 Trae 实施完成（awaiting_gpt_acceptance）
+
+- 触发：STORAGE-001 GPT 验收通过并激活 PERSIST-001（`ready_for_trae / nextActor=trae`）；用户授权在一个任务/分支/最终验收周期内连续执行 D-040 契约收敛 → CloudBase/local/mock adapter → PERSIST 核心闭环 → 三个内部安全单元 → 失败/恢复矩阵与统一 8 门禁。
+- 分支：`lumen/persist-001-trae`（基于 `6eaec946` STORAGE-001 验收后）。
+- 提交（12 commits）：
+  - `51ac5f9` `feat(lumen-v2): PERSIST-001 Task 2+3 — Job state machine + D-040 contract convergence`
+  - `859247f` `feat(lumen-v2): PERSIST-001 Task 4+5 — ProjectService + recoverable GenerationService`
+  - `1741567` `feat(lumen-v2): PERSIST-001 Task 6 — authenticated Project/Job APIs`
+  - `d030901` `feat(lumen-v2): PERSIST-001 Task 7 — controlled /api/edit compatibility layer`
+  - `889496e` `feat(lumen-v2): PERSIST-001 recoverable project client`
+  - `29be3a6` `feat(lumen-v2): PERSIST-001 version and job UI`
+  - `0248d09` `feat(lumen-v2): PERSIST-001 internal auth safety floor`
+  - `a2809e6` `feat(lumen-v2): PERSIST-001 validate image ingress`
+  - `2e1508d` `feat(lumen-v2): PERSIST-001 redact internal service boundaries`
+  - `075e453` `feat(lumen-v2): PERSIST-001 explicit history import`
+  - `ceaa9db` `test(lumen-v2): PERSIST-001 failure recovery matrix`
+  - 本提交 `feat(lumen-v2): PERSIST-001 implementation`（证据 + state handoff）
+- 累计变更：54 文件，+10945/-550。
+- 核心产出：
+  - D-040 契约收敛：9 阶段 Job 状态机、`(projectId, idempotencyKey)` 唯一性、lease/heartbeat/原子 claim、stale worker 拒写、同事务上下文；接口再次冻结（D-042）。
+  - 原子成功边界：Object upload → DB 事务 → 条件完成；失败补偿删除孤儿对象（D-043）。
+  - 内部安全底线（D-034）：runtime secret fail-fast + durable auth throttle + CORS allowlist + 7-step image validation + allowlist redaction（D-044）。
+  - Legacy history 显式导入：inspect → export → import with confirmation（D-045，D-009 落地）。
+  - E2E 失败矩阵：13 server tests + 18 client tests 覆盖成功/超时/配额/网络/存储失败/事务失败/取消/重试/幂等/级联删除/恢复路径。
+- 8 条门禁：全绿（client 194 tests / server 198 tests / root 392 combined / lint 0 errors / build / check-lumen-collab）。
+- 证据：`docs/lumen-v2/evidence/PERSIST-001/gate-results.md` + `base-commit.txt`。
+- 范围遵守：单任务/单分支/单验收周期；未启动 ROUTING / STORAGE-002 / PERSIST-002；未改变冻结的 Provider/API/存储决策；保留工作区既有无关修改；未提交密钥或未脱敏证据；普通阶段未暂停或请求 GPT 中间验收。
+- 状态推进：`STATE.json` 由 `ready_for_trae / nextActor=trae` → `awaiting_gpt_acceptance / nextActor=gpt`；`PROJECT-MEMORY.md` / `DECISION-LOG.md`（新增 D-042 / D-043 / D-044 / D-045）/ 本日志 / `SESSION-HANDOFF.md` / `NEW-WINDOW-GPT.md` 同步更新。
+- 下一步：GPT 按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板启动新窗口验收；审查 diff（base `6eaec94` → HEAD）、关键行为、8 门禁；写入 `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`。
+
 ## 2026-07-18 - STORAGE-001 GPT 验收通过并激活 PERSIST-001
 
 - 审查 commit：`abcc103394f86b87ae37af1bd6172f984e9d46e6`；结论：`MVP_PASS_WITH_DEBT`。

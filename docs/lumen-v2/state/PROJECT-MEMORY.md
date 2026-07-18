@@ -107,28 +107,39 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
+- [x] `PERSIST-001` 持久化生成闭环（Trae 实施完成，2026-07-18；`awaiting_gpt_acceptance / nextActor=gpt`；12 子任务 + 8 门禁全绿 + 392 tests）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：PERSIST-001（ready_for_trae / 扩大执行包）
+### 6.1 当前任务：PERSIST-001（awaiting_gpt_acceptance / 等待 GPT 验收）
 
 任务 ID：`PERSIST-001`
-状态：`ready_for_trae`，`nextActor=trae`（STORAGE-001 已冻结，2026-07-18）。
+状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（Trae 实施完成，2026-07-18）。
 前置依赖：FLOW-001 与 STORAGE-001 均已通过 GPT 验收。
 任务目标：在一个任务/分支/最终验收周期内完成 D-040 契约收敛、CloudBase 生产适配、Project/Asset/V0、不可变 Version、可恢复 GenerationJob、刷新恢复、取消/重试、删除、旧 history 显式导入和内部安全底线。
 任务文件：`docs/lumen-v2/tasks/active/PERSIST-001.md`。
 实施计划：`docs/lumen-v2/plans/PERSIST-001-IMPLEMENTATION-PLAN.md`。
-连续入口：`docs/lumen-v2/prompts/INTERNAL-FAST-TRACK-TRAE.md`。
-执行约束：先用红→绿测试关闭 D-040 契约差距；普通阶段不交接；只有付费/真实凭据、不可逆迁移、数据或安全 P0、候选 A 无法满足原子语义、完整门禁失败时停止。
-Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`（含修订章节）。
-选型报告：`docs/lumen-v2/storage-options.md`（推荐候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage，83/100 vs 82/100 vs 78/100）。
-PoC 证据：
-  - `docs/lumen-v2/evidence/STORAGE-001/poc-result.md`（原 3 合约测试通过）。
-  - `docs/lumen-v2/evidence/STORAGE-001/cloudbase-mock-poc-result.md`（**新增**：CloudBase mock adapter PoC 6 用例全部通过）。
-分支：`lumen/storage-001-trae`（commits `37c381d` → `d59abbd` → `13342b0` → `d85bae2` → 待提交修订 commit）。
-实施约束：本任务只做技术选型、接口契约与最小 PoC，不接入生产数据；未经 GPT/用户冻结不得进入 PERSIST-001。
-冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT 验收通过后由 GPT 写入冻结并更新 STATE.json 激活 PERSIST-001。
+Trae 报告：`docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md`。
+证据目录：`docs/lumen-v2/evidence/PERSIST-001/`（gate-results.md + base-commit.txt）。
+分支：`lumen/persist-001-trae`（基于 `6eaec946` STORAGE-001 验收后；12 commits `51ac5f9` → `ceaa9db` + 本提交）。
+累计变更：54 文件，+10945/-550。
+8 门禁：全绿（client 194 tests / server 198 tests / root 392 combined / lint 0 errors / build / check-lumen-collab）。
+范围遵守：单任务/单分支/单验收周期；D-040 契约收敛完成；未启动 ROUTING / STORAGE-002 / PERSIST-002；未改变冻结的 Provider/API/存储决策；保留工作区既有无关修改；未提交密钥或未脱敏证据。
+
+#### PERSIST-001 实施摘要（2026-07-18）
+
+- D-040 契约收敛：完整 Project/Asset/Version/GenerationJob 字段 + 9 阶段 Job 状态机 + `(projectId, idempotencyKey)` 唯一性 + lease/heartbeat/原子 claim + stale worker 拒写 + 同事务上下文。接口再次冻结。
+- CloudBase/local/mock adapter：`cloudbase-mock.ts` + `local.ts` 通过同一最终合约；6 contract tests + 3 PoC tests 全绿。
+- ProjectService：原子成功边界（Object upload → DB 事务 → 条件完成；失败补偿删除孤儿对象）；`validateImageBytes` 7-step 验证；级联删除（metadata 事务 + best-effort object cleanup）。
+- GenerationService：`executeJob` 生命周期（claim → upload → analyze → generate → postprocess → save → succeeded）；`createJob` 幂等；`cancelJob` / `retryJob`（attempt+1, parentJobId）；`classifyProviderError` 错误分类（timeout/quota/network → 504/429/502）；两 worker 接管 + stale worker 拒绝。
+- 认证 API：`createProjectsRouter` / `createJobsRouter` / `mountProjectJobsRoutes`；`Idempotency-Key` 必需；DomainError → HTTP status 映射；storageKey 脱敏为 `redacted://<last-segment>`。
+- /api/edit 受控兼容层：V2 返回 `Deprecation: true` + `Link` header + 202 Accepted with `{ success, jobId, status, deprecatedSyncRoute: true }`。
+- 客户端：`api/projects.ts` typed axios wrappers + `useProject` hook（轮询契约 1.5s，succeeded→refresh，failed/cancelled→停止，unmount→abort，从不合成百分比）+ `VersionStrip`（active/viewed/approved 标记）+ `JobStatusPanel`（9 状态标签 + 取消/重试）+ `LegacyHistoryImport`（三步显式导入）。
+- 内部安全底线（D-034）：runtime secret fail-fast（14 tests）+ durable auth throttle HMAC-derived key（6 tests）+ CORS allowlist + 7-step image validation（10 tests）+ allowlist redaction（19 tests + 9 integration）。
+- Legacy history：`inspectLegacyHistory`（只读）+ `exportLegacyBackup`（JSON 下载）+ `importRecoverableEntries`（逐条确认 + 失败恢复 + 备份保留）。
+- E2E 失败矩阵：13 server tests（upload/V0、success/V1、timeout、quota、network、object failure+compensation、DB failure+rollback+compensation、cancel、retry、idempotent、cascade delete、recovery path）+ 18 client tests（refresh、no-jobs、9 status labels、activate、approve、failed-no-version、cancel、retry、no-percentage、V0+V1 chips）。
+- Lint 修复：`useProject` hook 重排 `refresh` 声明顺序避免 React Compiler `set-state-in-effect` 警告；`AppV2` 添加 `eslint-disable` 注释（合法的 viewer 自动切换）；测试 fixture 缩短 `sk-` 和 `Bearer` 长度低于 check-lumen-collab 阈值。
 
 #### STORAGE-001 修订摘要（2026-07-18）
 

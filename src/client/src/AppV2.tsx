@@ -274,16 +274,14 @@ export default function AppV2() {
     if (!signedUrl) return;
 
     lastSyncedResultIdRef.current = job.resultVersionId;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- legitimate: auto-switch viewer to the newly-succeeded Version
     setViewedVersionId(job.resultVersionId);
     dispatch({
       type: 'SET_RESULT',
       payload: {
-        imageData: null,
         imageUrl: signedUrl,
-        text: null,
         mimeType: asset.mimeType,
         history: state.history, // preserve legacy history
-        meta: undefined,
       },
     });
   }, [project.activeJob, project.snapshot, dispatch, state.history]);
@@ -304,7 +302,7 @@ export default function AppV2() {
     if (!signedUrl) return;
     dispatch({
       type: 'SET_CURRENT_IMAGE',
-      payload: { image: null, imageUrl: signedUrl, mimeType: asset.mimeType },
+      payload: { imageUrl: signedUrl, mimeType: asset.mimeType },
     });
   }, [project.snapshot, dispatch]);
 
@@ -318,10 +316,12 @@ export default function AppV2() {
   }, [project]);
 
   const handleCancelJob = useCallback(async (jobId: string) => {
+    void jobId; // jobId accepted for API symmetry; cancel uses activeJob internally
     await project.cancel();
   }, [project]);
 
   const handleRetryJob = useCallback(async (jobId: string) => {
+    void jobId; // jobId accepted for API symmetry; retry uses activeJob internally
     await project.retry();
   }, [project]);
 

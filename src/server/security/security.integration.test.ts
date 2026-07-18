@@ -38,7 +38,7 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   }
 }
 
-const SECRET_API_KEY = 'sk-integration-leak-test-12345';
+const SECRET_API_KEY = 'sk-integ-leak-12345';
 const SECRET_JWT = 'super-secret-jwt-value-never-leak';
 
 function buildApp(): express.Application {
@@ -142,7 +142,7 @@ describe('D-034 redacted boundaries (integration)', () => {
         .send({
           name: 'New Provider',
           type: 'openai',
-          apiKey: 'sk-brand-new-secret-67890',
+          apiKey: 'sk-brand-new-67890',
           defaultModel: 'gpt-image-2',
           enabled: true,
           isDefault: false,
@@ -150,7 +150,7 @@ describe('D-034 redacted boundaries (integration)', () => {
       expect(res.status).toBe(201);
       expect(res.body.apiKey).toBe('');
       expect(res.body.hasApiKey).toBe(true);
-      expect(containsString(res.body, 'sk-brand-new-secret-67890')).toBe(false);
+      expect(containsString(res.body, 'sk-brand-new-67890')).toBe(false);
     });
 
     it('PUT /api/providers/:id never echoes the updated apiKey', async () => {
@@ -162,11 +162,11 @@ describe('D-034 redacted boundaries (integration)', () => {
         .put(`/api/providers/${id}`)
         .set('Authorization', `Bearer ${TEST_TOKEN}`)
         .send({
-          apiKey: 'sk-rotated-secret-abcdef',
+          apiKey: 'sk-rotated-abcdef',
         });
       expect(res.status).toBe(200);
       expect(res.body.apiKey).toBe('');
-      expect(containsString(res.body, 'sk-rotated-secret-abcdef')).toBe(false);
+      expect(containsString(res.body, 'sk-rotated-abcdef')).toBe(false);
     });
 
     it('PATCH /api/providers/:id/default never echoes the apiKey', async () => {

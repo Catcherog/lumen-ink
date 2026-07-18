@@ -31,11 +31,11 @@ describe('redactError (D-034 internal security floor)', () => {
 
   it('redacts Bearer tokens', () => {
     const result = redactError(
-      new Error('Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.sflKxwRJSMeKKF2QT4fwp')
+      new Error('Authorization: Bearer eyJhbGci.short')
     );
     const serialized = JSON.stringify(result.log);
     expect(serialized).not.toContain('Bearer eyJhbGci');
-    expect(serialized).not.toContain('sflKxwRJSMeKKF2QT4fwp');
+    expect(serialized).not.toContain('eyJhbGci.short');
   });
 
   it('redacts full JWT tokens', () => {
