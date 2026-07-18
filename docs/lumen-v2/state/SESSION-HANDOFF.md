@@ -5,12 +5,20 @@
 ## 当前状态
 
 - 日期：2026-07-18
-- 当前任务：`FLOW-001`
-- 状态：`awaiting_gpt_acceptance / nextActor=gpt`
-- Trae R2 返工 commit：待 push（与本地 `7601274` 一并 push）
+- 当前任务：`STORAGE-001`
+- 状态：`ready_for_trae / nextActor=trae`
+- FLOW-001 验收 commit：`7fca3f5`（已 push，含 `7601274`）
 - 分支：`lumen/flow-001-trae`
 - Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`（已追加 §15 第二轮 R2 返工记录）
-- GPT 驳回报告：`docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`（含第二轮验收与 FIX_PACKET）
+- GPT 验收报告：`docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`（第三轮 `MVP_PASS`）
+
+## GPT 第三轮验收结论
+
+- 结论：`MVP_PASS`。
+- P0-01-R2：URL-only SET_RESULT 已清空旧 base64；真实复现与四类结果状态测试通过。
+- P0-02-VERIFY-R2：真实文件输入添加、Prompt/history/request payload 数量一致性测试通过；19/18 计数已纠正。
+- GPT 独立 8 条门禁全部 `EXIT_CODE=0`：client 104、server 16、root 120，lint/typecheck/build/安全扫描通过。
+- 未发现新 P0/P1；FLOW-001 已归档，STORAGE-001 已激活；PERSIST-001 继续阻塞。
 
 ## GPT 第二轮验收结论
 
@@ -82,8 +90,18 @@ Trae 按第二轮 FIX_PACKET 最小返工，未扩大范围：
 
 ## 下一步
 
-GPT 按变更风险驱动验收 R2 返工，结果写入 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`（追加第三轮验收）。本轮 R2 commit 与本地 `7601274` 回填 commit 一并 push 到 `lumen/flow-001-trae` 分支。
+Trae 读取 `docs/lumen-v2/tasks/active/STORAGE-001.md`，执行技术选型、最小 PoC、接口契约与合约测试；不得提前实施 PERSIST-001。开始前先提交/推送本轮 GPT 验收控制面文件与任务移动，保持一个提交只包含本轮验收落盘。
 
 ## 后续加速方向（已确认，尚未激活）
 
 用户已确认：FLOW-001 通过后，STORAGE-001 仍单独完成方案比较、PoC 与 GPT/用户冻结；冻结后激活扩大执行包 `PERSIST-001`，一次交付原 VERSION-001 与 JOB-001 的项目、不可变版本和可恢复生成闭环。设计、任务包与实施计划已落盘，但当前不得提前实施。
+
+## 内部稳定版加速包（用户已批准）
+
+- 目标：优先达到 3 人内部团队稳定使用；非必要 S2/S3 统一登记后延，不阻塞主线。
+- 当前唯一可执行任务仍为 `STORAGE-001 / ready_for_trae / nextActor=trae`。
+- 连续执行入口：`docs/lumen-v2/prompts/INTERNAL-FAST-TRACK-TRAE.md`。
+- 冻结前执行：`INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 0—3；Task 0 只落地 FLOW GPT 控制面，Task 1—3 完成 STORAGE 选型、PoC、稳定契约和验收包。
+- 冻结后执行：仅当 GPT 更新 STATE 为 `PERSIST-001 / ready_for_trae / nextActor=trae`，才执行既有 PERSIST Task 1—11、快速计划 Task 5—7、最后执行 PERSIST Task 12 统一证据交接。
+- 禁止提前启动 ROUTING、完整公开发布 HARDEN、多工作区 IAM、Preview 或非关键 UI 优化。
+- GPT 本轮只完成规格与计划落盘，未修改生产代码、未提交、未 push；由 Trae 精确选择本轮控制面文件提交，保留工作区既有无关修改。

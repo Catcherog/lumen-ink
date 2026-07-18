@@ -1,5 +1,14 @@
 # 10｜变更日志
 
+## 2026-07-18 - FLOW-001 GPT 第三轮验收通过（MVP_PASS）
+
+- GPT 复核并确认本地/远端 commit `7fca3f5` 一致，`7601274` 已一并推送；
+- P0-01-R2 已关闭：URL-only SET_RESULT 清空旧 base64，真实复现与四类结果状态测试通过；
+- P0-02-VERIFY-R2 已关闭：真实 file input 添加、Prompt/history/request payload 数量一致性测试通过；首轮 19/18 计数已纠正；
+- GPT 独立重跑 8 条门禁全部 `EXIT_CODE=0`：client 104、server 16、root 120，lint/typecheck/build/安全扫描通过；
+- 无新增 P0/P1；FLOW-001 结论 `MVP_PASS` 并归档；
+- 激活 STORAGE-001 为 `ready_for_trae / nextActor=trae`；PERSIST-001 继续阻塞，未经方案冻结不得实施。
+
 ## 2026-07-18 - FLOW-001 P0 R2 返工完成（awaiting_gpt_acceptance）
 
 - 触发：GPT 第二轮验收 `MVP_FAIL`，附最小 FIX_PACKET（P0-01-R2 SET_RESULT 状态不变量 + P0-02-VERIFY-R2 真实添加/payload 回归 + 19/18 计数纠正）；状态 `changes_requested / nextActor=trae`；

@@ -105,21 +105,21 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
-- [ ] `FLOW-001` 配方和单一操作（Trae R2 返工完成 `awaiting_gpt_acceptance / nextActor=gpt`，2026-07-18；SET_RESULT 维护 URL-only 当前输入不变量，补真实添加/payload 回归 10 用例）。
-- [ ] `STORAGE-001` 技术选型。
+- [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
+- [ ] `STORAGE-001` 技术选型（`ready_for_trae / nextActor=trae`）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：FLOW-001（awaiting_gpt_acceptance / R2 返工完成）
+### 6.1 当前任务：STORAGE-001（ready_for_trae）
 
-任务 ID：`FLOW-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（R2 返工完成，2026-07-18）。
-前置依赖：`UI-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-17）。
-任务目标：一次完成 EditRecipe、五档参数与保护项、Prompt 编译器 v1、V2 单一"生成预览"CTA、现有 `/api/edit` 请求接线、自动化测试和脱敏证据。
-任务文件：`docs/lumen-v2/tasks/active/FLOW-001.md`。
-实施约束：继续使用同步 `/api/edit`；不做 STORAGE/JOB/VERSION；保持 Provider 输出兼容；完整 Prompt 默认折叠只读。
-R2 返工摘要：`useEditor.SET_RESULT` 重写为三种结果显式分支（base64 / URL-only / text-only），URL-only 时清空旧 base64；新建 `useEditor.test.ts`（9 用例）覆盖真实复现 + 四分支 + payload 一致性；`ContextPanel.test.tsx` 新增 1 用例覆盖真实添加流程；纠正 19/18 计数（首轮实际 18，R2 新增 10，累计 P0 相关 28 用例）。8 条门禁全绿：client 104 / server 16 / root 120。第二轮 FIX_PACKET 见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`。
+任务 ID：`STORAGE-001`
+状态：`ready_for_trae`，`nextActor=trae`（FLOW-001 第三轮验收通过后激活，2026-07-18）。
+前置依赖：`FLOW-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-18）。
+任务目标：比较至少两个完整持久化/任务基础设施方案，完成合成数据最小 PoC、评分矩阵、成本/迁移/备份/删除/回滚分析，并产出 PERSIST-001 所需的稳定接口与合约测试。
+任务文件：`docs/lumen-v2/tasks/active/STORAGE-001.md`。
+实施约束：本任务只做技术选型、接口契约与最小 PoC，不接入生产数据；未经 GPT/用户冻结不得进入 PERSIST-001。
+FLOW-001 验收摘要：commit `7fca3f5` 关闭第二轮两个 P0；GPT 独立 8 条门禁全绿（client 104 / server 16 / root 120），结论 `MVP_PASS`；详见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md` 第三轮验收。
 
 #### FLOW-001 实施摘要（2026-07-17）
 
@@ -151,7 +151,7 @@ R2 返工摘要：`useEditor.SET_RESULT` 重写为三种结果显式分支（bas
 
 ```text
 BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
-  → FLOW-001 (changes_requested, 当前) → STORAGE-001 → PERSIST-001 → HARDEN-001
+  → FLOW-001 (completed, MVP_PASS, 2026-07-18) → STORAGE-001 (ready_for_trae, 当前) → PERSIST-001 → HARDEN-001
 支线: ROUTING-001 (前置 PERSIST-001)
 模板: ACCEPTANCE-FIX (按需插入任意任务驳回场景)
 ```
@@ -192,8 +192,8 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 
 ### 6.4 当前阻塞
 
-- FLOW-001 R2 返工已交付（2026-07-18），状态 `awaiting_gpt_acceptance / nextActor=gpt`；STORAGE-001 / PERSIST-001 保持阻塞。
-- `STATE.json.blockedTasks` 仍列 STORAGE-001 / PERSIST-001；FLOW-001 通过后才由 GPT 激活 STORAGE-001。
+- FLOW-001 已于 2026-07-18 第三轮验收 `MVP_PASS` 并归档；STORAGE-001 已激活为 `ready_for_trae / nextActor=trae`。
+- `STATE.json.blockedTasks` 仅保留 PERSIST-001；STORAGE-001 方案未经 GPT/用户冻结前不得解除其阻塞。
 - 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
 - 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 PERSIST-001）。
 

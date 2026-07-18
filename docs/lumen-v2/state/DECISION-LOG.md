@@ -35,6 +35,10 @@
 | D-031 | 2026-07-18 | 冻结 | FLOW-001 第二轮验收 `MVP_FAIL`；P0-01 必须从真实 reducer 状态验证，允许最小修改 `useEditor` reducer 维护当前输入不变量 | URL-only 响应后实际状态为旧 `currentImage` base64 与新 `currentImageUrl` 并存，现有 `!!currentImage` 判定和防御检查均会放行；现有测试错误构造为 `currentImage=null` | FLOW-001 回到 `changes_requested / nextActor=trae`；P0-02 生产接线保留，只补真实添加与请求 payload 回归；STORAGE-001 / PERSIST-001 继续阻塞 |
 | D-032 | 2026-07-18 | 冻结 | FLOW-001 R2 返工方案：`useEditor.SET_RESULT` 重写为三种结果显式分支（base64 / URL-only / text-only），URL-only 时清空旧 base64；新建 `useEditor.test.ts` 真实复现 + payload 一致性测试；`ContextPanel.test.tsx` 补真实添加流程 | 第二轮 FIX_PACKET 要求从状态源头维护"当前画布输入"不变量，不得仅增加表面布尔判断；要求真实覆盖添加流程与 `submitEdit`/`/api/edit` payload 一致性，纠正 19/18 计数 | `SET_RESULT` 三分支：base64 结果 currentImage=新 base64 + currentImageUrl=同时返回 URL 或 null；URL-only 结果 currentImage=null + currentImageUrl=新 URL；text-only 保留既有 canvas。`useEditor.test.ts` 9 用例 + `ContextPanel.test.tsx` 1 用例 = R2 新增 10 用例；累计 P0 相关 28 用例（首轮 18 + R2 10）；8 条门禁全绿（client 104 / server 16 / root 120）；状态 `awaiting_gpt_acceptance / nextActor=gpt` |
 
+| D-033 | 2026-07-18 | 冻结 | FLOW-001 第三轮验收 `MVP_PASS`，激活 STORAGE-001 技术选型 | commit `7fca3f5` 关闭 URL-only 旧 base64 状态错位和参考图有效回归缺口；GPT 独立 8 条门禁全绿，未发现新 P0/P1 | FLOW-001 归档；STORAGE-001 进入 `ready_for_trae / nextActor=trae`；PERSIST-001 继续阻塞，方案冻结前不得实施 |
+
+| D-034 | 2026-07-18 | 冻结 | 内部稳定版优先采用“STORAGE 快速决策门 → PERSIST 连续扩大执行包 + 内部安全底线”的加速路径，非必要问题统一延期 | 用户明确选择优先让 3 人内部团队稳定使用；通过减少交接和延后 ROUTING/公开发布优化提速，同时保留数据一致性、恢复、删除和凭据安全硬门 | STORAGE 仍保留冻结门但压缩为两个方案与合成 PoC；PERSIST 加入最小内部安全单元；S0/S1 不得延期；完整 HARDEN 与 ROUTING 后移 |
+
 ## 新增决策格式
 
 ```text
