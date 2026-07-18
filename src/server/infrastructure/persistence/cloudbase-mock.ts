@@ -84,6 +84,7 @@ interface JobRow {
   status: GenerationJobStatus;
   provider_id: string | null;
   model: string | null;
+  input_version_id: string | null;
   result_version_id: string | null;
   error: string | null;
   error_code: string | null;
@@ -92,6 +93,7 @@ interface JobRow {
   lease_token: string | null;
   lease_expires_at: string | null;
   attempt: number | null;
+  parent_job_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +200,7 @@ function jobToRow(j: GenerationJob): JobRow {
     status: j.status,
     provider_id: j.providerId ?? null,
     model: j.model ?? null,
+    input_version_id: j.inputVersionId ?? null,
     result_version_id: j.resultVersionId ?? null,
     error: j.error ?? null,
     error_code: j.errorCode ?? null,
@@ -206,6 +209,7 @@ function jobToRow(j: GenerationJob): JobRow {
     lease_token: j.leaseToken ?? null,
     lease_expires_at: j.leaseExpiresAt ?? null,
     attempt: j.attempt ?? null,
+    parent_job_id: j.parentJobId ?? null,
     created_at: j.createdAt,
     updated_at: j.updatedAt,
   };
@@ -219,6 +223,7 @@ function jobFromRow(r: JobRow): GenerationJob {
     status: r.status,
     providerId: r.provider_id ?? undefined,
     model: r.model ?? undefined,
+    inputVersionId: r.input_version_id ?? undefined,
     resultVersionId: r.result_version_id ?? undefined,
     error: r.error ?? undefined,
     errorCode: r.error_code ?? undefined,
@@ -227,6 +232,7 @@ function jobFromRow(r: JobRow): GenerationJob {
     leaseToken: r.lease_token ?? undefined,
     leaseExpiresAt: r.lease_expires_at ?? undefined,
     attempt: r.attempt ?? undefined,
+    parentJobId: r.parent_job_id ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -476,6 +482,10 @@ export function createCloudBaseMockPersistence(
           : (patch.providerId ?? null),
       model:
         patch.model === undefined ? row.model : (patch.model ?? null),
+      input_version_id:
+        patch.inputVersionId === undefined
+          ? row.input_version_id
+          : (patch.inputVersionId ?? null),
       result_version_id:
         patch.resultVersionId === undefined
           ? row.result_version_id
@@ -497,6 +507,10 @@ export function createCloudBaseMockPersistence(
           : (patch.leaseExpiresAt ?? null),
       attempt:
         patch.attempt === undefined ? row.attempt : (patch.attempt ?? null),
+      parent_job_id:
+        patch.parentJobId === undefined
+          ? row.parent_job_id
+          : (patch.parentJobId ?? null),
       created_at: row.created_at,
       updated_at: patch.updatedAt ?? now().toISOString(),
     };

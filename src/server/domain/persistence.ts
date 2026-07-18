@@ -60,6 +60,9 @@ export interface GenerationJob {
   status: GenerationJobStatus;
   providerId?: string;
   model?: string;
+  /** Input version whose asset is the source image for this Job. */
+  inputVersionId?: string;
+  /** Result version created when the Job succeeds. */
   resultVersionId?: string;
   error?: string;
   errorCode?: string;
@@ -68,6 +71,8 @@ export interface GenerationJob {
   leaseToken?: string;
   leaseExpiresAt?: string;
   attempt?: number;
+  /** Parent Job ID for retries; null/undefined for original Jobs. */
+  parentJobId?: string;
   createdAt: string;
   updatedAt: string;
 }
