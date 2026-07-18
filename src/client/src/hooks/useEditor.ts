@@ -55,19 +55,44 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, isLoading: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
-    case 'SET_RESULT':
+    case 'SET_RESULT': {
+      // P0-01-R2: 维护"当前画布输入"不变量，避免 URL-only 结果保留旧 base64。
+      // - base64 结果：currentImage = 新 base64；currentImageUrl = 同时返回的 URL 或 null
+      // - URL-only 结果：清空旧 base64，currentImage = null，currentImageUrl = 新 URL
+      // - text-only 结果：保留既有 currentImage/currentImageUrl（chat 模型可继续基于原图编辑）
+      const hasImageData = !!action.payload.imageData;
+      const hasImageUrl = !!action.payload.imageUrl;
+      let nextCurrentImage: string | null;
+      let nextCurrentImageUrl: string | null;
+      let nextCurrentMimeType: string;
+      if (hasImageData) {
+        nextCurrentImage = action.payload.imageData ?? null;
+        nextCurrentImageUrl = hasImageUrl ? action.payload.imageUrl ?? null : null;
+        nextCurrentMimeType = action.payload.mimeType;
+      } else if (hasImageUrl) {
+        // URL-only 图片结果：清空旧 base64，避免下次 submitEdit 携带旧图
+        nextCurrentImage = null;
+        nextCurrentImageUrl = action.payload.imageUrl ?? null;
+        nextCurrentMimeType = action.payload.mimeType;
+      } else {
+        // text-only 或空结果：保留既有 canvas，用户可继续基于原图编辑
+        nextCurrentImage = state.currentImage;
+        nextCurrentImageUrl = state.currentImageUrl;
+        nextCurrentMimeType = state.currentMimeType;
+      }
       return {
         ...state,
         resultImage: action.payload.imageData || null,
         resultImageUrl: action.payload.imageUrl || null,
         resultText: action.payload.text || null,
         resultMimeType: action.payload.mimeType,
-        currentImage: action.payload.imageData || state.currentImage,
-        currentImageUrl: action.payload.imageUrl || null,
-        currentMimeType: action.payload.mimeType,
+        currentImage: nextCurrentImage,
+        currentImageUrl: nextCurrentImageUrl,
+        currentMimeType: nextCurrentMimeType,
         history: action.payload.history,
         lastCallMeta: action.payload.meta,
       };
+    }
     case 'SET_CURRENT_IMAGE':
       return {
         ...state,

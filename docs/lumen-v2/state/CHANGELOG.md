@@ -1,5 +1,25 @@
 # 10｜变更日志
 
+## 2026-07-18 - FLOW-001 P0 R2 返工完成（awaiting_gpt_acceptance）
+
+- 触发：GPT 第二轮验收 `MVP_FAIL`，附最小 FIX_PACKET（P0-01-R2 SET_RESULT 状态不变量 + P0-02-VERIFY-R2 真实添加/payload 回归 + 19/18 计数纠正）；状态 `changes_requested / nextActor=trae`；
+- 返工范围：严格按第二轮 FIX_PACKET，仅最小修改 `useEditor.SET_RESULT` reducer；未启动 STORAGE/JOB/VERSION/ROUTING，未修改 `/api/edit` 协议、Provider 实现、存储协议；
+- P0-01-R2 修复（`src/client/src/hooks/useEditor.ts`）：`SET_RESULT` 分支重写为三种结果显式分支（base64 / URL-only / text-only）；URL-only 时清空旧 base64，`currentImageUrl` = 新 URL；text-only 保留既有 canvas 供 chat 模型继续编辑。不变量：当前画布输入始终与最近一次结果的实际数据源一致；`submitEdit` 的 `image: state.currentImage || undefined` 自然不发任何 base64；
+- P0-02-VERIFY-R2 修复（测试）：新建 `src/client/src/hooks/useEditor.test.ts`（9 用例）覆盖 P0-01-R2 真实复现（上传 → URL-only SET_RESULT → currentImage=null → submitEdit 不含旧 base64）+ SET_RESULT 四分支无输入源错位 + P0-02-VERIFY-R2 payload 一致性（N=2/0/3 三种场景，断言编译 Prompt 含"参考 N 张"、history `params.recipe.auxiliary.referenceImageCount=N`、实际 `referenceImages` payload 长度=N）；`src/client/src/components/v2/ContextPanel.test.tsx` 新增 1 用例覆盖真实添加流程（mock `fileToBase64` + `fireEvent.change(fileInput)`，断言 `onReferenceImagesChange` 与 `onRecipeChange` 同步调用，recipe 计数 = 1）；
+- 19/18 计数纠正：首轮报告 §14.4 声称"新增 19 用例"实际为 18 用例；R2 新增 10 用例，累计 P0 相关回归 28 用例（首轮 18 + R2 10）；R2 真实补齐的"有效添加 + 有效 payload"测试为 10 用例，超过 FIX_PACKET 要求的最小 2 用例；
+- 8 条门禁重跑全绿：client 104 tests（首轮 94 + R2 新增 10）、server 16 tests、root 120 tests、lint/typecheck/build/安全扫描通过；证据文件就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`；
+- 状态推进：`STATE.json` → `awaiting_gpt_acceptance / nextActor=gpt`；`SESSION-HANDOFF.md` / `PROJECT-MEMORY.md` / `DECISION-LOG.md`（新增 D-032）/ `FLOW-001.md` Review History / 本日志同步更新；
+- 待 GPT 验收：按变更风险驱动，聚焦 R2 修复 diff、真实复现路径、payload 三层一致性、19/18 计数纠正与 8 条门禁结果；未变更的首轮文件与 UI-001 视觉证据不重审；
+- 本轮 R2 commit 与本地 `7601274` 回填 commit 一并 push 到 `lumen/flow-001-trae` 分支。
+
+## 2026-07-18 - FLOW-001 GPT 第二轮验收驳回（MVP_FAIL）
+
+- GPT 复核远端返工 commit `4e774ed`；本地 `7601274` 仅回填交接 hash，尚未 push；
+- 独立重跑 8 条门禁全部 `EXIT_CODE=0`：client 94 tests、server 16 tests、root 110 tests，lint/typecheck/build/安全扫描通过；
+- P0 `FLOW001-P0-01-R2`：真实 URL-only 响应状态为旧 base64 与新 URL 并存，现 `!!state.currentImage` 判定与防御检查仍会提交旧 base64；新增测试构造错了状态，未关闭原 P0；
+- P0 `FLOW001-P0-02-VERIFY-R2`：参考图生产接线方向正确，但承诺 19 条回归实际为 18 条，未覆盖真实添加和 `submitEdit`/`/api/edit` payload；
+- review 文件追加第二轮 FIX_PACKET；状态回退为 `changes_requested / nextActor=trae`；STORAGE-001 / PERSIST-001 继续阻塞。
+
 ## 2026-07-18 - FLOW-001 P0 返工完成（awaiting_gpt_acceptance）
 
 - 触发：GPT 首轮验收 `MVP_FAIL`，附最小 FIX_PACKET（P0-01 URL-only 旧 base64 + P0-02 参考图入口缺失）；状态 `changes_requested / nextActor=trae`；

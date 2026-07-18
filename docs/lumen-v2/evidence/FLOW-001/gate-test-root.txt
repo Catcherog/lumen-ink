@@ -1,4 +1,4 @@
-﻿
+
 > lumen-ink@0.1.0 test
 > npm run test --prefix src/client && npm run test --prefix src/server
 
@@ -7,30 +7,31 @@
 > vitest run
 
 
-[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/360Downloads/Trae 项目/picture-edit/src/client[39m
+ RUN  v4.1.10 D:/360Downloads/Trae 项目/picture-edit/src/client
 
- [32m✓[39m src/utils/image.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m src/utils/recipe.test.ts [2m([22m[2m54 tests[22m[2m)[22m[32m 10[2mms[22m[39m
- [32m✓[39m src/components/v2/ContextPanel.test.tsx [2m([22m[2m35 tests[22m[2m)[22m[33m 387[2mms[22m[39m
+ ✓ src/utils/image.test.ts (5 tests) 7ms
+ ✓ src/utils/recipe.test.ts (54 tests) 8ms
+ ✓ src/hooks/useEditor.test.ts (9 tests) 24ms
+ ✓ src/components/v2/ContextPanel.test.tsx (36 tests) 398ms
 
-[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
-[2m      Tests [22m [1m[32m94 passed[39m[22m[90m (94)[39m
-[2m   Start at [22m 11:47:16
-[2m   Duration [22m 1.68s[2m (transform 278ms, setup 424ms, import 446ms, tests 406ms, environment 1.76s)[22m
+ Test Files  4 passed (4)
+      Tests  104 passed (104)
+   Start at  12:15:17
+   Duration  1.82s (transform 418ms, setup 575ms, import 678ms, tests 437ms, environment 2.29s)
 
 
 > lumen-ink-server@0.1.0 test
 > vitest run
 
 
-[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/360Downloads/Trae 项目/picture-edit/src/server[39m
+ RUN  v4.1.10 D:/360Downloads/Trae 项目/picture-edit/src/server
 
- [32m✓[39m services/providers/operationType.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
- [32m✓[39m dist/services/providers/operationType.test.js [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ ✓ services/providers/operationType.test.ts (8 tests) 3ms
+ ✓ dist/services/providers/operationType.test.js (8 tests) 3ms
 
-[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
-[2m      Tests [22m [1m[32m16 passed[39m[22m[90m (16)[39m
-[2m   Start at [22m 11:47:18
-[2m   Duration [22m 267ms[2m (transform 44ms, setup 0ms, import 81ms, tests 6ms, environment 0ms)[22m
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+   Start at  12:15:19
+   Duration  362ms (transform 149ms, setup 0ms, import 195ms, tests 5ms, environment 0ms)
 
 EXIT=0

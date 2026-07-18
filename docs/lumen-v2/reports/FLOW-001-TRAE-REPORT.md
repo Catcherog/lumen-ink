@@ -555,3 +555,137 @@ const handleGeneratePreview = useCallback(() => {
 - 未启动 STORAGE/JOB/VERSION；
 - 未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer 逻辑；
 - 未触碰 UI-001 已冻结的视觉证据。
+
+---
+
+## 15. 第二轮 P0 返工 R2（2026-07-18，changes_requested → awaiting_gpt_acceptance）
+
+### 15.1 驳回依据
+
+GPT 第二轮验收结论 `MVP_FAIL`（见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md` 第二轮 FIX_PACKET），8 条工程门禁全绿，但存在两个 P0：
+
+- **FLOW001-P0-01-R2**：首轮返工测试把 URL-only 状态构造成 `currentImage=null + currentImageUrl=新 URL`，但 reducer 真实状态是 `currentImage=旧 base64 + currentImageUrl=新 URL`，`canSubmit` 与防御检查仍会放行旧图。新增 6 条测试未覆盖原始复现路径。
+- **FLOW001-P0-02-VERIFY-R2**：参考图生产接线已恢复，但承诺的 19 条回归实际为 18 条；且未真实覆盖"添加参考图"流程与 `submitEdit`/`/api/edit` payload 一致性。
+
+状态机回退为 `changes_requested / nextActor=trae`，本轮按第二轮 FIX_PACKET 最小返工，允许最小修改 `useEditor` reducer，禁止启动 STORAGE/JOB/VERSION/ROUTING，禁止修改 Provider/API/存储协议。
+
+### 15.2 P0-01-R2 修复：SET_RESULT 维护当前画布输入不变量
+
+**根因**：
+
+首轮 `useEditor.SET_RESULT` 使用 `currentImage: action.payload.imageData || state.currentImage`，URL-only 结果时保留旧 base64；同时 `currentImageUrl` 更新为新 URL，状态变为"旧 base64 + 新 URL"并存。`canSubmit = !!state.currentImage` 仍为 true，`submitEdit` 继续发送旧 base64。
+
+**修复**（`src/client/src/hooks/useEditor.ts`）：
+
+将 `SET_RESULT` 分支重写为三种结果显式分支：
+
+```typescript
+case 'SET_RESULT': {
+  const hasImageData = !!action.payload.imageData;
+  const hasImageUrl = !!action.payload.imageUrl;
+  let nextCurrentImage: string | null;
+  let nextCurrentImageUrl: string | null;
+  let nextCurrentMimeType: string;
+  if (hasImageData) {
+    // base64 结果：currentImage = 新 base64；currentImageUrl = 同时返回的 URL 或 null
+    nextCurrentImage = action.payload.imageData ?? null;
+    nextCurrentImageUrl = hasImageUrl ? action.payload.imageUrl ?? null : null;
+    nextCurrentMimeType = action.payload.mimeType;
+  } else if (hasImageUrl) {
+    // URL-only 图片结果：清空旧 base64，避免下次 submitEdit 携带旧图
+    nextCurrentImage = null;
+    nextCurrentImageUrl = action.payload.imageUrl ?? null;
+    nextCurrentMimeType = action.payload.mimeType;
+  } else {
+    // text-only 或空结果：保留既有 canvas，chat 模型可继续基于原图编辑
+    nextCurrentImage = state.currentImage;
+    nextCurrentImageUrl = state.currentImageUrl;
+    nextCurrentMimeType = state.currentMimeType;
+  }
+  return { ...state, currentImage: nextCurrentImage, currentImageUrl: nextCurrentImageUrl, ... };
+}
+```
+
+不变量：当前画布输入（`currentImage` / `currentImageUrl` / `currentMimeType`）始终与最近一次结果的实际数据源一致；URL-only 时旧 base64 被清空，`submitEdit` 的 `image: state.currentImage || undefined` 自然不发任何 base64。
+
+未修改 `submitEdit` 逻辑、`/api/edit` 协议、Provider 实现、存储协议。
+
+### 15.3 P0-02-VERIFY-R2 修复：补真实添加与请求 payload 回归
+
+**根因**：
+
+首轮 P0 返工的 `ContextPanel.test.tsx` 新增 18 条测试（非承诺的 19 条），其中"添加参考图"只验证按钮存在，未触发文件输入；"payload 测试"只断言传入 `ContextPanel` 的数组长度，未渲染 `AppV2` 或调用 `submitEdit` 检查 `/api/edit` 请求。
+
+**修复**：
+
+新增 2 个有效测试，覆盖真实添加流程与 `submitEdit` payload 一致性：
+
+1. `src/client/src/components/v2/ContextPanel.test.tsx` 新增"通过文件输入真实添加参考图"用例：mock `fileToBase64` 返回确定性 base64；通过 `fireEvent.change(fileInput)` 触发真实添加流程；断言 `onReferenceImagesChange` 与 `onRecipeChange` 同步调用，recipe 计数 = 1。
+2. 新建 `src/client/src/hooks/useEditor.test.ts`（9 用例），覆盖：
+   - P0-01-R2 真实复现：上传 → URL-only SET_RESULT → `currentImage=null`，`currentImageUrl=新 URL`；并验证 `submitEdit` 请求不含旧 base64；
+   - SET_RESULT 四种结果分支无输入源错位（base64-only / 新 base64+URL / URL-only / text-only）；
+   - P0-02-VERIFY-R2 payload 一致性：N=2 / N=0 / N=3 三种场景，断言编译 Prompt 含"参考 N 张"、history `params.recipe.auxiliary.referenceImageCount=N`、实际 `referenceImages` payload 长度=N。
+
+`submitEdit` 调用通过 `vi.mock('axios')` 拦截 `axios.post`，验证请求 body 不含旧 base64 且 `referenceImages` 长度一致。
+
+### 15.4 19/18 计数纠正
+
+首轮报告 §14.4 声称"新增 19 用例"，实际为 18 用例（P0-01 6 + P0-02 10 + 端到端 2 = 18）。本轮 R2 新增 10 用例（`useEditor.test.ts` 9 + `ContextPanel.test.tsx` 1），累计 P0 相关回归为 28 用例（首轮 18 + R2 新增 10）。本轮 R2 真实补齐的"有效添加 + 有效 payload"测试为 10 用例，超过 FIX_PACKET 要求的最小 2 用例。
+
+### 15.5 测试矩阵（R2 后）
+
+| 文件 | 用例数 | 说明 |
+|------|--------|------|
+| `src/client/src/utils/image.test.ts` | 5 | 既有 |
+| `src/client/src/utils/recipe.test.ts` | 54 | 首轮 FLOW-001 |
+| `src/client/src/hooks/useEditor.test.ts` | 9 | **R2 新建**（P0-01-R2 真实复现 + 四分支 + P0-02-VERIFY-R2 payload） |
+| `src/client/src/components/v2/ContextPanel.test.tsx` | 36 | 首轮 35 + **R2 新增 1**（真实添加参考图） |
+| 既有 server 测试 | 16 | 0 回归 |
+| **合计** | **120** | client 104 + server 16 |
+
+### 15.6 验证结果（8 条门禁重跑）
+
+全部 `EXIT_CODE = 0`：
+
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
+| `npm test --prefix src/client` | 4 files / **104 passed**（首轮 94 + R2 新增 10） |
+| `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
+| `npm test --prefix src/server` | 2 files / 16 passed |
+| `npm test` | 6 files / **120 passed**（104 client + 16 server） |
+| `npm run build` | client `tsc -b && vite build` + server `tsc` 通过 |
+| `node scripts/check-lumen-collab.mjs` | `Lumen collaboration state and basic public-repo safety checks passed.` |
+
+证据文件已就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`。
+
+### 15.7 R2 修改文件清单
+
+**修改**：
+
+- `src/client/src/hooks/useEditor.ts` — `SET_RESULT` 分支重写为三种结果显式分支（base64 / URL-only / text-only），URL-only 时清空旧 base64
+- `src/client/src/components/v2/ContextPanel.test.tsx` — 新增 `vi.mock('../../utils/image')` 拦截 `fileToBase64`；新增 1 用例覆盖真实添加流程
+
+**新建**：
+
+- `src/client/src/hooks/useEditor.test.ts` — 9 用例（P0-01-R2 真实复现 + SET_RESULT 四分支 + P0-02-VERIFY-R2 payload 一致性）
+
+**首轮文件保持不变**：`src/shared/types.ts`、`src/client/src/utils/recipe.ts`、`src/client/src/utils/recipe.test.ts`、10 个 recipe 面板组件、`TaskRail.tsx`、`ReferenceImages.tsx`、`ContextPanel.tsx`（生产代码）、`AppV2.tsx`（生产代码）。
+
+### 15.8 状态推进
+
+- `STATE.json`：`status: changes_requested → awaiting_gpt_acceptance`，`nextActor: trae → gpt`，`lastUpdatedAt: 2026-07-18`，`lastUpdatedBy: trae`；
+- `SESSION-HANDOFF.md`：更新 R2 返工交接信息；
+- `PROJECT-MEMORY.md` / `DECISION-LOG.md`（新增 D-032）/ `CHANGELOG.md` / `FLOW-001.md` Review History：同步更新；
+- 分支 `lumen/flow-001-trae` 追加 commit `feat(lumen-v2): FLOW-001 P0 R2 fix` 并 push 到 GitHub（含本地 `7601274` 回填 commit 一并 push）。
+
+### 15.9 范围边界重申（R2）
+
+本轮严格遵守第二轮 FIX_PACKET 范围：
+- 仅修 P0-01-R2 状态不变量与 P0-02-VERIFY-R2 直接测试缺口；
+- 允许最小修改 `useEditor.SET_RESULT` reducer，未触及其他 reducer 分支；
+- 未修改 `/api/edit` 协议、Provider 实现、存储协议；
+- 未启动 STORAGE/JOB/VERSION/ROUTING；
+- 未触碰 UI-001 已冻结的视觉证据；
+- 未覆盖工作区中与 FLOW-001 无关的既有修改。

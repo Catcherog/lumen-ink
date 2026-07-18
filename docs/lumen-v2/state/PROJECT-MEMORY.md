@@ -105,21 +105,21 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
-- [ ] `FLOW-001` 配方和单一操作（GPT 首轮验收 `MVP_FAIL`，`changes_requested / nextActor=trae`；仅返工 URL 当前结果与参考图链路两个 P0）。
+- [ ] `FLOW-001` 配方和单一操作（Trae R2 返工完成 `awaiting_gpt_acceptance / nextActor=gpt`，2026-07-18；SET_RESULT 维护 URL-only 当前输入不变量，补真实添加/payload 回归 10 用例）。
 - [ ] `STORAGE-001` 技术选型。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：FLOW-001（changes_requested）
+### 6.1 当前任务：FLOW-001（awaiting_gpt_acceptance / R2 返工完成）
 
 任务 ID：`FLOW-001`
-状态：`changes_requested`，`nextActor=trae`。
+状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（R2 返工完成，2026-07-18）。
 前置依赖：`UI-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-17）。
 任务目标：一次完成 EditRecipe、五档参数与保护项、Prompt 编译器 v1、V2 单一"生成预览"CTA、现有 `/api/edit` 请求接线、自动化测试和脱敏证据。
 任务文件：`docs/lumen-v2/tasks/active/FLOW-001.md`。
 实施约束：继续使用同步 `/api/edit`；不做 STORAGE/JOB/VERSION；保持 Provider 输出兼容；完整 Prompt 默认折叠只读。
-验收结论：首轮 `MVP_FAIL`；工程门禁全绿，但 URL-only 结果后二次编辑提交旧 base64，且参考图在 V2/Recipe/请求真实链路中不可达。FIX_PACKET 见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`。
+R2 返工摘要：`useEditor.SET_RESULT` 重写为三种结果显式分支（base64 / URL-only / text-only），URL-only 时清空旧 base64；新建 `useEditor.test.ts`（9 用例）覆盖真实复现 + 四分支 + payload 一致性；`ContextPanel.test.tsx` 新增 1 用例覆盖真实添加流程；纠正 19/18 计数（首轮实际 18，R2 新增 10，累计 P0 相关 28 用例）。8 条门禁全绿：client 104 / server 16 / root 120。第二轮 FIX_PACKET 见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`。
 
 #### FLOW-001 实施摘要（2026-07-17）
 
@@ -192,18 +192,28 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 
 ### 6.4 当前阻塞
 
-- FLOW-001 P0 返工已交付（2026-07-18），状态 `awaiting_gpt_acceptance / nextActor=gpt`；STORAGE-001 / PERSIST-001 保持阻塞。
+- FLOW-001 R2 返工已交付（2026-07-18），状态 `awaiting_gpt_acceptance / nextActor=gpt`；STORAGE-001 / PERSIST-001 保持阻塞。
 - `STATE.json.blockedTasks` 仍列 STORAGE-001 / PERSIST-001；FLOW-001 通过后才由 GPT 激活 STORAGE-001。
 - 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
 - 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 PERSIST-001）。
 
-### 6.5 FLOW-001 P0 返工要点（2026-07-18）
+### 6.5 FLOW-001 P0 返工要点（2026-07-18，R1 + R2 累计）
+
+#### R1 返工（首轮 P0）
 
 - **P0-01**：URL-only 结果不可继续编辑。`ContextPanel.canSubmit` 仅要求 `state.currentImage`；新增 `hasUrlOnlyResult` 显示琥珀色提示；`AppV2.handleGeneratePreview` 加防御检查。能力判定与 `submitEdit` 实际支持的输入类型 1:1 对齐。
 - **P0-02**：恢复 V2 参考图入口。`ContextPanel` 复用 Legacy `ReferenceImages` 组件；`handleReferenceImagesChange` 同步 `state.referenceImages` 与 `recipe.auxiliary.referenceImageCount`；`AppV2.handleGeneratePreview` 显式传 `referenceImages`。三层数据一致：state ↔ recipe 计数 ↔ 编译 Prompt【参考图】段 ↔ submitEdit payload。
-- **回归测试**：19 用例（6 P0-01 + 11 P0-02 + 2 端到端一致性）。
+- **回归测试**：首轮实际新增 18 用例（非承诺的 19 条；P0-01 6 + P0-02 10 + 端到端 2）。
 - **8 条门禁**：全绿，client 94 tests + server 16 tests = 110 tests passed。
-- **范围遵守**：未启动 STORAGE/JOB/VERSION；未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer。
+- **范围遵守**：未启动 STORAGE/JOB/VERSION；未修改 `/api/edit` 协议、Provider 实现。
+
+#### R2 返工（第二轮 P0）
+
+- **P0-01-R2**：`useEditor.SET_RESULT` 重写为三种结果显式分支（base64 / URL-only / text-only），URL-only 时清空旧 base64，从源头维护"当前画布输入"不变量；`submitEdit` 的 `image: state.currentImage || undefined` 自然不发任何 base64。
+- **P0-02-VERIFY-R2**：新建 `useEditor.test.ts`（9 用例）覆盖真实复现（上传 → URL-only SET_RESULT → currentImage=null → submitEdit 不含旧 base64）+ SET_RESULT 四分支 + payload 三层一致（N=2/0/3）；`ContextPanel.test.tsx` 新增 1 用例覆盖真实添加流程（mock `fileToBase64` + `fireEvent.change(fileInput)`）。
+- **19/18 计数纠正**：首轮实际 18 条，R2 新增 10 条，累计 P0 相关 28 条。
+- **8 条门禁**：全绿，client 104 tests + server 16 tests = 120 tests passed。
+- **范围遵守**：仅最小修改 `useEditor.SET_RESULT` reducer；未修改 `/api/edit` 协议、Provider 实现、存储协议；未启动 STORAGE/JOB/VERSION/ROUTING。
 
 ## 7. 仍需确认但不阻塞 UI-001
 

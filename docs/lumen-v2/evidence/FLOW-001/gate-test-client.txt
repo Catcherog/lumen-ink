@@ -1,13 +1,18 @@
-﻿
-[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/360Downloads/Trae 项目/picture-edit/src/client[39m
 
- [32m✓[39m src/utils/recipe.test.ts [2m([22m[2m54 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m src/utils/image.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [32m✓[39m src/components/v2/ContextPanel.test.tsx [2m([22m[2m35 tests[22m[2m)[22m[33m 328[2mms[22m[39m
+> client@0.0.0 test
+> vitest run
 
-[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
-[2m      Tests [22m [1m[32m94 passed[39m[22m[90m (94)[39m
-[2m   Start at [22m 11:47:02
-[2m   Duration [22m 1.41s[2m (transform 216ms, setup 263ms, import 357ms, tests 345ms, environment 1.58s)[22m
+
+ RUN  v4.1.10 D:/360Downloads/Trae 项目/picture-edit/src/client
+
+ ✓ src/utils/image.test.ts (5 tests) 9ms
+ ✓ src/utils/recipe.test.ts (54 tests) 8ms
+ ✓ src/hooks/useEditor.test.ts (9 tests) 27ms
+ ✓ src/components/v2/ContextPanel.test.tsx (36 tests) 404ms
+
+ Test Files  4 passed (4)
+      Tests  104 passed (104)
+   Start at  12:15:12
+   Duration  1.87s (transform 497ms, setup 607ms, import 773ms, tests 447ms, environment 2.27s)
 
 EXIT=0

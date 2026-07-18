@@ -1,5 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+// P0-02-VERIFY-R2: 拦截 fileToBase64，让"真实添加参考图"用例走确定性 base64
+vi.mock('../../utils/image', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/image')>();
+  return {
+    ...actual,
+    fileToBase64: vi.fn().mockResolvedValue('mocked-base64-data'),
+  };
+});
+
 import ContextPanel from './ContextPanel';
 import { defaultRecipe, compilePrompt } from '../../utils/recipe';
 import type { EditRecipe, EditorState, ReferenceImage } from '../../../../shared/types';
@@ -546,6 +556,44 @@ describe('ContextPanel (FLOW-001)', () => {
       const removeButton = screen.getByRole('button', { name: '×' });
       fireEvent.click(removeButton);
       expect(onRecipeChange).toHaveBeenCalledTimes(1); // 1 → 0，触发
+    });
+
+    // P0-02-VERIFY-R2: 真实"添加"参考图流程（通过文件输入触发），
+    // 验证 onReferenceImagesChange 与 onRecipeChange 同步计数。
+    // 首轮 P0 返工只覆盖了"删除"路径，被 GPT 第二轮验收标记为缺口。
+    it('通过文件输入真实添加参考图：onReferenceImagesChange 与 onRecipeChange 同步计数', async () => {
+      const onReferenceImagesChange = vi.fn();
+      const onRecipeChange = vi.fn();
+      renderPanel({
+        recipe: defaultRecipe('subject'),
+        state: { currentImage: 'fake-base64-data', referenceImages: [] },
+        onReferenceImagesChange,
+        onRecipeChange,
+      });
+
+      // 定位隐藏的 file input（ReferenceImages 内部点击"+ 添加参考图"按钮触发它）
+      const fileInput = document.querySelector(
+        'input[type="file"]',
+      ) as HTMLInputElement;
+      expect(fileInput).toBeInTheDocument();
+
+      const file = new File(['dummy'], 'ref.png', { type: 'image/png' });
+      fireEvent.change(fileInput, { target: { files: [file] } });
+
+      // 等待 async handleAddImages 完成（fileToBase64 已被 mock）
+      await waitFor(() =>
+        expect(onReferenceImagesChange).toHaveBeenCalledTimes(1),
+      );
+
+      // onReferenceImagesChange 被调用，传入 1 张参考图
+      expect(onReferenceImagesChange).toHaveBeenCalledWith([
+        { base64: 'mocked-base64-data', mimeType: 'image/png' },
+      ]);
+
+      // onRecipeChange 被调用，新 recipe 的 referenceImageCount = 1（从 0 → 1，触发同步）
+      expect(onRecipeChange).toHaveBeenCalledTimes(1);
+      const newRecipe = onRecipeChange.mock.calls[0][0];
+      expect(newRecipe.auxiliary.referenceImageCount).toBe(1);
     });
   });
 
