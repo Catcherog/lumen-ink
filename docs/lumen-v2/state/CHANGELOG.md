@@ -1,5 +1,14 @@
 # 10｜变更日志
 
+## 2026-07-18 - STORAGE-001 GPT 验收通过并激活 PERSIST-001
+
+- 审查 commit：`abcc103394f86b87ae37af1bd6172f984e9d46e6`；结论：`MVP_PASS_WITH_DEBT`。
+- 冻结候选 A：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage；GitHub 运行时存储禁令、CloudBase Workflow 60 秒边界、CloudRun/R2 未来选项同步冻结。
+- GPT 使用官方主源核对 Vercel/CloudBase 时效事实，独立重跑 CloudBase mock 合约：1 file / 6 tests passed。
+- P1 `DEBT-STORAGE-01`：PoC 简化契约低于 PERSIST 恢复模型；D-040 授权 PERSIST Tasks 1—3 在同一扩大包内完成一次契约收敛，覆盖事务上下文、幂等、lease 所有权、两 worker 接管和 stale worker 拒写。
+- STORAGE-001 归档；PERSIST-001 激活为 `ready_for_trae / nextActor=trae`；中间不做普通阶段交接，最后统一证据回传。
+- GPT 未 commit/push；工作区既有无关修改继续隔离，由 Trae 精确提交本轮控制面文件后创建 `lumen/persist-001-trae`。
+
 ## 2026-07-18 - STORAGE-001 修订完成（awaiting_gpt_acceptance，候选 A CloudBase）
 
 - 触发：用户重新打开 STORAGE-001 局部选型修订，明确决策方向：首选架构为 Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage；当前不注册 Cloudflare、不升级 Vercel Pro；GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储；当前仍只允许执行 STORAGE-001 修订，禁止启动 PERSIST-001；不得自行写入 `decision: frozen`，修订完成后交回 GPT 验收冻结。

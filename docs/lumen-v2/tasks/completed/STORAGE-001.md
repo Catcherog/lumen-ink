@@ -2,6 +2,8 @@
 
 > 状态：`ready_for_trae / nextActor=trae`（FLOW-001 于 2026-07-18 通过 GPT 第三轮验收后激活）。
 
+> GPT 验收：2026-07-18，`MVP_PASS_WITH_DEBT`；候选 A 已冻结。P1 契约收敛进入 PERSIST-001 首门，详见 `docs/lumen-v2/reviews/STORAGE-001-GPT-REVIEW.md` 与 D-040。
+
 > 前置条件：`FLOW-001` 已通过。  
 > 本任务以技术报告和最小 PoC 为主，不接入生产数据。
 

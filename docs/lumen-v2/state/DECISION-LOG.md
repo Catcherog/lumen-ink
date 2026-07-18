@@ -43,11 +43,14 @@
 
 | D-036 | 2026-07-18 | 冻结 | STORAGE-001 冻结持久化与执行器稳定接口契约（9 个接口）：`ProjectRepository` / `AssetRepository` / `VersionRepository` / `JobRepository` / `ObjectStore` / `UnitOfWork` / `AuthThrottleRepository` / `PersistenceDependencies` / `JobExecutor` | PERSIST-001 必须消费这些接口不变；本地 PoC 已证明合约可实现（适配器重建恢复 + 级联删除 + UoW 回滚 + ObjectStore 缺失键行为，3 合约测试通过） | 接口签名不得在 PERSIST-001 期间重命名/删除/扩宽；新增字段必须可选且不破坏现有合约测试；生产 adapter（Vercel Postgres + R2 / Supabase）在 `src/server/infrastructure/persistence/` 与 `src/server/infrastructure/executor/`注册 |
 
-| D-037 | 2026-07-18 | 提议（待 GPT 冻结） | 用户重新打开 STORAGE-001 局部选型修订；首选架构为候选 A：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**；当前不注册 Cloudflare、不升级 Vercel Pro；GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储；Cloudflare R2 保留为未来 S3 迁移备选 | 用户授权 GPT 进行技术判断；原候选 1（Vercel + Cloudflare R2 + Vercel Workflow）的账号门槛（Cloudflare 注册 + Vercel Pro 升级）当前不满足；CloudBase 个人版参考 19.9 元/月，且无需注册新云厂商；Hobby Function 300s maxDuration 已覆盖 80—100s Provider 调用 | Trae 修订完成：`storage-options.md` 全面重写、`cloudbase-mock.ts` 新增 PoC、`cloudbase-mock.contract.test.ts` 6 用例通过；评分 A=83 / B=78 / C=82；8 条门禁全绿（client 104 / server 28 / root 132）；状态推进至 `awaiting_gpt_acceptance / nextActor=gpt`；PERSIST-001 继续阻塞；未写 `decision: frozen` |
+| D-037 | 2026-07-18 | 冻结 | 用户重新打开 STORAGE-001 局部选型修订；首选架构为候选 A：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**；当前不注册 Cloudflare、不升级 Vercel Pro；GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储；Cloudflare R2 保留为未来 S3 迁移备选 | 用户授权 GPT 进行技术判断；原候选 1（Vercel + Cloudflare R2 + Vercel Workflow）的账号门槛当前不满足；CloudBase 个人版参考 19.9 元/月；Hobby Function 300s 覆盖 80—100s Provider 调用 | GPT 于 `abcc103` 风险验收后冻结候选 A；PERSIST-001 激活；真实 CloudBase 环境开通与凭据配置仍由用户执行 |
 
-| D-038 | 2026-07-18 | 提议（待 GPT 冻结） | STORAGE-001 修订边界声明：GitHub 仅用于源码、规格、脱敏证据和小型合成 fixture；CloudBase 本轮不创建真实环境、不索取或写入密钥、不连接生产数据；不修改生产 Provider、上传、Job 或 Version 运行路径；不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）；CloudBase CloudRun 仅登记为未来容量/长任务升级选项，本轮不部署 | 用户明确边界；CloudBase Workflow 单节点 60s 限制无法满足 80—100s Provider 调用；生产路径修改超出 STORAGE-001 选型范围 | PERSIST-001 实施时遵守同样边界；如需使用 CloudBase Workflow 或 CloudRun 执行长任务，需在 PERSIST-001 或后续任务中重新评估并显式声明 |
+| D-038 | 2026-07-18 | 冻结 | STORAGE-001 修订边界声明：GitHub 仅用于源码、规格、脱敏证据和小型合成 fixture；CloudBase 本轮不创建真实环境、不索取或写入密钥、不连接生产数据；不使用 CloudBase Workflow 执行 80—100s Provider 调用（单节点 60s）；CloudBase CloudRun 仅登记为未来选项 | 用户明确边界；生产路径修改超出 STORAGE 选型范围 | PERSIST 实施遵守同样安全边界；如需 CloudRun/R2/商业化，重新评估并显式决策 |
 
-| D-039 | 2026-07-18 | 提议（待 GPT 冻结） | STORAGE-001 修订事实修正：删除「Vercel Blob 仅支持公开 URL」结论（现支持私有 Blob + 签名 URL）；删除「Vercel Pro 是 80—100s 任务的技术必需条件」（Hobby 300s 已覆盖）；删除「Vercel Postgres 包含在 Pro」（已停止，需 Marketplace）；修正 Workflow 计费信息（按 Steps + Storage + Functions 计算）；补记最终 STORAGE commit `d85bae2` | 主源登记访问日期 2026-07-18；前版结论基于过时文档 | 候选 B 重新纳入评估；Pro 升级不再是硬门槛；本轮不使用 Vercel Workflow，计费细节仅供未来参考 |
+| D-039 | 2026-07-18 | 冻结 | STORAGE-001 事实修正：Vercel Blob 支持私有 Blob + 签名 URL；Hobby 300s 覆盖当前长调用；Postgres 走 Marketplace；Workflow 按 Steps + Storage + Functions 计费；最终修订 commit `abcc103` | GPT 使用 2026-07-18 官方主源复核 | 候选 B 重新纳入评估；Pro 不再是当前硬门槛；本轮不使用 Vercel Workflow |
+
+| D-040 | 2026-07-18 | 冻结 | 候选 A 与抽象职责边界冻结，但 D-036 的 PoC 级精确签名由 PERSIST 首门一次性收敛 | PoC 实体/Job 状态、事务上下文、lease 所有权与幂等表面低于 PERSIST 恢复模型；退回新一轮 STORAGE 不改变供应商结论 | PERSIST Tasks 1—3 先以红→绿测试锁定完整字段、唯一约束、两 worker 接管、stale worker 拒写和同事务上下文；随后再次冻结 |
+| D-041 | 2026-07-18 | 冻结 | STORAGE-001 验收 `MVP_PASS_WITH_DEBT`，激活 PERSIST-001 扩大执行包 | 官方主源支持关键事实，CloudBase mock 6 用例独立通过，无供应商选择 P0；用户要求减少非必要审计和增加 Trae 单次执行量 | STORAGE 归档；PERSIST `ready_for_trae / nextActor=trae`；契约收敛、生产适配、核心闭环与内部安全底线连续执行 |
 
 ## 新增决策格式
 

@@ -1,11 +1,11 @@
 # STORAGE-001 持久化与任务基础设施技术选型
 
-> 状态：`awaiting_gpt_acceptance`（用户授权 GPT 进行技术判断；Trae 修订完成，等 GPT 验收冻结）
+> 状态：`frozen`（GPT 于 2026-07-18 验收；`MVP_PASS_WITH_DEBT`，PERSIST 首门完成契约收敛）
 > 任务：STORAGE-001
 > 创建日期：2026-07-18
 > 修订日期：2026-07-18（用户重新打开局部选型修订，新增首选候选 A，修正过时事实）
 > 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`
-> 最终 STORAGE 提交：`d85bae2`（已 push 到 `lumen/storage-001-trae`）
+> 最终 STORAGE 修订提交：`abcc103394f86b87ae37af1bd6172f984e9d46e6`（已 push 到 `lumen/storage-001-trae`）
 
 ## 0. 决策摘要（先读这一节）
 
@@ -13,8 +13,8 @@
   - 首选架构：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**（候选 A）。
   - 当前不注册 Cloudflare，不升级 Vercel Pro。
   - GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储。
-  - 当前仍只允许执行 STORAGE-001 修订；禁止启动 PERSIST-001。
-  - 不得自行写入 `decision: frozen`，修订完成后交回 GPT 验收冻结。
+  - Trae 修订阶段只允许执行 STORAGE-001；该限制已由本文件的 GPT 冻结记录完成解除。
+  - `decision: frozen` 仅由 GPT 写入；Trae 不得自行改写冻结结论。
 - 候选方案数：3（详见 §2）。
   - A. Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage（首选）
   - B. Vercel Hobby + Marketplace Postgres + Vercel Private Blob
@@ -31,7 +31,7 @@
   - 当前非商业内部 PoC：Vercel Hobby + CloudBase 免费试用/个人额度。
   - CloudBase 个人版参考 19.9 元/月；实际以账号地区和控制台报价为准。
   - 若转为商业用途：重新审查 Vercel Pro 与 CloudBase 正式环境费用。
-- 冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT 验收通过后由 GPT 写入冻结并更新 STATE.json 激活 PERSIST-001。
+- 冻结状态：**已冻结**。候选 A 作为当前内部稳定版方案；商业化、CloudRun 或 R2 迁移需重新决策。
 
 ## 1. 硬条件筛选（按 INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md Task 1 Step 2）
 
@@ -212,11 +212,11 @@ Vercel Function (Node.js, Express, Sharp) — 保留作为应用层 + Provider �
 - 不实施 PERSIST-001 业务服务、真实版本 UI 或生产数据迁移。
 - 未经 GPT/用户冻结不得进入 PERSIST-001。
 
-### 3.4 接口冻结边界
+### 3.4 接口与契约边界
 
-- `PersistenceDependencies` 与 `JobExecutor` 接口表面在 STORAGE-001 已冻结（D-036），本轮修订保持不变。
-- 新增字段必须可选且不破坏现有合约测试。
-- PoC-only helper（`createVersionIdempotent` / lease helpers / `dumpPgStyleRows`）属于具体 adapter 的扩展方法，不在冻结接口表面。
+- `PersistenceDependencies` 与 `JobExecutor` 的职责边界继续冻结：业务服务只依赖仓储、对象存储、事务与执行器抽象，不直接依赖 CloudBase SDK。
+- D-036 的 PoC 级精确签名由 D-040 修订：PERSIST-001 首门允许一次性收敛实体字段、事务上下文、幂等与 lease 原子语义；完成合约测试后再次锁定，后续不得随业务实现漂移。
+- PoC-only helper（`createVersionIdempotent` / lease helpers / `dumpPgStyleRows`）不得直接成为业务层隐式依赖；所需语义必须在 PERSIST 契约收敛时进入明确接口或数据库约束。
 
 ## 4. 评分矩阵（固定 100 分权重）
 
@@ -443,19 +443,26 @@ SEEDREAM_API_KEY=<volcengine key>
 ## 10. 冻结状态
 
 ```yaml
-decision: pending_gpt_acceptance
+decision: frozen
 recommended_candidate: Candidate A (Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage)
-account_gate: user  # PERSIST-001 实施前用户需在 CloudBase 控制台开通真实环境
-decision_authority: gpt  # 用户已授权 GPT 进行技术判断
-frozen_at: null
+account_gate: user_for_live_environment  # 无凭据先完成 mock/contract；真实环境开通与配置由用户执行
+decision_authority: gpt
+frozen_at: 2026-07-18
+review: docs/lumen-v2/reviews/STORAGE-001-GPT-REVIEW.md
 ```
 
-GPT 验收通过后：
-- 在本文件追加 `## 11. 冻结记录`，写入 `decision: frozen`、冻结日期、冻结决策者、最终方案。
-- 更新 STATE.json 激活 PERSIST-001（`currentTask=PERSIST-001`、`status=ready_for_trae`、`nextActor=trae`、从 `blockedTasks` 移除 PERSIST-001）。
-- PERSIST-001 按既有 12 项实施计划 + 快速计划 Task 5—7 三个内部安全单元连续执行。
+冻结后执行：STATE 激活 `PERSIST-001 / ready_for_trae / nextActor=trae`；按既有 12 项实施计划 + 快速计划 Task 5—7 连续执行，首门先完成 D-040 契约收敛。
 
-## 11. 修订历史
+## 11. 冻结记录
+
+- `decision: frozen`
+- 日期：2026-07-18
+- 决策者：GPT（用户已授权技术判断）
+- 最终方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
+- 验收结论：`MVP_PASS_WITH_DEBT`
+- 附带条件：PERSIST-001 首门完成 D-040 契约收敛；真实 CloudBase 环境与凭据由用户提供，不进入仓库。
+
+## 12. 修订历史
 
 ### 2026-07-18 修订（用户重新打开局部选型）
 
@@ -471,4 +478,4 @@ GPT 验收通过后：
 - 重算 100 分矩阵：A = 83，B = 78，C = 82；推荐 A。
 - 边界声明：GitHub/CloudBase/生产路径/接口冻结四类边界明确。
 - 成本表达：按阶段（PoC / 内部稳定版 / 商业用途），不再使用固定 `$20—25/月`。
-- 状态：`awaiting_gpt_acceptance / nextActor=gpt`，不写 `decision: frozen`，等待 GPT 验收冻结。
+- 状态：Trae 修订于 `awaiting_gpt_acceptance / nextActor=gpt` 交回；GPT 已于 2026-07-18 写入 `decision: frozen` 并激活 PERSIST-001。

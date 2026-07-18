@@ -1,7 +1,7 @@
 # Trae Prompt｜PERSIST-001 项目版本与可恢复生成闭环
 
-> 前置条件：FLOW-001 已通过；STORAGE-001 方案与 PoC 已由 GPT/用户冻结。
-> 当前状态：blocked / backlog，不得提前实施。
+> 前置条件：FLOW-001 已通过；STORAGE-001 已由 GPT 于 2026-07-18 冻结为候选 A。
+> 当前状态：`ready_for_trae / nextActor=trae`。按 D-040 先完成契约收敛门，再连续实施完整扩大包。
 
 ## 目标
 
@@ -32,6 +32,7 @@
 - 按 D-034 合并内部安全底线：运行时 secret fail-fast、登录限流、CORS allowlist、服务端图片解码/大小/像素校验、Provider 响应与 health/log 脱敏；完整公开发布 HARDEN 仍不在本任务；
 - 不使用真实客户数据，不伪造进度或成功版本；
 - 未满足前置条件时只能标记 blocked。
+- 除付费/真实凭据、不可逆迁移、数据/安全 P0、候选 A 无法实现 D-040 语义或完整门禁失败外，不做普通阶段交接。
 
 ## 验收
 

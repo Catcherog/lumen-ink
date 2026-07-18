@@ -106,18 +106,21 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
-- [ ] `STORAGE-001` 技术选型（Trae 已交付修订版：候选 A（Vercel Hobby + CloudBase PG + CloudBase PG Storage）+ CloudBase mock adapter PoC 6 用例 + 8 门禁全绿；`awaiting_gpt_acceptance / nextActor=gpt`，未冻结）。
+- [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：STORAGE-001（awaiting_gpt_acceptance / 修订版）
+### 6.1 当前任务：PERSIST-001（ready_for_trae / 扩大执行包）
 
-任务 ID：`STORAGE-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（用户授权 GPT 进行技术判断；Trae 已完成修订，等 GPT 验收冻结，2026-07-18）。
-前置依赖：`FLOW-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-18）。
-任务目标：比较至少两个完整持久化/任务基础设施方案，完成合成数据最小 PoC、评分矩阵、成本/迁移/备份/删除/回滚分析，并产出 PERSIST-001 所需的稳定接口与合约测试。
-任务文件：`docs/lumen-v2/tasks/active/STORAGE-001.md`。
+任务 ID：`PERSIST-001`
+状态：`ready_for_trae`，`nextActor=trae`（STORAGE-001 已冻结，2026-07-18）。
+前置依赖：FLOW-001 与 STORAGE-001 均已通过 GPT 验收。
+任务目标：在一个任务/分支/最终验收周期内完成 D-040 契约收敛、CloudBase 生产适配、Project/Asset/V0、不可变 Version、可恢复 GenerationJob、刷新恢复、取消/重试、删除、旧 history 显式导入和内部安全底线。
+任务文件：`docs/lumen-v2/tasks/active/PERSIST-001.md`。
+实施计划：`docs/lumen-v2/plans/PERSIST-001-IMPLEMENTATION-PLAN.md`。
+连续入口：`docs/lumen-v2/prompts/INTERNAL-FAST-TRACK-TRAE.md`。
+执行约束：先用红→绿测试关闭 D-040 契约差距；普通阶段不交接；只有付费/真实凭据、不可逆迁移、数据或安全 P0、候选 A 无法满足原子语义、完整门禁失败时停止。
 Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`（含修订章节）。
 选型报告：`docs/lumen-v2/storage-options.md`（推荐候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage，83/100 vs 82/100 vs 78/100）。
 PoC 证据：
