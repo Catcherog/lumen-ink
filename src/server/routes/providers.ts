@@ -9,6 +9,15 @@ function sanitize(config: ProviderConfig): ProviderConfig {
   return { ...rest, apiKey: '', hasApiKey: _existing ?? !!_apiKey } as ProviderConfig;
 }
 
+/** Reject mutating routes when the ProviderStore is env-managed (deployed mode). */
+function envManagedGuard(req: Request, res: Response): boolean {
+  if (providerStore.isEnvManaged()) {
+    res.status(403).json({ error: 'PROVIDER_CONFIG_ENV_MANAGED' });
+    return true;
+  }
+  return false;
+}
+
 router.get('/', (_req: Request, res: Response) => {
   try {
     res.json(providerStore.list().map(sanitize));
@@ -19,6 +28,7 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.post('/', (req: Request, res: Response) => {
+  if (envManagedGuard(req, res)) return;
   try {
     const { name, type, apiKey, baseUrl, defaultModel, enabled, isDefault } = req.body as Partial<ProviderConfig>;
 
@@ -46,6 +56,7 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 router.put('/:id', (req: Request, res: Response) => {
+  if (envManagedGuard(req, res)) return;
   try {
     const id = req.params.id as string;
     const { name, type, apiKey, baseUrl, defaultModel, enabled, isDefault } = req.body as Partial<ProviderConfig>;
@@ -74,6 +85,7 @@ router.put('/:id', (req: Request, res: Response) => {
 });
 
 router.delete('/:id', (req: Request, res: Response) => {
+  if (envManagedGuard(req, res)) return;
   try {
     const deleted = providerStore.delete(req.params.id as string);
     if (!deleted) {
@@ -89,6 +101,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 });
 
 router.patch('/:id/default', (req: Request, res: Response) => {
+  if (envManagedGuard(req, res)) return;
   try {
     const updated = providerStore.setDefault(req.params.id as string);
     if (!updated) {
