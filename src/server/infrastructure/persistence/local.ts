@@ -94,6 +94,16 @@ const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = [
   'saving',
 ];
 
+const TERMINAL_JOB_STATUSES: GenerationJobStatus[] = [
+  'succeeded',
+  'failed',
+  'cancelled',
+];
+
+function isTerminalStatus(status: GenerationJobStatus): boolean {
+  return TERMINAL_JOB_STATUSES.includes(status);
+}
+
 function cloneState(state: LocalState): LocalState {
   return {
     projects: { ...state.projects },
@@ -399,7 +409,35 @@ export function createLocalPersistence(
       await ensureLoaded();
       const found = state.jobs[id];
       if (!found) return null;
+      // Defensive: a terminal job (cancelled/failed/succeeded) cannot be
+      // advanced even if the caller happens to hold a matching lease token.
+      // This guards against the cancel-vs-complete race where cancel revokes
+      // the lease but a stale worker still presents the old token.
+      if (isTerminalStatus(found.status)) return null;
       if (!found.leaseToken || found.leaseToken !== leaseToken) return null;
+      const updated: GenerationJob = {
+        ...found,
+        ...patch,
+        id: found.id,
+        projectId: found.projectId,
+        updatedAt: patch.updatedAt ?? new Date().toISOString(),
+      };
+      state.jobs[id] = updated;
+      await persist();
+      return { ...updated };
+    },
+
+    async updateIfActive(
+      id: string,
+      patch: Partial<GenerationJob>
+    ): Promise<GenerationJob | null> {
+      await ensureLoaded();
+      const found = state.jobs[id];
+      if (!found) return null;
+      // Only apply the patch if the job is still in an active state.
+      // This lets `cancelJob` atomically cancel AND revoke the lease
+      // without racing a worker that completes the job concurrently.
+      if (isTerminalStatus(found.status)) return null;
       const updated: GenerationJob = {
         ...found,
         ...patch,
@@ -419,6 +457,8 @@ export function createLocalPersistence(
       await ensureLoaded();
       const found = state.jobs[id];
       if (!found) throw new Error(`JOB_NOT_FOUND:${id}`);
+      // A terminal job cannot be claimed — its lease is permanently revoked.
+      if (isTerminalStatus(found.status)) return false;
       // Allow claim if no lease, lease expired, or same worker re-claiming.
       const nowMs = Date.parse(input.now);
       const currentExpiry = found.leaseExpiresAt ? Date.parse(found.leaseExpiresAt) : 0;
@@ -446,6 +486,9 @@ export function createLocalPersistence(
       await ensureLoaded();
       const found = state.jobs[id];
       if (!found) return false;
+      // Defensive: a terminal job cannot be heartbeated — its lease was
+      // revoked by cancellation (or never existed for terminal transitions).
+      if (isTerminalStatus(found.status)) return false;
       if (!found.leaseToken || found.leaseToken !== input.leaseToken) return false;
       const updated: GenerationJob = {
         ...found,
@@ -474,7 +517,9 @@ export function createLocalPersistence(
       return Object.values(state.jobs)
         .filter((j) => {
           if (!ACTIVE_JOB_STATUSES.includes(j.status)) return false;
-          if (!j.leaseExpiresAt) return false;
+          // Jobs with no lease (queued, never claimed) are available for
+          // recovery. Jobs with an expired lease are also available.
+          if (!j.leaseExpiresAt) return true;
           return Date.parse(j.leaseExpiresAt) <= nowMs;
         })
         .map((j) => ({ ...j }));
@@ -489,6 +534,22 @@ export function createLocalPersistence(
       const filePath = objectPath(key);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, bytes);
+    },
+
+    async get(key: string): Promise<Uint8Array> {
+      await ensureLoaded();
+      const filePath = objectPath(key);
+      try {
+        const buffer = await fs.readFile(filePath);
+        // Return a Uint8Array view (Buffer is already a Uint8Array subclass,
+        // but this guards against Node version differences in toString tags).
+        return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(`OBJECT_NOT_FOUND:${key}`);
+        }
+        throw err;
+      }
     },
 
     async getSignedUrl(key: string): Promise<string> {

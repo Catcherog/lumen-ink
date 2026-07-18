@@ -24,12 +24,55 @@ import { createProjectsRouter } from './routes/projects.js';
 import { createJobsRouter } from './routes/jobs.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
-import { createLocalPersistence } from './infrastructure/persistence/local.js';
-import { createLocalJobExecutor } from './infrastructure/executor/local.js';
+import { getProvider } from './services/providers/ProviderFactory.js';
+import { selectPersistenceByEnv, type CloudBasePersistenceDeps } from './infrastructure/persistence/index.js';
+import {
+  createLocalJobExecutor,
+  createWorkerJobExecutor,
+  type WorkerExecutor,
+} from './infrastructure/executor/index.js';
 import { ProjectService } from './services/ProjectService.js';
 import { GenerationService } from './services/GenerationService.js';
 import { loadRuntimeConfig } from './config/runtime.js';
 import { createAuthThrottle } from './security/authThrottle.js';
+import type { GenerationJob, JobExecutor } from './domain/persistence.js';
+
+/**
+ * PERSIST-001 P0-01: production providerFactory for the worker executor.
+ *
+ * Resolves the Provider via ProviderStore using `job.providerId` (or the
+ * default), converts the frozen input bytes to base64, calls provider.edit(),
+ * and converts the result back to bytes. Throws classified errors that
+ * GenerationService.executeJob maps to stable DomainErrorCode values.
+ */
+async function productionProviderFactory(
+  job: GenerationJob,
+  input: { bytes: Uint8Array; mimeType: string }
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  const provider = getProvider(job.providerId ?? undefined);
+  if (!provider) {
+    throw new Error(
+      `PROVIDER_NOT_FOUND: 无法解析 Provider ${job.providerId ?? '(default)'}`
+    );
+  }
+  const base64 = Buffer.from(input.bytes).toString('base64');
+  const result = await provider.edit({
+    prompt: job.prompt,
+    image: base64,
+    mimeType: input.mimeType,
+    model: job.model ?? provider.config.defaultModel,
+  });
+  if (!result.imageData) {
+    throw new Error(
+      'PROVIDER_EMPTY_RESULT: Provider 返回空结果（无 imageData）'
+    );
+  }
+  const resultBytes = Buffer.from(result.imageData, 'base64');
+  return {
+    bytes: new Uint8Array(resultBytes),
+    mimeType: result.mimeType ?? input.mimeType,
+  };
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,14 +112,54 @@ if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.D
   console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
 }
 
-// PERSIST-001: local file-backed persistence for PoC / dev / tests.
-// Production (Vercel) should inject a CloudBase adapter before going live.
-const persistenceRoot =
-  process.env.PERSISTENCE_ROOT ?? path.join(__dirname, 'data');
-const persistenceDeps = createLocalPersistence({ rootDir: persistenceRoot });
-const jobExecutor = createLocalJobExecutor();
+// PERSIST-001 P0-01: select persistence adapter by deployment mode.
+// Deployed mode (VERCEL=1) uses CloudBase PostgreSQL + PG Storage with
+// fail-fast config validation. Local mode uses the file-backed adapter.
+const persistenceDeps = selectPersistenceByEnv();
+
+// In deployed mode, the CloudBase adapter must be initialized before any
+// method is invoked. Top-level await is safe in ESM and runs once per cold
+// start. If ensureReady() throws, the boot fails fast with a stable error.
+if (runtimeConfig.isDeployed) {
+  const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
+  await cloudBaseDeps.ensureReady();
+}
+
+// PERSIST-001 P0-01: in deployed mode, use the real worker executor that
+// actually invokes GenerationService.executeJob (with polling + sweeper
+// recovery). In local/dev mode, the local no-op executor is sufficient —
+// Jobs are executed manually in tests or via the legacy /api/edit path.
+let workerExecutor: WorkerExecutor | null = null;
+let jobExecutor: JobExecutor;
+if (runtimeConfig.isDeployed) {
+  workerExecutor = createWorkerJobExecutor({
+    deps: persistenceDeps,
+    providerFactory: productionProviderFactory,
+    pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 100),
+    leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+    sweeperIntervalMs: Number(process.env.WORKER_SWEEPER_INTERVAL_MS ?? 500),
+  });
+  jobExecutor = workerExecutor.executor;
+  workerExecutor.start();
+} else {
+  jobExecutor = createLocalJobExecutor();
+}
+
 const projectService = new ProjectService(persistenceDeps, jobExecutor);
 const generationService = new GenerationService(persistenceDeps, jobExecutor);
+
+// Graceful shutdown: stop the worker timers so the process can exit cleanly.
+if (workerExecutor) {
+  const shutdown = () => {
+    try {
+      workerExecutor?.stop();
+    } catch {
+      // Best-effort during shutdown.
+    }
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
 
 // D-034: Durable login throttle backed by the frozen AuthThrottleRepository.
 const authThrottle = createAuthThrottle({

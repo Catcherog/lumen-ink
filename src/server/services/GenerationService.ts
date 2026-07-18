@@ -71,8 +71,16 @@ export interface CreateJobInput {
 }
 
 export interface ExecuteJobOptions {
-  /** Provider factory function; defaults to a no-op that requires override. */
-  providerFactory?: (job: GenerationJob) => Promise<{
+  /**
+   * Provider factory function. Receives the Job plus the frozen input
+   * bytes (loaded from `Job.inputVersionId`'s Asset via `ObjectStore.get`)
+   * so the Provider always sees the exact input that was captured at Job
+   * creation time — never the live `project.activeVersionId`.
+   */
+  providerFactory?: (
+    job: GenerationJob,
+    input: { bytes: Uint8Array; mimeType: string }
+  ) => Promise<{
     bytes: Uint8Array;
     mimeType: string;
   }>;
@@ -324,33 +332,49 @@ export class GenerationService {
       // Step 2: transition to uploading.
       await advance('uploading');
 
-      // Step 3: resolve the input version + asset. The ObjectStore frozen
-      // contract does not yet expose a `get()` method; the providerFactory
-      // override is responsible for loading bytes (production will widen the
-      // ObjectStore interface in a future STORAGE task). We validate that
-      // the input version and asset exist so a missing input fails fast
-      // with a stable error code instead of a Provider crash.
-      const project = await this.deps.projects.get(job.projectId);
-      if (!project || !project.activeVersionId) {
+      // Step 3 (P0-04): resolve the FROZEN input version + asset from
+      // `job.inputVersionId`. The Provider MUST receive the bytes that were
+      // captured at Job creation time — never the live
+      // `project.activeVersionId`, which may have moved forward by the time
+      // the worker executes the Job.
+      if (!job.inputVersionId) {
         return await failWith(
           'INVALID_RECIPE',
-          `INVALID_RECIPE: 项目 ${job.projectId} 没有可用的输入版本`
+          `INVALID_RECIPE: 任务 ${jobId} 缺少 inputVersionId`
         );
       }
-      const versions = await this.deps.versions.listByProject(job.projectId);
-      const activeVersion = versions.find((v) => v.id === project.activeVersionId);
-      if (!activeVersion) {
+      const inputVersion = await this.deps.versions.get(job.inputVersionId);
+      if (!inputVersion) {
         return await failWith(
           'VERSION_NOT_FOUND',
-          `VERSION_NOT_FOUND: 活动版本 ${project.activeVersionId} 不存在`
+          `VERSION_NOT_FOUND: 冻结输入版本 ${job.inputVersionId} 不存在`
         );
       }
-      const assets = await this.deps.assets.listByProject(job.projectId);
-      const inputAsset = assets.find((a) => a.id === activeVersion.assetId);
+      if (inputVersion.projectId !== job.projectId) {
+        return await failWith(
+          'VERSION_NOT_FOUND',
+          `VERSION_NOT_FOUND: 冻结输入版本 ${job.inputVersionId} 不属于项目 ${job.projectId}`
+        );
+      }
+      const inputAsset = await this.deps.assets.get(inputVersion.assetId);
       if (!inputAsset) {
         return await failWith(
           'ASSET_NOT_FOUND',
-          `ASSET_NOT_FOUND: 输入资产 ${activeVersion.assetId} 不存在`
+          `ASSET_NOT_FOUND: 输入资产 ${inputVersion.assetId} 不存在`
+        );
+      }
+
+      // Load the frozen input bytes via `ObjectStore.get()` so the
+      // Provider factory receives a byte-identical input regardless of any
+      // concurrent project activeVersionId change.
+      let inputBytes: Uint8Array;
+      try {
+        inputBytes = await this.deps.objects.get(inputAsset.storageKey);
+      } catch (err) {
+        return await failWith(
+          'ASSET_NOT_FOUND',
+          `ASSET_NOT_FOUND: 输入对象 ${inputAsset.storageKey} 读取失败 ${err instanceof Error ? err.message : String(err)}`,
+          err
         );
       }
 
@@ -370,7 +394,10 @@ export class GenerationService {
       let resultBytes: Uint8Array;
       let resultMimeType: string;
       try {
-        const result = await options.providerFactory(job);
+        const result = await options.providerFactory(job, {
+          bytes: inputBytes,
+          mimeType: inputAsset.mimeType,
+        });
         resultBytes = result.bytes;
         resultMimeType = result.mimeType;
       } catch (err) {
@@ -399,7 +426,12 @@ export class GenerationService {
       // Step 8: transition to saving.
       await advance('saving');
 
-      // Step 9: inside ONE UnitOfWork, create Asset + Version + update Project.
+      // Step 9 (P0-02): inside ONE UnitOfWork, create Asset + Version +
+      // update Project AND conditionally transition the Job to `succeeded`
+      // via `updateIfClaimed` IN THE SAME TRANSACTION. If the conditional
+      // Job update fails (lease lost), the UoW rolls back the Asset/Version/
+      // Project writes so no metadata leak survives. Compensation for the
+      // already-uploaded result object still runs after the rollback.
       const resultAsset: Asset = {
         id: resultAssetId,
         projectId: job.projectId,
@@ -408,16 +440,18 @@ export class GenerationService {
         sizeBytes: resultBytes.byteLength,
         createdAt: resultNow,
       };
+      const existingVersions = await this.deps.versions.listByProject(job.projectId);
       const resultVersion: Version = {
         id: resultVersionId,
         projectId: job.projectId,
         assetId: resultAssetId,
-        label: `v${versions.length}`,
+        label: `v${existingVersions.length}`,
         createdAt: resultNow,
       };
 
+      let succeeded: GenerationJob | null = null;
       try {
-        await this.deps.unitOfWork.run(async () => {
+        succeeded = await this.deps.unitOfWork.run(async () => {
           await this.deps.assets.create(resultAsset);
           await this.deps.versions.createIdempotent(
             job.projectId,
@@ -427,6 +461,22 @@ export class GenerationService {
           await this.deps.projects.updatePointers(job.projectId, {
             activeVersionId: resultVersionId,
           });
+          // Final lease-conditional transition INSIDE the UoW. If this
+          // returns null, the UoW throws and Asset/Version/Project are
+          // rolled back atomically. The result object is then compensated
+          // by the outer catch.
+          const updated = await this.deps.jobs.updateIfClaimed(jobId, leaseToken, {
+            status: 'succeeded',
+            resultVersionId,
+            updatedAt: nowIso(),
+          });
+          if (!updated) {
+            throw new DomainError({
+              code: 'JOB_LEASE_EXPIRED',
+              message: `JOB_LEASE_EXPIRED: 任务 ${jobId} 的租约在最终提交时丢失，结果已回滚`,
+            });
+          }
+          return updated;
         });
       } catch (err) {
         // Compensation: delete the uncommitted result object.
@@ -435,34 +485,14 @@ export class GenerationService {
         } catch {
           // Swallow compensation failures; orphaned bytes are retryable.
         }
+        if (err instanceof DomainError && err.code === 'JOB_LEASE_EXPIRED') {
+          throw err;
+        }
         return await failWith(
           'SAVE_FAILED',
           `SAVE_FAILED: 结果持久化失败 ${err instanceof Error ? err.message : String(err)}`,
           err
         );
-      }
-
-      // Step 10: conditionally mark Job succeeded via updateIfClaimed.
-      // If the lease was taken over by another worker, this returns null
-      // and we must delete the result object as compensation.
-      const succeeded = await this.deps.jobs.updateIfClaimed(jobId, leaseToken, {
-        status: 'succeeded',
-        resultVersionId,
-        updatedAt: nowIso(),
-      });
-
-      if (!succeeded) {
-        // Lease was lost — another worker may have already produced a
-        // successful result. Delete our uncommitted result object.
-        try {
-          await this.deps.objects.delete(resultStorageKey);
-        } catch {
-          // Swallow compensation failures.
-        }
-        throw new DomainError({
-          code: 'JOB_LEASE_EXPIRED',
-          message: `JOB_LEASE_EXPIRED: 任务 ${jobId} 的租约在最终提交时丢失，结果已回滚`,
-        });
       }
 
       return succeeded;
@@ -491,6 +521,15 @@ export class GenerationService {
   /**
    * Cancel a queued/active Job. Uses legal state transitions and asks the
    * executor for best-effort cancellation of any in-flight work.
+   *
+   * PERSIST001-P0-03: cancel atomically terminates publication rights by
+   * using `updateIfActive` (which revokes the lease AND transitions to
+   * `cancelled` in a single conditional write). A worker that still holds
+   * the old lease token cannot subsequently `heartbeat`, `updateIfClaimed`,
+   * or `claim` because the Job is now in a terminal state.
+   *
+   * Returns the cancelled Job. Throws ILLEGAL_JOB_TRANSITION if the Job
+   * already reached a terminal state (succeeded/failed/cancelled).
    */
   async cancelJob(jobId: string): Promise<GenerationJob> {
     const job = await this.deps.jobs.get(jobId);
@@ -514,10 +553,32 @@ export class GenerationService {
       // Swallow — cancellation is best-effort.
     }
 
-    return this.deps.jobs.update(jobId, {
+    // P0-03: use `updateIfActive` so the cancel AND lease revocation happen
+    // atomically. If the Job transitioned to a terminal state between the
+    // read above and this write (race with another worker), the conditional
+    // write returns null and we surface ILLEGAL_JOB_TRANSITION to the caller.
+    const now = nowIso();
+    const cancelled = await this.deps.jobs.updateIfActive(jobId, {
       status: 'cancelled',
-      updatedAt: nowIso(),
+      // Revoke the lease: clear token/expiry/worker so even a stale caller
+      // holding the old token cannot advance the now-terminal Job.
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      workerId: undefined,
+      updatedAt: now,
     });
+
+    if (!cancelled) {
+      // The Job reached a terminal state between our read and the
+      // conditional write. Re-read to give a precise error.
+      const current = await this.deps.jobs.get(jobId);
+      throw new DomainError({
+        code: 'ILLEGAL_JOB_TRANSITION',
+        message: `ILLEGAL_JOB_TRANSITION: 任务 ${jobId} 状态 ${current?.status ?? '?'} 不可取消（条件写入返回 null）`,
+      });
+    }
+
+    return cancelled;
   }
 
   /**

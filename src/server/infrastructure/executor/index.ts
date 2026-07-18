@@ -1,9 +1,14 @@
 /**
- * STORAGE-001 JobExecutor adapter registry.
+ * PERSIST-001 JobExecutor adapter registry.
  *
- * Re-exports the local executor. PERSIST-001 adds production executors
- * (Vercel Workflow, Supabase pgmq) here without changing the frozen
- * `JobExecutor` contract.
+ * Re-exports the local executor (PoC / dev / tests) and the worker executor
+ * (real Job execution via GenerationService.executeJob + sweeper recovery).
+ * Production wiring selects the appropriate executor based on deployment mode.
  */
 
 export { createLocalJobExecutor } from './local.js';
+export {
+  createWorkerJobExecutor,
+  type WorkerExecutorOptions,
+  type WorkerExecutor,
+} from './worker.js';

@@ -299,6 +299,7 @@ describe('PERSIST-001 Task 11 — End-to-End Failure/Recovery Matrix', () => {
         }
         return realObjects.put(key, bytes, mimeType);
       },
+      async get(key) { return realObjects.get(key); },
       async getSignedUrl(key) { return realObjects.getSignedUrl(key); },
       async delete(key) { return realObjects.delete(key); },
       async exists(key) { return realObjects.exists(key); },
@@ -347,6 +348,7 @@ describe('PERSIST-001 Task 11 — End-to-End Failure/Recovery Matrix', () => {
         if (key.includes('/generated/')) resultStorageKey = key;
         return realObjects.put(key, bytes, mimeType);
       },
+      async get(key) { return realObjects.get(key); },
       async getSignedUrl(key) { return realObjects.getSignedUrl(key); },
       async delete(key) { return realObjects.delete(key); },
       async exists(key) { return realObjects.exists(key); },

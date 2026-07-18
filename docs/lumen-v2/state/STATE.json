@@ -10,7 +10,7 @@
   "nextActor": "gpt",
   "lastAcceptedTask": "STORAGE-001",
   "latestTraeReport": "docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md",
-  "latestGptReview": "docs/lumen-v2/reviews/STORAGE-001-GPT-REVIEW.md",
+  "latestGptReview": "docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md",
   "productionV2Flag": "off",
   "lastUpdatedAt": "2026-07-18",
   "lastUpdatedBy": "trae",
@@ -29,6 +29,9 @@
     "docs/lumen-v2/prompts/INTERNAL-FAST-TRACK-TRAE.md",
     "docs/lumen-v2/state/SESSION-HANDOFF.md"
   ],
-  "blockedTasks": [],
+  "blockedTasks": [
+    "ROUTING-001",
+    "HARDEN-001"
+  ],
   "publicRepoSafety": "required"
 }

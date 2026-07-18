@@ -219,3 +219,115 @@ GPT 应按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板启动新窗口验收
 4. 运行 8 门禁独立验证
 5. 写入 `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`
 6. 通过则归档 PERSIST-001 + 激活下一任务；驳回则生成明确缺陷
+
+---
+
+# PERSIST-001 P0 修复轮（2026-07-18）
+
+> 触发：GPT 首轮验收 `MVP_FAIL`（`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`）
+> 审查基线：`4e3a1253145b74aa30278ec201208d1baae28f28`
+> FIX_PACKET：PERSIST001-P0-01 至 P0-04 + 直接回归
+> 状态推进：`changes_requested / nextActor=trae` → `awaiting_gpt_acceptance / nextActor=gpt`
+
+## P0. 执行摘要
+
+按 FIX_PACKET 修复 4 个 P0 阻塞问题，所有修复均先写真实失败测试复现（红），再写最小实现使其通过（绿）。8 门禁独立重跑全部 exit 0，349 server tests + 194 client tests 全绿。
+
+| P0 | 问题 | 修复 |
+|----|------|------|
+| P0-01 | 部署入口固定 local + no-op executor | `selectPersistenceByEnv` + `createWorkerJobExecutor` + CloudBase adapter |
+| P0-02 | 最终 lease 失败留下错误 Version | Asset/Version/Project 指针 + Job succeeded 纳入同一事务 |
+| P0-03 | 取消后原 worker 仍可覆盖为 succeeded | `updateIfActive` 原子取消 + lease 撤销 + 终态防御 |
+| P0-04 | executeJob 忽略冻结 inputVersionId | 读取 `job.inputVersionId` Asset bytes via `ObjectStore.get` |
+
+## P1. P0-01：CloudBase adapter + 真实 executor + 恢复扫描
+
+### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/server/infrastructure/persistence/cloudbase.ts` | CloudBase PostgreSQL + PG Storage 生产 adapter（1191 行） |
+| `src/server/infrastructure/persistence/select.ts` | 部署模式 adapter 选择器（fail-fast config validation） |
+| `src/server/infrastructure/persistence/select.test.ts` | 选择器测试（5 tests） |
+| `src/server/infrastructure/executor/worker.ts` | 真实 Job executor（polling + sweeper recovery） |
+| `src/server/infrastructure/executor/worker.test.ts` | executor 测试（4 tests） |
+| `src/server/types/pg.d.ts` | `pg` 模块最小类型声明（动态 import 支持） |
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `src/server/index.ts` | 替换 `createLocalPersistence` → `selectPersistenceByEnv`；部署模式用 `createWorkerJobExecutor` + `productionProviderFactory` + `ensureReady()` + SIGTERM/SIGINT graceful shutdown |
+| `src/server/infrastructure/persistence/index.ts` | 导出 CloudBase adapter + selector |
+| `src/server/infrastructure/persistence/local.ts` | `listLeaseExpired` 包含 never-claimed queued jobs |
+| `src/server/infrastructure/persistence/cloudbase-mock.ts` | 同步 `listLeaseExpired` 语义 |
+| `src/server/infrastructure/executor/index.ts` | 导出 worker executor |
+| `src/server/domain/persistence.ts` | `listLeaseExpired` 合约文档更新 |
+
+### 验证矩阵
+
+- ✅ CloudBase 配置缺失 fail-fast（`CLOUDBASE_CONFIG_REQUIRED`）
+- ✅ CloudBase 配置存在时不创建 local adapter
+- ✅ 创建 Job 后真实 executor 可执行并到达 succeeded
+- ✅ 进程/adapter 重建后 queued Job 可接管（sweeper 恢复）
+- ✅ lease 过期 Job 被 sweeper 重新入队并完成
+- ✅ cancel 信号 best-effort 传递到 executor
+
+## P2. P0-02：同事务条件成功
+
+`GenerationService.executeJob` 将 Asset.create + Version.create + Project.updatePointers + Job.updateIfClaimed(succeeded) 纳入同一 `UnitOfWork.run`。最终条件写失败时：
+- UoW 回滚，不留下 metadata
+- 补偿删除已上传的 result object
+- activeVersion 不变
+
+验证：`GenerationService.p0.test.ts` "final updateIfClaimed failure rolls back Asset/Version/Project pointer and deletes result object"
+
+## P3. P0-03：取消原子终止发布资格
+
+`cancelJob` 使用 `updateIfActive` 原子取消 + 撤销 lease（清空 leaseToken/leaseExpiresAt/workerId）。`updateIfClaimed`/`heartbeat` 增加终态防御：cancelled/failed/succeeded Job 不可被 stale lease holder 推进。
+
+验证：
+- "cancel during provider call → Job remains cancelled, no Version created"
+- "cancel revokes the lease so the original worker cannot heartbeat"
+- "cancel does not overwrite a job that already succeeded"
+
+## P4. P0-04：冻结 inputVersion 消费
+
+`executeJob` 读取 `job.inputVersionId` → `versions.get` → `assets.get` → `objects.get`，将冻结 bytes 传给 `providerFactory`。不再读取执行时 `project.activeVersionId`。`retryJob` 保持同一 `inputVersionId`。
+
+验证：
+- "executeJob reads input bytes from job.inputVersionId, not project.activeVersionId"
+- "retry preserves the original inputVersionId across attempts"
+- "executeJob fails with ASSET_NOT_FOUND when frozen inputVersionId points to a missing asset"
+- "ObjectStore.get() returns the bytes previously stored by put()"
+
+## P5. P0 修复轮 8 门禁结果
+
+详见 `docs/lumen-v2/evidence/PERSIST-001/gate-results.md`（P0 fix round section）。
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 349 tests / 35 files |
+| 6 | Root tests | PASS | 543 combined |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+## P6. 范围遵守
+
+- ✅ 只修 PERSIST001-P0-01 至 P0-04 及直接回归
+- ✅ 未启动 ROUTING / HARDEN / PERSIST-002
+- ✅ 未提交既有无关修改（精确 `git add <path>`）
+- ✅ 未提交密钥、真实客户数据或未脱敏证据
+- ✅ 候选 A 不变（Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage）
+- ✅ CloudBase live 凭据仍由用户在部署环境配置，不进入仓库或测试前置条件
+
+## P7. 状态推进
+
+- `status`: `changes_requested` → `awaiting_gpt_acceptance`
+- `nextActor`: `trae` → `gpt`
+- `latestTraeReport`: 本文件
+- 未归档任务，未激活下一任务

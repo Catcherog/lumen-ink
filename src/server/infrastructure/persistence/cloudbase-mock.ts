@@ -262,6 +262,16 @@ const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = [
   'saving',
 ];
 
+const TERMINAL_JOB_STATUSES: GenerationJobStatus[] = [
+  'succeeded',
+  'failed',
+  'cancelled',
+];
+
+function isTerminalStatus(status: GenerationJobStatus): boolean {
+  return TERMINAL_JOB_STATUSES.includes(status);
+}
+
 function emptyState(): MockDbState {
   return {
     projects: {},
@@ -573,7 +583,27 @@ export function createCloudBaseMockPersistence(
     ): Promise<GenerationJob | null> {
       const row = state.jobs[id];
       if (!row) return null;
+      // Defensive: a terminal job (cancelled/failed/succeeded) cannot be
+      // advanced even if the caller happens to hold a matching lease token.
+      // This guards against the cancel-vs-complete race where cancel revokes
+      // the lease but a stale worker still presents the old token.
+      if (isTerminalStatus(row.status)) return null;
       if (!row.lease_token || row.lease_token !== leaseToken) return null;
+      const updated = applyJobPatch(row, patch);
+      state.jobs[id] = updated;
+      return jobFromRow(updated);
+    },
+
+    async updateIfActive(
+      id: string,
+      patch: Partial<GenerationJob>
+    ): Promise<GenerationJob | null> {
+      const row = state.jobs[id];
+      if (!row) return null;
+      // Only apply the patch if the job is still in an active state.
+      // This lets `cancelJob` atomically cancel AND revoke the lease
+      // without racing a worker that completes the job concurrently.
+      if (isTerminalStatus(row.status)) return null;
       const updated = applyJobPatch(row, patch);
       state.jobs[id] = updated;
       return jobFromRow(updated);
@@ -585,6 +615,8 @@ export function createCloudBaseMockPersistence(
     ): Promise<boolean> {
       const row = state.jobs[id];
       if (!row) throw new Error(`JOB_NOT_FOUND:${id}`);
+      // A terminal job cannot be claimed — its lease is permanently revoked.
+      if (isTerminalStatus(row.status)) return false;
       const nowMs = Date.parse(input.now);
       const currentExpiry = row.lease_expires_at
         ? Date.parse(row.lease_expires_at)
@@ -610,6 +642,9 @@ export function createCloudBaseMockPersistence(
     ): Promise<boolean> {
       const row = state.jobs[id];
       if (!row) return false;
+      // Defensive: a terminal job cannot be heartbeated — its lease was
+      // revoked by cancellation (or never existed for terminal transitions).
+      if (isTerminalStatus(row.status)) return false;
       if (!row.lease_token || row.lease_token !== input.leaseToken) return false;
       state.jobs[id] = {
         ...row,
@@ -634,7 +669,9 @@ export function createCloudBaseMockPersistence(
       return Object.values(state.jobs)
         .filter((j) => {
           if (!ACTIVE_JOB_STATUSES.includes(j.status)) return false;
-          if (!j.lease_expires_at) return false;
+          // Jobs with no lease (queued, never claimed) are available for
+          // recovery. Jobs with an expired lease are also available.
+          if (!j.lease_expires_at) return true;
           return Date.parse(j.lease_expires_at) <= nowMs;
         })
         .map(jobFromRow);
@@ -650,6 +687,15 @@ export function createCloudBaseMockPersistence(
         mimeType,
         createdAt: now().toISOString(),
       });
+    },
+
+    async get(key: string): Promise<Uint8Array> {
+      const record = objectStore.get(key);
+      if (!record) {
+        throw new Error(`OBJECT_NOT_FOUND:${key}`);
+      }
+      // Return a copy so callers cannot mutate the stored bytes.
+      return new Uint8Array(record.bytes);
     },
 
     /**

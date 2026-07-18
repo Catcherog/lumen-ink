@@ -78,6 +78,9 @@ function makeFailingObjectStore(
       }
       return real.put(key, bytes, mimeType);
     },
+    async get(key) {
+      return real.get(key);
+    },
     async getSignedUrl(key) {
       return real.getSignedUrl(key);
     },
@@ -263,6 +266,9 @@ describe('GenerationService', () => {
         }
         return realObjects.put(key, bytes, mimeType);
       },
+      async get(key) {
+        return realObjects.get(key);
+      },
       async getSignedUrl(key) {
         return realObjects.getSignedUrl(key);
       },
@@ -317,6 +323,9 @@ describe('GenerationService', () => {
           putCount += 1;
         }
         return realObjects.put(key, bytes, mimeType);
+      },
+      async get(key) {
+        return realObjects.get(key);
       },
       async getSignedUrl(key) {
         return realObjects.getSignedUrl(key);
