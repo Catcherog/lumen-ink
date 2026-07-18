@@ -7,7 +7,7 @@
 - 日期：2026-07-18
 - 当前任务：`FLOW-001`
 - 状态：`awaiting_gpt_acceptance / nextActor=gpt`
-- Trae 返工 commit：待 push 后回填
+- Trae 返工 commit：`4e774ed`（push 到 `lumen/flow-001-trae`）
 - 分支：`lumen/flow-001-trae`
 - Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`（已追加 §14 P0 返工记录）
 - GPT 驳回报告：`docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`
