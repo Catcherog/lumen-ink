@@ -9,12 +9,15 @@ import TaskRail from './components/v2/TaskRail';
 import ContextPanel from './components/v2/ContextPanel';
 import VersionStrip from './components/v2/VersionStrip';
 import JobStatusPanel from './components/v2/JobStatusPanel';
+import LegacyHistoryImport from './components/v2/LegacyHistoryImport';
 import useEditor from './hooks/useEditor';
 import { useProject } from './hooks/useProject';
 import { serializeError } from './utils/error';
 import { downloadImage } from './utils/image';
 import { defaultRecipeBook, compilePrompt } from './utils/recipe';
+import { createProject } from './api/projects';
 import type { ProviderConfig, V2TaskId, EditRecipe } from '../../shared/types';
+import type { UploadFn, ImportResult } from './utils/legacyHistory';
 
 type ViewMode = 'result' | 'original' | 'compare';
 
@@ -42,6 +45,23 @@ export default function AppV2() {
   // - viewedVersionId: when null, the viewer shows the active Version's URL.
   const [viewedVersionId, setViewedVersionId] = useState<string | null>(null);
   const project = useProject();
+
+  // PERSIST-001 Task 10: legacy history explicit-import modal. The modal
+  // is opened from EditorHeader ("导入旧历史") when localStorage contains
+  // legacy `edit_history` entries. The upload callback wraps the V2
+  // createProject API so each recovered base64 becomes a new Project.
+  const [legacyImportOpen, setLegacyImportOpen] = useState(false);
+  const legacyUpload = useCallback<UploadFn>(async (entry) => {
+    // Convert the recovered base64 back to a File so the V2 createProject
+    // API accepts it as a normal image upload.
+    const byteString = atob(entry.base64);
+    const bytes = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) {
+      bytes[i] = byteString.charCodeAt(i);
+    }
+    const file = new File([bytes], `legacy-${entry.id}.png`, { type: entry.mimeType });
+    await createProject(file, entry.prompt || `导入 ${new Date(entry.timestamp).toLocaleString()}`);
+  }, []);
 
   const currentRecipe = recipeBook[activeTask];
   const compiled = useMemo(() => compilePrompt(currentRecipe), [currentRecipe]);
@@ -347,6 +367,7 @@ export default function AppV2() {
             onToggleTheme={() => setDarkMode((v) => !v)}
             onLogout={handleLogout}
             onSettings={() => setShowApiSettings(true)}
+            onImportLegacy={() => setLegacyImportOpen(true)}
             onCompare={handleCompare}
             onExport={handleExport}
             canCompare={canCompare}
@@ -428,6 +449,25 @@ export default function AppV2() {
           }
         }}
       />
+
+      {legacyImportOpen && (
+        <LegacyHistoryImport
+          upload={legacyUpload}
+          onImported={(result: ImportResult) => {
+            // The modal displays its own result summary; we only surface
+            // a soft error if any imports failed so the user knows to
+            // retry. Newly-imported Projects are not auto-loaded here —
+            // a future ROUTING task will add a projects-list view.
+            if (result.failed > 0) {
+              dispatch({
+                type: 'SET_ERROR',
+                payload: `${result.failed} 条记录导入失败，已保留在 edit_history 中，可重试`,
+              });
+            }
+          }}
+          onClose={() => setLegacyImportOpen(false)}
+        />
+      )}
     </div>
   );
 }

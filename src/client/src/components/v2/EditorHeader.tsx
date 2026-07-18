@@ -6,6 +6,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  History,
 } from 'lucide-react';
 
 interface EditorHeaderProps {
@@ -16,6 +17,8 @@ interface EditorHeaderProps {
   onCompare?: () => void;
   onExport?: () => void;
   onSettings?: () => void;
+  /** PERSIST-001 Task 10: optional callback to open the legacy history import modal. */
+  onImportLegacy?: () => void;
   /** 无原图或无结果时为 false，按钮渲染为禁用态 */
   canCompare?: boolean;
   /** 无可导出图片结果（base64 或 URL）时为 false，按钮渲染为禁用态；纯文本结果不计入 */
@@ -30,6 +33,7 @@ export default function EditorHeader({
   onCompare,
   onExport,
   onSettings,
+  onImportLegacy,
   canCompare = false,
   canExport = false,
 }: EditorHeaderProps) {
@@ -90,6 +94,18 @@ export default function EditorHeader({
           <Download className="w-4 h-4" />
           <span className="hidden md:inline">导出</span>
         </button>
+
+        {onImportLegacy && (
+          <button
+            type="button"
+            onClick={onImportLegacy}
+            title="导入旧历史记录"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <History className="w-4 h-4" />
+            <span className="hidden md:inline">导入历史</span>
+          </button>
+        )}
 
         <button
           type="button"
