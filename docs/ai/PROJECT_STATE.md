@@ -13,7 +13,7 @@
 完成 STORAGE-001 的至少两个完整方案比较、合成数据 PoC、评分矩阵、稳定接口与合约测试，并由 GPT/用户冻结方案。
 
 ## In Progress
-- STORAGE-001：持久化与任务基础设施技术选型，当前状态 `ready_for_trae / nextActor=trae`。仅允许方案比较、稳定接口、合成数据 PoC 与合约测试；未经 GPT/用户冻结不得进入 PERSIST-001。
+- STORAGE-001：持久化与任务基础设施技术选型，当前状态 `awaiting_gpt_acceptance / nextActor=gpt`（用户授权 GPT 进行技术判断；Trae 已完成修订，等 GPT 验收冻结）。仅允许方案比较、稳定接口、合成数据 PoC 与合约测试；未经 GPT/用户冻结不得进入 PERSIST-001。
 
 ## Recently Completed
 - FLOW-001：配方模型与单一生成操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18）。第二轮两个 P0 已关闭；GPT 独立 8 条门禁全绿（client 104、server 16、root 120）。
@@ -24,8 +24,8 @@
 - 产品与 UI 审计、V2 定位 / 范围 / UI / PRD / 技术 / 验收规格已冻结。
 
 ## Next Priorities
-1. Trae 按内部稳定版快速计划执行 STORAGE-001：恰好两个完整方案、合成数据 PoC、成本/迁移/备份/回滚与稳定接口合约。
-2. GPT/用户冻结 STORAGE-001 方案，未冻结前不得启动 PERSIST-001。
+1. GPT 验收 STORAGE-001 修订（候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage；CloudBase mock adapter PoC 6 用例通过；8 条门禁全绿）。
+2. GPT 验收通过后写入 `decision: frozen`，STATE 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae`，解除 PERSIST-001 阻塞；未冻结前不得启动 PERSIST-001。
 3. 方案冻结后连续执行已确认的 PERSIST-001 合并闭环与三个内部安全单元；ROUTING、完整公开发布 HARDEN 和非关键体验优化延期。
 
 ## Active Blockers
@@ -36,11 +36,11 @@
 - 图片与 history 缺乏可靠持久化，主要在前端内存。
 - Vercel `/tmp` Provider 配置会随实例回收丢失。
 - 默认密码 / JWT fallback、无限制 CORS 和日志内容存在安全风险。
-- 当前自动化门禁为 client 104 + server 16 = 120 tests；后续任务继续补对应合约/集成覆盖。
+- 当前自动化门禁为 client 104 + server 28（含 6 个新 CloudBase mock 测试）= 132 tests；后续任务继续补对应合约/集成覆盖。
 - `docs/ai/` 三个权威文件未提交到远端分支（DF-RULES-01，另建 docs-only 任务处理）。
 
 ## Last Updated
-2026-07-18
+2026-07-18（STORAGE-001 修订：候选 A CloudBase PoC 完成，等 GPT 验收冻结）
 
 ---
 

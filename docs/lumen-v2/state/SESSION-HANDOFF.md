@@ -6,14 +6,25 @@
 
 - 日期：2026-07-18
 - 当前任务：`STORAGE-001`
-- 状态：`awaiting_user_decision / nextActor=user`
+- 状态：`awaiting_gpt_acceptance / nextActor=gpt`（用户授权 GPT 进行技术判断；Trae 修订完成，等 GPT 验收冻结）
 - 分支：`lumen/storage-001-trae`（基于 `lumen/flow-001-trae`）
-- Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`
-- 选型报告：`docs/lumen-v2/storage-options.md`（推荐 Vercel + Cloudflare R2 + Vercel Workflow，84/100 vs 82/100）
-- PoC 证据：`docs/lumen-v2/evidence/STORAGE-001/poc-result.md`（3 合约测试通过）
+- Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`（含修订章节）
+- 选型报告：`docs/lumen-v2/storage-options.md`（推荐候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage，83/100 vs 82/100 vs 78/100）
+- PoC 证据：
+  - `docs/lumen-v2/evidence/STORAGE-001/poc-result.md`（原 3 合约测试通过）
+  - `docs/lumen-v2/evidence/STORAGE-001/cloudbase-mock-poc-result.md`（**新增**：CloudBase mock adapter PoC 6 用例全部通过）
 - 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`
-- 冻结状态：**未冻结**。`decision: pending_user_approval`。
-- 待用户决策：Cloudflare 账号 + Vercel Pro 升级 + 月度预算 + Vercel Workflow Beta 风险 + 不可逆迁移审批。
+- 冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT 验收通过后由 GPT 写入冻结并更新 STATE.json 激活 PERSIST-001。
+
+## STORAGE-001 修订背景（2026-07-18）
+
+用户重新打开 STORAGE-001 局部选型修订，明确决策方向：
+
+- 首选架构：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**（候选 A）。
+- 当前不注册 Cloudflare，不升级 Vercel Pro。
+- GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储。
+- 当前仍只允许执行 STORAGE-001 修订；禁止启动 PERSIST-001。
+- 不得自行写入 `decision: frozen`，修订完成后交回 GPT 验收冻结。
 
 ## STORAGE-001 提交记录
 
@@ -22,9 +33,10 @@
 | 0 | `37c381d` | `docs(lumen-v2): accept FLOW-001 and start internal fast track` |
 | 1 | `d59abbd` | `docs(lumen-v2): STORAGE-001 compare two complete stacks` |
 | 2 | `13342b0` | `feat(lumen-v2): STORAGE-001 persistence contract PoC` |
-| 3 | (待提交) | `feat(lumen-v2): STORAGE-001 decision and PoC`（含报告 + 状态推进 + 8 门禁证据） |
+| 3 | `d85bae2` | `feat(lumen-v2): STORAGE-001 decision and PoC`（原 Task 3 状态推进 + 8 门禁证据） |
+| 4 | (待提交) | `docs(lumen-v2): revise STORAGE-001 for CloudBase`（修订：新增候选 A + CloudBase mock PoC + 事实修正 + 状态推进） |
 
-## STORAGE-001 8 条门禁（全部 EXIT=0）
+## STORAGE-001 修订 8 条门禁（全部 EXIT=0）
 
 | 命令 | 结果 |
 |------|------|
@@ -32,35 +44,112 @@
 | `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
 | `npm test --prefix src/client` | 4 files / **104 passed** |
 | `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
-| `npm test --prefix src/server` | 3 files / **19 passed**（含 3 个新合约测试） |
-| `npm test` | 7 files / **123 passed**（104 client + 19 server） |
-| `npm run build` | client + server 通过 |
-| `node scripts/check-lumen-collab.mjs` | 通过 |
+| `npm test --prefix src/server` | 5 files / **28 passed**（含 6 个新 CloudBase mock 测试） |
+| `npm test` | 9 files / **132 passed**（104 client + 28 server） |
+| `npm run build` | exit 0，client + server 构建成功 |
+| `node scripts/check-lumen-collab.mjs` | exit 0，"Lumen collaboration state and basic public-repo safety checks passed." |
 
 证据文件：`docs/lumen-v2/evidence/STORAGE-001/gate-*.txt`。
 
-## STORAGE-001 范围遵守
+## STORAGE-001 修订范围遵守
 
-- ✅ 仅执行 STORAGE-001，未启动 PERSIST-001。
+- ✅ 仅执行 STORAGE-001 修订，未启动 PERSIST-001。
 - ✅ 严格保留工作区无关修改：精确 `git add <path>`。
-- ✅ 非必要 S2/S3 不登记新项（既有 6 项延期项保持不变）。
-- ✅ STORAGE 未经 GPT/用户冻结，未启动 PERSIST-001。
+- ✅ 保留已冻结的 `PersistenceDependencies` 和 `JobExecutor` 接口表面不变。
+- ✅ CloudBase 本轮不创建真实环境，不索取或写入密钥，不连接生产数据。
+- ✅ 不修改生产 Provider、上传、Job 或 Version 运行路径。
+- ✅ 不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）。
 - ✅ 未写 `decision: frozen`。
 
-## 用户决策项（待答复）
+## 修订内容摘要
 
-1. 是否注册 Cloudflare 账号（R2 免费额度内不收费，需信用卡验证）。
-2. 是否将 Vercel 升级到 Pro（$20/月）。
-3. 月度预算上限（推荐 $20—25/月）。
-4. 是否接受 Vercel Workflow Beta 风险。
-5. 是否批准不可逆迁移（生产数据写入 R2 / Vercel Postgres 后回滚需手动导出）。
+### 一、修正过时事实（详见 `storage-options.md` §1.1）
 
-可选：若拒绝候选 1 的账号门槛，可切换到候选 2（Supabase），但需接受 Edge Function 不支持 `sharp` 的限制。
+- 删除「Vercel Blob 仅支持公开 URL」结论；记录其目前支持私有 Blob 和签名 URL。
+- 删除「Vercel Pro 是 80—100s 任务的技术必需条件」；Hobby 当前上限为 300 秒。
+- 删除「Vercel Postgres 包含在 Pro」；记录 Vercel Postgres 已停止，新项目需 Marketplace 数据库。
+- 修正 Workflow 计费信息，不再写「Beta 期间免费」。
+- 补记最终 STORAGE 提交 `d85bae2`。
+- 修正本文件与 `docs/ai/PROJECT_STATE.md` 中过时状态。
+
+### 二、新增首选候选 A 并评估（详见 `storage-options.md` §2、§4）
+
+候选 A：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**。
+
+能力映射：
+
+- Project/Asset/Version/GenerationJob/AuthThrottle：CloudBase PostgreSQL。
+- ObjectStore：CloudBase PG 私有 bucket。
+- getSignedUrl：CloudBase createSignedUrl。
+- UnitOfWork：PostgreSQL 事务。
+- JobExecutor：现有 Vercel Node Function。
+- 任务恢复：数据库 Job 状态 + lease/heartbeat + 幂等键 + 显式 retry。
+- 图片处理：继续使用现有 Node.js/Sharp，不迁移到 Edge Runtime。
+- 本地开发：现有 LocalPersistence adapter，不要求联网或真实账号。
+
+评分矩阵（100 分固定权重）：
+
+| 候选 | 总分 | 资格线 |
+|------|------|--------|
+| A. Vercel Hobby + CloudBase PG + CloudBase PG Storage | **83** | ✓ |
+| B. Vercel Hobby + Marketplace Postgres + Vercel Private Blob | 78 | ✓ |
+| C. Supabase all-in-one | 82 | ✓ |
+
+### 三、明确边界（详见 `storage-options.md` §3）
+
+- GitHub 仅用于源码、规格、脱敏证据和小型合成 fixture。
+- CloudBase 本轮不创建真实环境，不索取或写入密钥，不连接生产数据。
+- 不修改生产 Provider、上传、Job 或 Version 运行路径。
+- 不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）。
+- CloudBase CloudRun 仅登记为未来容量/长任务升级选项，本轮不部署。
+
+### 四、PoC 与测试（详见 `cloudbase-mock-poc-result.md`）
+
+- 新建 `src/server/infrastructure/persistence/cloudbase-mock.ts`：CloudBase mock adapter PoC，实现冻结的 `PersistenceDependencies` 接口，内部维护 PG-style snake_case 行结构 + camelCase 双向 mapper + PoC-only helper（lease/heartbeat/idempotency）。
+- 新建 `src/server/domain/cloudbase-mock.contract.test.ts`：6 个测试用例覆盖 6 个必需场景：
+  1. repository CRUD 与字段映射（camelCase ↔ snake_case 双向 round-trip）。
+  2. UnitOfWork 事务失败不产生部分 Version/Job 成功状态。
+  3. 私有对象签名 URL 适配（含 expiry 与确定性 signature）。
+  4. 项目删除清理元数据和对象（级联删除）。
+  5. Job lease 过期后可以安全重试（leaseSeconds TTL + 第二个 worker 安全接管）。
+  6. 同一 idempotencyKey 不产生重复 Version。
+- 测试结果：6 tests passed in 9ms（不要求 CloudBase 账号作为前置条件）。
+- 不接入生产路径；只更新设计映射和 mock 合约。
+
+### 五、决策材料（详见 `storage-options.md` §4、§6）
+
+- 重算固定 100 分矩阵，比较 A/B/C 三方案，Cloudflare R2 保留为未来 S3 迁移备选但不再是当前账号门槛。
+- 成本按阶段表达：
+  - 当前非商业内部 PoC：Vercel Hobby + CloudBase 免费试用/个人额度。
+  - CloudBase 个人版参考 19.9 元/月；实际以账号地区和控制台报价为准。
+  - 若转为商业用途：重新审查 Vercel Pro 和 CloudBase 正式环境费用。
+- 不再使用「固定 $20—25/月」结论。
+
+## GPT 验收指引
+
+按变更风险驱动验收，建议聚焦：
+
+1. 修订 diff：`storage-options.md` 全面重写、`cloudbase-mock.ts` 新增、`cloudbase-mock.contract.test.ts` 新增 6 用例。
+2. 事实修正记录（`storage-options.md` §1.1）：5 项过时结论的修正是否准确。
+3. 边界声明（`storage-options.md` §3）：GitHub / CloudBase / 生产路径 / 接口冻结 4 类边界是否完整。
+4. 评分矩阵（`storage-options.md` §4）：A=83 / B=78 / C=82 的逐项打分是否合理。
+5. CloudBase mock adapter PoC（`cloudbase-mock-poc-result.md`）：6 个必需场景是否完整覆盖。
+6. 8 条门禁结果（见上表）：真实退出码与测试数。
+
+无需重审 FLOW-001 视觉证据（已冻结）；未变更的 FLOW-001 文件不重审；本轮不重审原 STORAGE-001 PoC（已冻结）。
+
+## 仍需 GPT 冻结的事项
+
+1. 是否接受候选 A（Vercel Hobby + CloudBase PG + CloudBase PG Storage）为冻结方案。
+2. 是否确认 GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储的硬边界。
+3. 是否确认 CloudBase CloudRun 仅作为未来容量/长任务升级选项，本轮不部署。
+4. 是否确认 Cloudflare R2 保留为未来 S3 迁移备选，不再是当前账号门槛。
+5. GPT 验收通过后由 GPT 写入 `decision: frozen` 到 `storage-options.md`，并更新 `STATE.json` 为 `PERSIST-001 / ready_for_trae / nextActor=trae`，解除 PERSIST-001 阻塞。
 
 ## 下一步
 
-1. 用户决策账号与预算 → GPT 写入 `decision: frozen` 到 `storage-options.md` 并更新 DECISION-LOG.md → STATE.json 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae` → 解除 PERSIST-001 阻塞。
-2. 用户未决策前，PERSIST-001 保持阻塞；任何窗口不得提前实施 PERSIST-001。
+1. GPT 验收 → 写入 `decision: frozen` → STATE.json 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae` → 解除 PERSIST-001 阻塞。
+2. GPT 未冻结前，PERSIST-001 保持阻塞；任何窗口不得提前实施 PERSIST-001。
 3. 冻结后执行 `INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 4—8（PERSIST-001 主体）+ Task 5—7（内部安全底线）。
 
 ---
@@ -72,7 +161,7 @@
 - Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`（已追加 §15 第二轮 R2 返工记录）
 - GPT 验收报告：`docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`（第三轮 `MVP_PASS`）
 
-## GPT 第三轮验收结论
+## GPT 第三轮验收结论（FLOW-001）
 
 - 结论：`MVP_PASS`。
 - P0-01-R2：URL-only SET_RESULT 已清空旧 base64；真实复现与四类结果状态测试通过。
@@ -80,77 +169,12 @@
 - GPT 独立 8 条门禁全部 `EXIT_CODE=0`：client 104、server 16、root 120，lint/typecheck/build/安全扫描通过。
 - 未发现新 P0/P1；FLOW-001 已归档，STORAGE-001 已激活；PERSIST-001 继续阻塞。
 
-## GPT 第二轮验收结论
-
-- 结论：`MVP_FAIL`。
-- 独立 8 条门禁：全部 `EXIT_CODE=0`（client 94、server 16、root 110）。
-- `FLOW001-P0-01-R2`：真实 reducer 状态是旧 `currentImage` base64 与新 `currentImageUrl` 并存；现 `!!state.currentImage` 的 CTA 判定与防御检查仍会放行，旧图仍被提交。
-- `FLOW001-P0-02-VERIFY-R2`：参考图生产接线已恢复，但新增测试实际为 18 条而非 19 条；没有真实覆盖添加流程和 `submitEdit`/`/api/edit` payload。
-- 最小返工：允许最小修改 `useEditor.SET_RESULT` 维护 URL-only 当前输入不变量；补真实添加与请求 payload 两类有效回归；不得启动 STORAGE/JOB/VERSION/ROUTING。
-
-## 本轮 R2 返工事实
-
-Trae 按第二轮 FIX_PACKET 最小返工，未扩大范围：
-
-### P0-01-R2 修复：SET_RESULT 维护当前画布输入不变量
-
-- 根因：首轮 `useEditor.SET_RESULT` 使用 `currentImage: action.payload.imageData || state.currentImage`，URL-only 结果时保留旧 base64；同时 `currentImageUrl` 更新为新 URL，状态变为"旧 base64 + 新 URL"并存。
-- 修复：将 `SET_RESULT` 分支重写为三种结果显式分支（base64 / URL-only / text-only）；URL-only 时清空旧 base64，`currentImageUrl` = 新 URL；text-only 保留既有 canvas 供 chat 模型继续编辑。
-- 不变量：当前画布输入始终与最近一次结果的实际数据源一致；`submitEdit` 的 `image: state.currentImage || undefined` 自然不发任何 base64。
-- 未修改 `submitEdit` 逻辑、`/api/edit` 协议、Provider 实现、存储协议。
-
-### P0-02-VERIFY-R2 修复：补真实添加与请求 payload 回归
-
-- 根因：首轮 P0 返工的 `ContextPanel.test.tsx` 新增 18 条测试（非承诺的 19 条），"添加参考图"只验证按钮存在，未触发文件输入；"payload 测试"只断言传入 `ContextPanel` 的数组长度，未渲染 `AppV2` 或调用 `submitEdit` 检查请求。
-- 修复：
-  - `ContextPanel.test.tsx` 新增 1 用例：mock `fileToBase64` 返回确定性 base64；`fireEvent.change(fileInput)` 触发真实添加流程；断言 `onReferenceImagesChange` 与 `onRecipeChange` 同步调用，recipe 计数 = 1。
-  - 新建 `useEditor.test.ts`（9 用例）：覆盖 P0-01-R2 真实复现、SET_RESULT 四分支无输入源错位、P0-02-VERIFY-R2 payload 一致性（N=2 / N=0 / N=3 三种场景，断言编译 Prompt 含"参考 N 张"、history `params.recipe.auxiliary.referenceImageCount=N`、实际 `referenceImages` payload 长度=N）。
-  - `submitEdit` 调用通过 `vi.mock('axios')` 拦截 `axios.post`，验证请求 body 不含旧 base64 且 `referenceImages` 长度一致。
-
-### 19/18 计数纠正
-
-- 首轮报告 §14.4 声称"新增 19 用例"，实际为 18 用例（P0-01 6 + P0-02 10 + 端到端 2 = 18）。
-- 本轮 R2 新增 10 用例（`useEditor.test.ts` 9 + `ContextPanel.test.tsx` 1），累计 P0 相关回归为 28 用例（首轮 18 + R2 新增 10）。
-- 本轮 R2 真实补齐的"有效添加 + 有效 payload"测试为 10 用例，超过 FIX_PACKET 要求的最小 2 用例。
-
-## 8 条门禁重跑（全部 EXIT=0）
-
-| 命令 | 结果 |
-|------|------|
-| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
-| `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
-| `npm test --prefix src/client` | 4 files / **104 passed**（首轮 94 + R2 新增 10） |
-| `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
-| `npm test --prefix src/server` | 2 files / 16 passed |
-| `npm test` | 6 files / **120 passed**（104 client + 16 server） |
-| `npm run build` | client + server 通过 |
-| `node scripts/check-lumen-collab.mjs` | 通过 |
-
-证据文件已就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`。
-
-## GPT 验收指引
-
-按变更风险驱动验收，建议聚焦：
-
-1. P0-01-R2 修复 diff：`useEditor.ts` 的 `SET_RESULT` 三分支重写
-2. P0-02-VERIFY-R2 修复 diff：`ContextPanel.test.tsx` 真实添加用例 + `useEditor.test.ts` 9 用例
-3. 真实复现路径：上传 → URL-only SET_RESULT → `currentImage=null` + `currentImageUrl=新 URL` → `submitEdit` 请求 body `image` 字段 undefined
-4. payload 三层一致性：编译 Prompt 含"参考 N 张" + history `params.recipe.auxiliary.referenceImageCount=N` + 实际 `referenceImages` payload 长度=N
-5. 19/18 计数纠正与 R2 新增 10 用例
-6. 8 条门禁重跑结果
-
-无需重审 UI-001 视觉证据（已冻结）；未变更的首轮文件不重审。
-
 ## 范围边界
 
-- 仅修 P0-01-R2 状态不变量与 P0-02-VERIFY-R2 直接测试缺口；
-- 允许最小修改 `useEditor.SET_RESULT` reducer，未触及其他 reducer 分支；
+- 仅修 STORAGE-001 选型材料与新增 CloudBase mock PoC；
+- 未修改生产 Provider、上传、Job 或 Version 运行路径；
 - 未修改 `/api/edit` 协议、Provider 实现、存储协议；
-- 未启动 STORAGE/JOB/VERSION/ROUTING。
-
-## 下一步
-
-Trae 读取 `docs/lumen-v2/tasks/active/STORAGE-001.md`，执行技术选型、最小 PoC、接口契约与合约测试；不得提前实施 PERSIST-001。开始前先提交/推送本轮 GPT 验收控制面文件与任务移动，保持一个提交只包含本轮验收落盘。
+- 未启动 PERSIST-001。
 
 ## 后续加速方向（已确认，尚未激活）
 
@@ -159,7 +183,7 @@ Trae 读取 `docs/lumen-v2/tasks/active/STORAGE-001.md`，执行技术选型、�
 ## 内部稳定版加速包（用户已批准）
 
 - 目标：优先达到 3 人内部团队稳定使用；非必要 S2/S3 统一登记后延，不阻塞主线。
-- 当前唯一可执行任务仍为 `STORAGE-001 / ready_for_trae / nextActor=trae`。
+- 当前唯一可执行任务仍为 `STORAGE-001 / awaiting_gpt_acceptance / nextActor=gpt`。
 - 连续执行入口：`docs/lumen-v2/prompts/INTERNAL-FAST-TRACK-TRAE.md`。
 - 冻结前执行：`INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 0—3；Task 0 只落地 FLOW GPT 控制面，Task 1—3 完成 STORAGE 选型、PoC、稳定契约和验收包。
 - 冻结后执行：仅当 GPT 更新 STATE 为 `PERSIST-001 / ready_for_trae / nextActor=trae`，才执行既有 PERSIST Task 1—11、快速计划 Task 5—7、最后执行 PERSIST Task 12 统一证据交接。

@@ -6,8 +6,8 @@
   "phase": "storage-selection",
   "currentTask": "STORAGE-001",
   "activeTaskPath": "docs/lumen-v2/tasks/active/STORAGE-001.md",
-  "status": "awaiting_user_decision",
-  "nextActor": "user",
+  "status": "awaiting_gpt_acceptance",
+  "nextActor": "gpt",
   "lastAcceptedTask": "FLOW-001",
   "latestTraeReport": "docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md",
   "latestGptReview": "docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md",
@@ -26,6 +26,7 @@
     "docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md",
     "docs/lumen-v2/storage-options.md",
     "docs/lumen-v2/evidence/STORAGE-001/poc-result.md",
+    "docs/lumen-v2/evidence/STORAGE-001/cloudbase-mock-poc-result.md",
     "docs/lumen-v2/state/SESSION-HANDOFF.md"
   ],
   "blockedTasks": [

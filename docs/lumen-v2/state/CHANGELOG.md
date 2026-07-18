@@ -1,5 +1,26 @@
 # 10｜变更日志
 
+## 2026-07-18 - STORAGE-001 修订完成（awaiting_gpt_acceptance，候选 A CloudBase）
+
+- 触发：用户重新打开 STORAGE-001 局部选型修订，明确决策方向：首选架构为 Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage；当前不注册 Cloudflare、不升级 Vercel Pro；GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储；当前仍只允许执行 STORAGE-001 修订，禁止启动 PERSIST-001；不得自行写入 `decision: frozen`，修订完成后交回 GPT 验收冻结。
+- 分支：`lumen/storage-001-trae`（沿用，基于 `lumen/flow-001-trae`）。
+- 提交：
+  - `37c381d` `docs(lumen-v2): accept FLOW-001 and start internal fast track`
+  - `d59abbd` `docs(lumen-v2): STORAGE-001 compare two complete stacks`
+  - `13342b0` `feat(lumen-v2): STORAGE-001 persistence contract PoC`
+  - `d85bae2` `feat(lumen-v2): STORAGE-001 decision and PoC`（原 Task 3 状态推进 + 8 门禁证据）
+  - 待提交 `docs(lumen-v2): revise STORAGE-001 for CloudBase`（修订：新增候选 A + CloudBase mock PoC + 事实修正 + 状态推进）
+- 修订内容：
+  - 一、修正过时事实：删除「Vercel Blob 仅公开 URL」「Vercel Pro 是 80—100s 任务必需」「Vercel Postgres 包含在 Pro」「Workflow Beta 免费」「待提交」5 项过时结论。
+  - 二、新增首选候选 A：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage；能力映射覆盖 9 个冻结接口。
+  - 三、明确边界：GitHub / CloudBase / 生产路径 / 接口冻结 4 类边界。
+  - 四、PoC 与测试：新建 `src/server/infrastructure/persistence/cloudbase-mock.ts` + `src/server/domain/cloudbase-mock.contract.test.ts`，6 用例覆盖 CRUD/字段映射、UoW 回滚、私有签名 URL、级联删除、Job lease 过期重试、幂等键防重；不接入生产路径。
+  - 五、决策材料：重算 100 分矩阵 A=83 / B=78 / C=82；成本按阶段表达（PoC $0 / 内部稳定版参考 19.9 元/月 / 商业用途未冻结）；不再使用「固定 $20—25/月」结论。
+- 8 条门禁：client 104 / server 28（含 6 新 mock 测试）/ root 132 tests passed，lint/typecheck/build/安全扫描全绿；证据文件 `docs/lumen-v2/evidence/STORAGE-001/gate-*.txt` 已就地更新。
+- 状态推进：`STATE.json` 由 `awaiting_user_decision / nextActor=user` → `awaiting_gpt_acceptance / nextActor=gpt`；`SESSION-HANDOFF.md` / `PROJECT-MEMORY.md` / `DECISION-LOG.md`（新增 D-037 / D-038 / D-039）/ 本日志 / `STORAGE-001-TRAE-REPORT.md` / `docs/ai/PROJECT_STATE.md` 同步更新；PERSIST-001 继续阻塞。
+- 冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT 验收通过后由 GPT 写入冻结并更新 STATE.json 激活 PERSIST-001。
+- 下一步：GPT 验收 → 写入 `decision: frozen` → STATE.json 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae` → 解除 PERSIST-001 阻塞。
+
 ## 2026-07-18 - STORAGE-001 Trae 实施完成（awaiting_user_decision）
 
 - 触发：FLOW-001 第三轮验收通过后激活 STORAGE-001（`ready_for_trae / nextActor=trae`）；用户授权连续执行 INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md Task 0—3，禁止启动 PERSIST-001。

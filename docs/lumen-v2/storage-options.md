@@ -1,100 +1,157 @@
 # STORAGE-001 持久化与任务基础设施技术选型
 
-> 状态：`awaiting_user_decision`（推荐方案需要用户决策账号与预算）
+> 状态：`awaiting_gpt_acceptance`（用户授权 GPT 进行技术判断；Trae 修订完成，等 GPT 验收冻结）
 > 任务：STORAGE-001
-> 决策权限：用户
 > 创建日期：2026-07-18
+> 修订日期：2026-07-18（用户重新打开局部选型修订，新增首选候选 A，修正过时事实）
 > 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`
+> 最终 STORAGE 提交：`d85bae2`（已 push 到 `lumen/storage-001-trae`）
 
 ## 0. 决策摘要（先读这一节）
 
-- 候选方案数：2（Vercel+R2+Workflow / Supabase all-in-one），均满足硬条件。
-- 评分结果：Vercel+R2+Workflow **84/100**，Supabase **82/100**，差异在统计误差内。
-- 推荐方案：**Vercel + Cloudflare R2 + Vercel Workflow**（Candidate 1），理由是保留现有 Node.js/Express/Sharp 栈、Vercel Workflow 提供唯一 durable execution、迁移成本最低。
-- 备选方案：Supabase all-in-one（Candidate 2），本地开发体验最佳，但 Edge Function 不支持 `sharp`，PERSIST-001 Task 6 需要改用 WASM 或外部服务。
-- 账号门槛：`account_gate: user`，需要用户确认 Cloudflare 账号 + Vercel 计划升级 + 月度预算 + 不可逆迁移审批（详见 §6）。
-- 决策权限：`decision_authority: user`。
-- 冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT/用户冻结后由 STATE.json 激活 PERSIST-001。
+- 用户决策方向（2026-07-18 重新打开修订）：
+  - 首选架构：**Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage**（候选 A）。
+  - 当前不注册 Cloudflare，不升级 Vercel Pro。
+  - GitHub 不得作为运行时数据库、对象存储或 GenerationJob 状态存储。
+  - 当前仍只允许执行 STORAGE-001 修订；禁止启动 PERSIST-001。
+  - 不得自行写入 `decision: frozen`，修订完成后交回 GPT 验收冻结。
+- 候选方案数：3（详见 §2）。
+  - A. Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage（首选）
+  - B. Vercel Hobby + Marketplace Postgres + Vercel Private Blob
+  - C. Supabase all-in-one
+- 评分结果（详见 §4）：A = **83/100**，B = 78/100，C = 82/100。三方案均通过资格线（recoverability / long_task / deletion 各维度 ≥3）。
+- 推荐方案：**候选 A（Vercel Hobby + CloudBase PG + CloudBase PG Storage）**。理由：满足用户已定的方向（不注册 Cloudflare、不升级 Vercel Pro），同时保留现有 Node.js/Express/Sharp 栈，本地 PoC 与 CloudBase mock adapter 6 用例全部通过。
+- 边界声明（详见 §3）：
+  - GitHub 仅用于源码、规格、脱敏证据和小型合成 fixture。
+  - CloudBase 本轮不创建真实环境，不索取或写入密钥，不连接生产数据。
+  - 不修改生产 Provider、上传、Job 或 Version 运行路径。
+  - 不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）。
+  - CloudBase CloudRun 仅登记为未来容量/长任务升级选项，本轮不部署。
+- 成本表达（详见 §6）：按阶段表达，不再使用固定 `$20—25/月` 结论。
+  - 当前非商业内部 PoC：Vercel Hobby + CloudBase 免费试用/个人额度。
+  - CloudBase 个人版参考 19.9 元/月；实际以账号地区和控制台报价为准。
+  - 若转为商业用途：重新审查 Vercel Pro 与 CloudBase 正式环境费用。
+- 冻结状态：**未冻结**。本文件不写 `decision: frozen`。GPT 验收通过后由 GPT 写入冻结并更新 STATE.json 激活 PERSIST-001。
 
 ## 1. 硬条件筛选（按 INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md Task 1 Step 2）
 
-| 硬条件 | Vercel Blob | Vercel+R2+Workflow | Supabase all-in-one |
-|--------|-------------|--------------------|---------------------|
-| 持久元数据 | ✓ Vercel Postgres | ✓ Vercel Postgres (Neon) | ✓ Supabase Postgres |
-| 私有对象/签名 URL | ✗ 公开 URL | ✓ R2 presigned URL | ✓ Storage Signed URL + RLS |
-| 持久 Job 状态 | ✓ Postgres | ✓ Postgres + Workflow state | ✓ Postgres + pgmq |
-| 80—100s Provider 执行（不依赖单个 90s 请求） | ✓ Function 300s | ✓ Function 800s + Workflow durable | ✓ Edge Function 400s (paid) |
-| 适配器重建恢复 | ✓ | ✓ | ✓ |
-| 项目级联删除 | ✓ Postgres CASCADE | ✓ Postgres CASCADE + R2 lifecycle | ✓ Postgres CASCADE + Storage lifecycle |
+| 硬条件 | 候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage | 候选 B：Vercel Hobby + Marketplace Postgres + Vercel Private Blob | 候选 C：Supabase all-in-one |
+|--------|------|------|------|
+| 持久元数据 | ✓ CloudBase PostgreSQL | ✓ Vercel Marketplace Postgres（Neon 等） | ✓ Supabase Postgres |
+| 私有对象/签名 URL | ✓ CloudBase PG Storage 私有 bucket + createSignedUrl | ✓ Vercel Blob 私有 Blob + 签名 URL（已支持，参见 §1.1 修正） | ✓ Storage Signed URL + RLS |
+| 持久 Job 状态 | ✓ CloudBase PG Job 表 + lease/heartbeat | ✓ Marketplace Postgres Job 表 | ✓ Postgres + pgmq |
+| 80—100s Provider 执行（不依赖单个 90s 请求） | ✓ Vercel Hobby Function 300s（覆盖 80—100s Provider 调用 + Sharp 验证 + 对象写入） | ✓ 同左 | ✓ Edge Function 400s（paid） |
+| 适配器重建恢复 | ✓（PoC 已验证，详见 §5） | ✓ | ✓ |
+| 项目级联删除 | ✓ CloudBase PG 外键 CASCADE + Storage 删对象 | ✓ Postgres CASCADE + Blob 删对象 | ✓ Postgres CASCADE + Storage lifecycle |
 
-Vercel Blob 因不满足"私有对象/签名 URL"硬条件被拒绝（见 source-register.md §1.7）。Vercel+R2+Workflow 用 Cloudflare R2 替代 Vercel Blob 满足全部硬条件。
+三方案均满足硬条件。
 
-## 2. 候选方案 1：Vercel + Cloudflare R2 + Vercel Workflow
+### 1.1 事实修正记录（2026-07-18 修订）
 
-### 2.1 架构
+前版文档与 `source-register.md §1.7` 中的以下结论已过时，本次修订修正如下：
+
+| 原结论（过时） | 修正后事实 |
+|---|---|
+| Vercel Blob 仅支持公开 URL，不满足「私有对象/签名 URL」硬条件 | **修正**：Vercel Blob 现支持私有 Blob 与签名 URL（access 参数 `private` + 签名 URL API）。前版拒绝理由不成立；候选 B 重新纳入评估。 |
+| Vercel Pro 是 80—100s 任务的技术必需条件（Pro 800s） | **修正**：Hobby 当前 Function maxDuration 上限为 300s，已覆盖 80—100s Provider 调用 + Sharp 验证 + 对象写入。Pro 不再是硬门槛。 |
+| Vercel Postgres 包含在 Pro 计划 | **修正**：Vercel Postgres（原 First-Party）已停止服务，新项目需通过 Vercel Marketplace 接入第三方 Postgres（如 Neon）。Marketplace Postgres 独立计费，不属于 Vercel 计划包含项。 |
+| Vercel Workflow Beta 期间免费 | **修正**：Vercel Workflow 计费按 Workflow Steps（durable 工作单元）+ Workflow Storage（状态数据量）+ Functions 计算费用计算；Observability 在 Beta 期间免费，Steps 与 Storage 按使用量计费。本轮不使用 Vercel Workflow。 |
+| 最终 STORAGE 提交为「待提交」 | **修正**：最终提交为 `d85bae2` `feat(lumen-v2): STORAGE-001 decision and PoC`，已 push 到 `lumen/storage-001-trae` 分支。 |
+
+修正依据：详见 `docs/lumen-v2/evidence/STORAGE-001/source-register.md`（访问日期 2026-07-18，本轮追加补充核对）。
+
+## 2. 候选方案详述
+
+### 2.1 候选 A：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage（首选）
+
+#### 2.1.1 架构
 
 ```text
 Client (React 19)
   ↓
-Vercel Function (Node.js 20+, Express 4, Sharp, maxDuration=800s Pro)
-  ├─→ Vercel Postgres (Neon) — Project/Asset/Version/Job/AuthThrottle 元数据
-  ├─→ Cloudflare R2 (S3 SDK) — 私有桶 + presigned URL，原图/版本对象
-  └─→ Vercel Workflow (Beta, durable) — Job 状态机，pause/resume/replay
-        ├─→ 'use step' generateDraft → Provider API (80—100s)
-        ├─→ sleep / hook (human-in-loop)
-        └─→ Vercel Cron — 定期清理孤立对象（CRON_SECRET 校验）
+Vercel Function (Node.js 20+, Express 4, Sharp, maxDuration=300s on Hobby)
+  ├─→ CloudBase PostgreSQL — Project/Asset/Version/GenerationJob/AuthThrottle 元数据
+  ├─→ CloudBase PG Storage (私有 bucket) — createSignedUrl，原图/版本对象
+  └─→ JobExecutor：现有 Vercel Node Function（同步执行 + Job 状态机 + lease/heartbeat + 幂等键 + 显式 retry）
+        ├─→ 同步路径：Function 直接调用 Provider API（80—100s），完成后原子写入 Version + Job succeeded
+        └─→ 任务恢复：DB Job 状态 + lease 过期自动重试 + idempotencyKey 防重
+
+未来容量升级（本轮不部署）：
+  - CloudBase CloudRun：长任务执行 / 容量扩展选项
+  - Cloudflare R2：S3 兼容对象存储迁移备选
 ```
 
-### 2.2 关键能力映射
+#### 2.1.2 关键能力映射
 
-- **元数据**：Vercel Postgres (Neon)，PostgreSQL 15，外键 ON DELETE CASCADE。
-- **对象存储**：Cloudflare R2，S3 兼容 SDK，私有桶 + presigned URL（GET/PUT），lifecycle rules 自动清理，object versioning 防误删。
-- **签名 URL**：R2 presigned URL，TTL 可配置（建议 5—15 分钟）。
-- **Job 状态机**：Vercel Workflow（Beta），`'use workflow'` + `'use step'`，可暂停几分钟到几个月，部署/崩溃后确定性重放。
-- **80—100s Provider 执行**：
-  - 同步路径：Vercel Function Pro 800s 单次处理 90s Provider 调用 + Sharp 验证 + R2 写入。
-  - 异步路径：Vercel Workflow step（durable，无时间限制），失败自动重试。
-- **任务取消**：Vercel Workflow 支持 hook 取消；Function 内 AbortController 中断 fetch。
-- **任务重试**：Vercel Workflow step 内置重试。
-- **刷新恢复**：Job 状态持久化在 Workflow 托管持久层 + Postgres，重新加载页面时查询 Job status。
-- **级联删除**：Postgres 外键 CASCADE 删元数据 + R2 lifecycle/SDK 删对象 + Vercel Cron 兜底清理孤立对象。
-- **环境变量**：Vercel Dashboard 管理，64 KB 总上限；`AUTH_PASSWORD`、`JWT_SECRET`、`PROVIDER_ENCRYPTION_KEY`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_BUCKET`、`R2_ACCOUNT_ID`、Provider Keys。
+- **元数据**：CloudBase PostgreSQL，标准 PG，外键 `ON DELETE CASCADE`。
+- **对象存储**：CloudBase PG Storage 私有 bucket；通过 `createSignedUrl` 颁发带 TTL 的签名 URL（建议 5—15 分钟）。
+- **签名 URL**：`createSignedUrl(key, { ttlSeconds })`；mock adapter PoC 已验证可返回带 expiry 与 signature 的 HTTPS URL（详见 §5）。
+- **Job 状态机**：CloudBase PG `generation_jobs` 表 + `lease_expires_at` 字段 + 应用层 lease/heartbeat/释放/重试。
+  - 不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）。
+- **80—100s Provider 执行**：Vercel Hobby Function 单次 300s maxDuration，直接处理 Provider 调用 + Sharp 验证 + 对象写入。
+- **任务取消**：Function 内 AbortController 中断 fetch；Job 标记 `cancelled`。
+- **任务重试**：lease 过期 → `listLeaseExpiredJobs` → 重新 `acquireJobLease` → 显式 retry（幂等键防重复 Version）。
+- **刷新恢复**：Job 状态持久在 PG，重新加载页面时查询 Job status。
+- **级联删除**：PG 外键 CASCADE 删元数据 + 应用层 `deleteObjects(keys)` 删 CloudBase PG Storage 对象。
+- **环境变量**：Vercel Dashboard 管理（64 KB 总上限）；CloudBase 凭据仅在 PERSIST-001 实施阶段由用户在 Vercel Dashboard 手动配置，本轮不写入。
 
-### 2.3 Windows 本地开发替代
+#### 2.1.3 Windows 本地开发替代
 
-- Vercel CLI `vercel dev` 本地运行 Vercel Function（Node.js runtime）。
-- 本地 Postgres（Docker `postgres:15`）或 Neon branching（云分支）替代 Vercel Postgres。
-- MinIO（Docker）模拟 R2 S3 接口，本地签名 URL 测试。
-- Vercel Workflow 本地通过 WDK + 本地持久化层（SQLite 或内存）模拟。
+- 现有 `LocalPersistence` adapter（`src/server/infrastructure/persistence/local.ts`）保留：纯文件系统，不联网、不要求 CloudBase 账号。
+- 新增 `CloudBaseMockPersistence` adapter（`src/server/infrastructure/persistence/cloudbase-mock.ts`）：纯内存 mock，不联网、不读凭据，用于 PoC 测试与本地开发模拟 CloudBase 行为。
+- 本地开发优先用 `LocalPersistence`；需要验证 CloudBase 字段映射、lease、幂等语义时用 `CloudBaseMockPersistence`。
 
-### 2.4 成本（3 用户内部团队）
+#### 2.1.4 优势
 
-| 项 | 月度成本 | 说明 |
-|----|---------|------|
-| Vercel Pro | $20 | Function 800s maxDuration、Workflow Beta、Cron |
-| Cloudflare R2 | $0（免费额度内） | 10 GB 存储、1M Class A、10M Class B；3 用户内部用量预计远低于 |
-| Vercel Postgres | 包含在 Pro | Hobby 计划受限；Pro 含一定额度 |
-| Vercel Workflow Storage | Beta 期间免费 | Observability 免费；Steps 按使用计费 |
-| **合计** | **~$20—25/月** | R2 超免费额度后按 $0.015/GB 计 |
+- 满足用户已定方向（不注册 Cloudflare，不升级 Vercel Pro）。
+- 保留现有 Node.js/Express/Sharp 栈，迁移成本最低。
+- CloudBase PG 标准 SQL，外键 CASCADE、事务、lease 字段均原生支持。
+- CloudBase PG Storage 提供私有 bucket + createSignedUrl，满足硬条件。
+- 本地 PoC + 6 个 mock 用例全部通过，验证冻结接口可实现。
+- 不引入跨云账号（仅 Vercel + CloudBase，且 CloudBase 本轮不创建真实环境）。
 
-### 2.5 优势
+#### 2.1.5 劣势
 
-- 保留现有 Node.js/Express/Sharp 代码栈，迁移成本最低。
-- Vercel Workflow 是唯一提供 durable execution（暂停/恢复/重放）的方案，长任务恢复最稳健。
-- Vercel Function Pro 800s 足够 90s Provider 调用 + Sharp 验证 + R2 写入。
-- R2 S3 兼容，未来可迁回 AWS S3 或其他 S3 兼容存储。
-- Vercel + R2 都支持多区域部署，对网络抖动容忍度高。
+- CloudBase 个人版非开源、不可自托管，vendor lock-in 高于 Supabase。
+- CloudBase 可视化 Workflow 单节点 60s 限制，不能用于 80—100s Provider 调用。
+- CloudBase CloudRun 部署与计费细节本轮未深入，仅作为未来升级选项登记。
+- 跨区域网络延迟（Vercel Function ↔ CloudBase PG）需在 PERSIST-001 实测，可能需要在 CloudBase 控制台选择与 Vercel 部署区域就近的可用区。
 
-### 2.6 劣势
+### 2.2 候选 B：Vercel Hobby + Marketplace Postgres + Vercel Private Blob
 
-- 跨云（Vercel + Cloudflare）需要两个账号，运维复杂度高于一体化方案。
-- Vercel Workflow 是 Beta，生产稳定性待长期验证；Beta 期间 Observability 免费，GA 后计费规则可能变化。
-- Cloudflare 注册需信用卡（免费额度内不收费）。
-- R2 在中国访问需考虑网络（Vercel Function 同区域调用 R2 不影响终端用户）。
+#### 2.2.1 架构
 
-## 3. 候选方案 2：Supabase all-in-one
+```text
+Client (React 19)
+  ↓
+Vercel Function (Node.js 20+, Express 4, Sharp, maxDuration=300s on Hobby)
+  ├─→ Vercel Marketplace Postgres (Neon) — 元数据
+  ├─→ Vercel Blob (私有 Blob + 签名 URL) — 对象存储
+  └─→ JobExecutor：Vercel Node Function 同步执行 + DB Job 状态机
+```
 
-### 3.1 架构
+#### 2.2.2 关键能力映射
+
+- **元数据**：Marketplace Postgres（Neon），独立计费，与 Vercel 计划不绑定。
+- **对象存储**：Vercel Blob 私有 Blob + 签名 URL（已修正事实，前版拒绝理由不成立）。
+- **80—100s Provider 执行**：Vercel Hobby Function 300s。
+- **任务恢复**：Marketplace Postgres Job 表 + lease/heartbeat（同 A）。
+
+#### 2.2.3 优势
+
+- 完全在 Vercel 生态内，单 Dashboard 管理。
+- Blob 与 Function 同账号，无跨云延迟。
+- Neon Marketplace Postgres 支持 branching，本地开发体验良好。
+
+#### 2.2.4 劣势
+
+- Vercel Blob 历史无原生备份系统（需自建 `list + copy` 备份流）。
+- Marketplace Postgres 独立计费，未含在 Vercel 计划内，长期成本需在 PERSIST-001 阶段实测。
+- 未与用户已定方向对齐（用户首选 CloudBase），仅作为对照候选保留。
+
+### 2.3 候选 C：Supabase all-in-one
+
+#### 2.3.1 架构
 
 ```text
 Client (React 19)
@@ -102,201 +159,246 @@ Client (React 19)
 Vercel Function (Node.js, Express, Sharp) — 保留作为应用层 + Provider 调用
   ├─→ Supabase Postgres (Pro) — 元数据 + pgmq 队列
   ├─→ Supabase Storage — 私有桶 + Signed URL + RLS
-  └─→ Supabase Edge Function (Deno, 400s) — 异步 Job worker
+  └─→ Supabase Edge Function (Deno, 400s paid) — 异步 Job worker
         ↑
         pg_cron 定时扫描 pgmq → pg_net 触发 Edge Function
 ```
 
-注：Vercel Function 仍保留用于 Sharp 图片验证和 Provider 调用（Node.js runtime 完整支持）；Supabase Edge Function 用于异步 Job 编排（pgmq 消费、状态机推进、回调通知）。这是混合架构，但 Supabase 作为独立运营的存储/队列后端。
+#### 2.3.2 关键能力映射
 
-### 3.2 关键能力映射
-
-- **元数据**：Supabase Postgres（Pro $25/月），dedicated instance，8 GB disk，7 天 daily backups。
+- **元数据**：Supabase Postgres Pro $25/月，dedicated instance，8 GB disk，7 天 daily backups。
 - **对象存储**：Supabase Storage，S3 兼容，私有桶 + Signed URL + RLS。
-- **签名 URL**：Storage Signed URL，TTL 可配置。
-- **Job 状态机**：pgmq 队列 + pg_cron 定时扫描 + pg_net 触发 Edge Function；状态持久在 Postgres。
-- **80—100s Provider 执行**：
-  - 同步路径：Vercel Function（保留）或 Edge Function 400s（paid）。
-  - 异步路径：pgmq enqueue → pg_cron 扫描 → Edge Function dequeue → Provider 调用 → 更新 Job。
-- **任务取消**：pgmq 删除消息或标记 Job cancelled；运行中的 Edge Function 用 AbortController。
-- **任务重试**：pgmq 可见性超时 + 应用层重试计数。
-- **刷新恢复**：Job 状态在 Postgres，重新加载页面时查询。
-- **级联删除**：Postgres 外键 CASCADE 删元数据 + Storage API 删对象 + pg_cron 兜底清理孤立对象。
-- **环境变量**：Supabase Dashboard 管理；Vercel 环境变量保留。
+- **80—100s Provider 执行**：Edge Function 400s（paid），CPU 2s 限制。
+- **任务恢复**：pgmq + pg_cron + pg_net 编排。
 
-### 3.3 Windows 本地开发替代
-
-- Supabase CLI `supabase start` 一键启动完整本地堆栈（Docker）：
-  - 本地 Postgres（含 pgmq、pg_cron、pg_net 扩展）。
-  - 本地 Storage（GoTrue + PostgREST + Storage API）。
-  - 本地 Edge Runtime。
-- 完全本地化，无需云账号即可开发。
-- Vercel Function 本地通过 `vercel dev` 运行。
-
-### 3.4 成本（3 用户内部团队）
-
-| 项 | 月度成本 | 说明 |
-|----|---------|------|
-| Supabase Pro | $25 | 含 $10 compute credit（Micro 实例） |
-| Vercel | $0—20 | 若当前已 Pro 则无新增；若 Hobby 则保留 |
-| Storage 超额 | $0.0213/GB | 100 GB 内含 |
-| Egress 超额 | $0.09/GB | 250 GB 内含 |
-| **合计** | **~$25—45/月** | 取决于 Vercel 计划 |
-
-### 3.5 优势
+#### 2.3.3 优势
 
 - 一体化平台，单账号、单 Dashboard、单 SDK。
 - 本地开发体验最佳（Supabase CLI 一键 Docker 完整堆栈）。
 - Storage 真正私有桶 + Signed URL + RLS，安全模型最完整。
-- 标准 Postgres + S3 兼容，可自托管（开源），vendor lock-in 低。
-- Postgres 原生外键 CASCADE + pgmq/pg_cron/pg_net 成熟扩展。
+- 标准 Postgres + S3 兼容，可自托管（开源），vendor lock-in 最低。
 
-### 3.6 劣势
+#### 2.3.4 劣势
 
-- **Edge Function 不支持 `sharp`/`libvips`**（多线程 Node 库），PERSIST-001 Task 6 服务端图片验证需要：
-  - 选项 A：保留 Vercel Function 调用 Supabase（混合方案，但增加跨平台复杂度）；
-  - 选项 B：改用 WASM 图片解码库（如 `@jsquash/png` 等，功能有限）；
-  - 选项 C：客户端验证 + 服务端只做 MIME 魔数校验（安全性降低）。
-- pg_cron + pgmq 自行编排 Job 队列，复杂度高于 Vercel Workflow。
-- Supabase Pro $25/月固定支出（无免费生产方案）。
+- **Edge Function 不支持 `sharp`/`libvips`**（多线程 Node 库），PERSIST-001 Task 6 服务端图片验证需要：保留 Vercel Function 调用 Supabase（混合方案）/ 改用 WASM / 客户端验证 + 服务端 MIME 魔数校验。
+- pg_cron + pgmq 自行编排 Job 队列，复杂度高于 A 候选的应用层 lease。
+- Supabase Pro $25/月固定支出。
 - 跨平台（Vercel Function + Supabase）增加账号和 SDK 复杂度。
-- Edge Function Wall clock 400s（paid），CPU 2s 限制，复杂图片处理可能超限。
+- 未与用户已定方向对齐（用户首选 CloudBase），仅作为对照候选保留。
+
+## 3. 边界声明（必须遵守）
+
+### 3.1 GitHub 使用边界
+
+- GitHub 仅用于：源码、规格、脱敏证据、小型合成 fixture。
+- 不得使用 GitHub Contents、Git LFS、Issues、Actions Artifacts 存储运行时业务数据或客户图片。
+- 不得使用 GitHub Actions 作为运行时任务执行器。
+- 公开仓库安全边界遵循 `AGENTS.md` 第 6 节，证据必须脱敏。
+
+### 3.2 CloudBase 使用边界（本轮）
+
+- 不创建 CloudBase 真实环境（开发/生产均不创建）。
+- 不索取、不写入 CloudBase 凭据到仓库或环境变量文件。
+- 不连接生产数据。
+- 本轮仅通过 mock adapter 验证接口适配性与字段映射。
+- 不使用 CloudBase 可视化 Workflow 执行 80—100s Provider 调用（单节点 60s 限制）。
+- CloudBase CloudRun 仅登记为未来容量/长任务升级选项，本轮不部署。
+
+### 3.3 生产路径边界
+
+- 不修改生产 Provider、上传、Job 或 Version 运行路径。
+- 不修改 `/api/edit` 协议、Provider 实现、Provider 配置存储协议。
+- 不接入生产数据。
+- 不实施 PERSIST-001 业务服务、真实版本 UI 或生产数据迁移。
+- 未经 GPT/用户冻结不得进入 PERSIST-001。
+
+### 3.4 接口冻结边界
+
+- `PersistenceDependencies` 与 `JobExecutor` 接口表面在 STORAGE-001 已冻结（D-036），本轮修订保持不变。
+- 新增字段必须可选且不破坏现有合约测试。
+- PoC-only helper（`createVersionIdempotent` / lease helpers / `dumpPgStyleRows`）属于具体 adapter 的扩展方法，不在冻结接口表面。
 
 ## 4. 评分矩阵（固定 100 分权重）
 
 权重来源：`INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 1 Step 3。
 
-| 维度 | 权重 | Vercel+R2+Workflow 评分 | 加权 | Supabase 评分 | 加权 |
-|------|------|------------------------|------|---------------|------|
-| recoverability_and_consistency | 25 | 4 | 20 | 5 | 25 |
-| long_task_execution | 20 | 5 | 20 | 3 | 12 |
-| vercel_fit | 15 | 5 | 15 | 3 | 9 |
-| windows_local_development | 10 | 3 | 6 | 5 | 10 |
-| deletion_and_backup | 10 | 4 | 8 | 4 | 8 |
-| security_and_secret_handling | 10 | 4 | 8 | 5 | 10 |
-| monthly_cost_for_3_users | 5 | 4 | 4 | 4 | 4 |
-| vendor_lock_in_and_rollback | 5 | 3 | 3 | 4 | 4 |
-| **合计** | **100** | — | **84** | — | **82** |
+| 维度 | 权重 | A 评分 | A 加权 | B 评分 | B 加权 | C 评分 | C 加权 |
+|------|------|--------|--------|--------|--------|--------|--------|
+| recoverability_and_consistency | 25 | 4 | 20 | 4 | 20 | 5 | 25 |
+| long_task_execution | 20 | 4 | 16 | 4 | 16 | 3 | 12 |
+| vercel_fit | 15 | 5 | 15 | 5 | 15 | 3 | 9 |
+| windows_local_development | 10 | 4 | 16 | 4 | 16 | 5 | 10 |
+| deletion_and_backup | 10 | 4 | 8 | 3 | 6 | 4 | 8 |
+| security_and_secret_handling | 10 | 4 | 8 | 4 | 8 | 5 | 10 |
+| monthly_cost_for_3_users | 5 | 4 | 4 | 3 | 3 | 4 | 4 |
+| vendor_lock_in_and_rollback | 5 | 3 | 3 | 3 | 3 | 4 | 4 |
+| **合计** | **100** | — | **83** | — | **78** | — | **82** |
 
 ### 4.1 评分依据（每项一句证据）
 
 **recoverability_and_consistency (25)**
-- Vercel+R2 4/5：Neon Postgres ACID + R2 强一致，但跨云增加一致性边界。
-- Supabase 5/5：Postgres + Storage 同账号同区域，ACID + 7 天 daily backups (Pro)。
+- A 4/5：CloudBase PG ACID + PG Storage 强一致；lease + idempotency 由应用层维护，跨边界一致性需 PERSIST-001 实测。
+- B 4/5：Neon Marketplace Postgres ACID + Blob 强一致；同 A 由应用层维护 lease。
+- C 5/5：Postgres + Storage 同账号同区域，ACID + 7 天 daily backups (Pro)。
 
 **long_task_execution (20)**
-- Vercel+R2 5/5：Vercel Workflow 是唯一提供 durable execution（暂停/恢复/重放，minutes to months）的方案。
-- Supabase 3/5：Edge Function 400s paid 足够 90s Provider，但 pg_cron+pgmq 需自行编排，无原生 durable execution。
+- A 4/5：Vercel Hobby Function 300s 覆盖 80—100s Provider；不依赖 CloudBase Workflow（60s 限制），用应用层 lease + 重试替代 durable execution。
+- B 4/5：同 A，Vercel Hobby Function 300s + 应用层 lease。
+- C 3/5：Edge Function 400s paid 足够 90s Provider，但 pg_cron+pgmq 需自行编排，无原生 durable execution。
 
 **vercel_fit (15)**
-- Vercel+R2 5/5：保留 Vercel Function Node.js/Express/Sharp 代码栈，加 R2 SDK + Workflow SDK。
-- Supabase 3/5：独立平台，需要 Supabase client SDK + 跨平台账号；Vercel Function 保留则混合架构。
+- A 5/5：保留 Vercel Function Node.js/Express/Sharp 栈；CloudBase 仅作为外部 PG + 对象存储，Function 内通过 SDK 调用。
+- B 5/5：完全在 Vercel 生态内，Function + Marketplace Postgres + Blob。
+- C 3/5：独立平台，需要 Supabase client SDK + 跨平台账号；Vercel Function 保留则混合架构。
 
 **windows_local_development (10)**
-- Vercel+R2 3/5：Vercel CLI 本地 + Docker Postgres + MinIO 模拟 R2，多组件配置。
-- Supabase 5/5：Supabase CLI 一键 Docker 启动完整本地堆栈（Postgres+Storage+Edge），Windows 友好。
+- A 4/5：现有 `LocalPersistence` 文件系统 adapter + 新增 `CloudBaseMockPersistence` 内存 mock；Windows 无需 Docker 即可开发。
+- B 4/5：Vercel CLI + Neon branching + 本地 Blob mock（需自行模拟签名 URL）。
+- C 5/5：Supabase CLI 一键 Docker 启动完整本地堆栈（Postgres+Storage+Edge），Windows 友好。
 
 **deletion_and_backup (10)**
-- Vercel+R2 4/5：R2 lifecycle rules + object versioning + Postgres 外键 CASCADE；Vercel Postgres 备份机制需确认 Neon。
-- Supabase 4/5：Storage lifecycle + Postgres 外键 CASCADE + Pro 7 天 daily backups；PITR $100/月额外。
+- A 4/5：PG 外键 CASCADE + 应用层删对象；CloudBase PG 备份机制需在 PERSIST-001 阶段确认（个人版通常含日备）。
+- B 3/5：Postgres CASCADE + Blob API 删对象；Vercel Blob 历史无原生备份，需自建 list + copy 流。
+- C 4/5：Storage lifecycle + Postgres CASCADE + Pro 7 天 daily backups；PITR $100/月额外。
 
 **security_and_secret_handling (10)**
-- Vercel+R2 4/5：R2 私有桶 + presigned URL；Vercel 环境变量管理；Workflow state 受管。
-- Supabase 5/5：Storage 私有桶 + Signed URL + RLS + Auth 内置，安全模型最完整。
+- A 4/5：CloudBase PG Storage 私有桶 + createSignedUrl；Vercel 环境变量管理；CloudBase 凭据本轮不写入仓库。
+- B 4/5：Blob 私有 + 签名 URL；Vercel 环境变量管理；Marketplace Postgres 连接串由 Vercel Dashboard 管理。
+- C 5/5：Storage 私有桶 + Signed URL + RLS + Auth 内置，安全模型最完整。
 
 **monthly_cost_for_3_users (5)**
-- Vercel+R2 4/5：Vercel Pro $20 + R2 免费额度 ≈ $20—25/月。
-- Supabase 4/5：Pro $25/月（含 $10 compute credit），若 Vercel 仍 Pro 则总 $45/月。
+- A 4/5：Vercel Hobby $0 + CloudBase 个人版参考 19.9 元/月（约 $2.8）；当前 PoC 阶段可能为 0。
+- B 3/5：Vercel Hobby $0 + Neon Marketplace Postgres（按用量计费，免费额度有限）+ Vercel Blob（免费额度 1GB）。
+- C 4/5：Supabase Pro $25/月（含 $10 compute credit），固定支出较高但可预期。
 
 **vendor_lock_in_and_rollback (5)**
-- Vercel+R2 3/5：R2 S3 兼容可迁回 AWS S3；Vercel Workflow proprietary；Vercel Postgres 可独立用 Neon。
-- Supabase 4/5：标准 Postgres + S3 兼容，开源可自托管，lock-in 最低。
+- A 3/5：CloudBase 闭源不可自托管；但 PG 标准 SQL + createSignedUrl 通用，应用层 lease 可移植；CloudBase CloudRun 升级路径封闭。
+- B 3/5：Neon 可独立使用（Neon 账号）；Vercel Blob proprietary，但 S3 SDK 兼容度有限。
+- C 4/5：标准 Postgres + S3 兼容，开源可自托管，lock-in 最低。
 
 ### 4.2 资格判定
 
 按规则："A candidate scoring below 3 on recoverability, long-task execution, or deletion is ineligible regardless of total."
 
-- Vercel+R2：recoverability 4、long_task 5、deletion 4 → **eligible**，总分 84。
-- Supabase：recoverability 5、long_task 3、deletion 4 → **eligible**，总分 82。
+- A：recoverability 4、long_task 4、deletion 4 → **eligible**，总分 83。
+- B：recoverability 4、long_task 4、deletion 3 → **eligible**，总分 78。
+- C：recoverability 5、long_task 3、deletion 4 → **eligible**，总分 82。
 
-两方案均合格，差异在统计误差内（2 分）。
+三方案均合格。A 与 C 差距 1 分（统计误差内），但 A 与用户已定方向对齐，且本轮已交付 mock PoC；推荐 A。
 
-## 5. 推荐方案与理由
+## 5. CloudBase Mock Adapter PoC（本轮新增）
 
-**推荐：Vercel + Cloudflare R2 + Vercel Workflow（Candidate 1）**
+### 5.1 文件
 
-### 5.1 关键理由
+- `src/server/infrastructure/persistence/cloudbase-mock.ts` — mock adapter 实现，导出 `createCloudBaseMockPersistence`，返回冻结 `PersistenceDependencies` + PoC-only helper。
+- `src/server/domain/cloudbase-mock.contract.test.ts` — 6 个用例覆盖 6 个必需场景。
 
-1. **保留现有代码栈**：当前后端是 Express 4 + TypeScript on Vercel Node.js runtime，使用 Sharp 做图片处理。Vercel+R2+Workflow 完全保留，迁移成本最低。
-2. **Vercel Workflow durable execution 是唯一差异化能力**：可暂停几分钟到几个月、部署/崩溃后确定性重放、内置 hook 等待外部事件。Supabase 无对应能力，需自行用 pg_cron+pgmq+pg_net 编排。
-3. **Sharp 原生支持**：PERSIST-001 Task 6 明确要求 Sharp 验证图片字节、MIME、像素、解码。Supabase Edge Function 不支持 Sharp（多线程 Node 库），需要改架构或换库。
-4. **80—100s Provider 调用最稳健**：Vercel Function Pro 800s + Vercel Workflow durable 双路径，同步/异步都覆盖。
-5. **评分略高**：84 vs 82，差异虽小但在 long_task_execution 维度（5 vs 3）有实质差距。
+### 5.2 PoC-only helper（不在冻结接口表面）
 
-### 5.2 接受的折中
+- `createVersionIdempotent(projectId, idempotencyKey, version)` — 幂等键防重复 Version。
+- `acquireJobLease(jobId, leaseSeconds, now?)` — 获取 lease。
+- `heartbeatJobLease(jobId, leaseSeconds, now?)` — 续租 lease。
+- `releaseJobLease(jobId, now?)` — 主动释放 lease。
+- `listLeaseExpiredJobs(now?)` — 列出过期 lease。
+- `dumpPgStyleRows()` — 返回 snake_case 行快照，用于字段映射验证。
+- `setFixedNow(now | null)` — 固定时间，用于确定性 lease 测试。
 
-- 跨云（Vercel + Cloudflare）增加账号复杂度，但两个账号都是成熟 SaaS。
-- Vercel Workflow 是 Beta，生产稳定性待验证；PERSIST-001 设计时需保留同步 Function 路径作为回退。
-- Cloudflare 注册需信用卡（免费额度内不收费）。
+### 5.3 测试结果
 
-### 5.3 不选 Supabase 的关键原因
-
-- **Sharp 限制是架构性问题**：PERSIST-001 Task 6 服务端图片验证是安全底线（防 MIME 伪装、防超大像素、防畸形字节）。Supabase Edge Function 不支持 Sharp，要么改用 WASM（功能受限），要么保留 Vercel Function 调 Supabase（混合方案，反而比 Vercel+R2 更复杂）。
-- **durable execution 缺失**：pg_cron+pgmq 自行编排 Job 状态机复杂度高，恢复语义需自己实现；Vercel Workflow 内置。
-
-## 6. 账号门槛与用户决策（account_gate: user）
-
-按 `INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 1 Step 4 要求记录：
-
-```yaml
-account_gate: user
-required_action: |
-  用户需确认以下事项后方可冻结方案并激活 PERSIST-001：
-  1. 新增 Cloudflare 账号（注册需信用卡，免费额度内不收费）；
-  2. 确认 Vercel 当前计划，若为 Hobby 需升级到 Pro（$20/月）以获得 800s Function maxDuration 和 Workflow Beta；
-  3. 月度预算上限：$20—25（Vercel Pro + R2 免费额度），允许 R2 超额后按 $0.015/GB 计费；
-  4. 不可逆迁移审批：无（R2 可迁回 AWS S3，Vercel Postgres 可独立用 Neon，Vercel Workflow Beta 期间可回退到同步 Function）；
-  5. 接受 Vercel Workflow Beta 风险：生产稳定性待验证，PERSIST-001 保留同步 Function 回退路径。
-decision_authority: user
 ```
+✓ domain/cloudbase-mock.contract.test.ts (6 tests) 10ms
+    ✓ 1. repository CRUD round-trips through camelCase ↔ snake_case field mapping
+    ✓ 2. UnitOfWork rolls back Version and Job — no partial success state visible
+    ✓ 3. ObjectStore emits private signed URLs with expiry and deterministic signature
+    ✓ 4. deleteCascade removes project metadata, child entities, and object bytes
+    ✓ 5. Job lease expires after TTL and allows safe retry by a second worker
+    ✓ 6. createVersionIdempotent returns the same Version for the same idempotencyKey
+
+Test Files  1 passed (1)
+Tests       6 passed (6)
+```
+
+### 5.4 PoC 证明要点
+
+1. **Repository CRUD 与字段映射**：camelCase ↔ snake_case 双向映射稳定，PG 风格行可读出。
+2. **UnitOfWork 回滚**：事务失败时 Version 与 Job 均不可见，无部分成功状态。
+3. **私有对象签名 URL**：URL 含 bucket/key/expires/signature，TTL 可配，签名确定性可验证。
+4. **项目删除清理**：deleteCascade 清空 PG 元数据 + Storage 对象字节。
+5. **Job lease 过期重试**：lease TTL 内第二 worker 抢占失败；TTL 过期后第二 worker 可安全重试；heartbeat 续租；主动释放后立即可重新获取。
+6. **幂等键防重**：同一 idempotencyKey 第二次调用返回原 Version，不产生重复行；不同 idempotencyKey 创建新 Version。
+
+### 5.5 不接入生产路径
+
+- mock adapter 不连接 CloudBase。
+- 不读环境凭据。
+- 不修改生产 Provider/上传/Job/Version 运行路径。
+- 不在 `src/server/infrastructure/persistence/index.ts` 中导出（仅测试 import）。
+
+## 6. 成本（按阶段表达）
+
+### 6.1 当前阶段：非商业内部 PoC
+
+| 项 | 月度成本 | 说明 |
+|----|---------|------|
+| Vercel Hobby | $0 | 300s maxDuration 足够 80—100s Provider 调用 |
+| CloudBase 免费试用 / 个人额度 | 视账号而定 | 本轮不创建真实环境；PERSIST-001 阶段用户在 CloudBase 控制台开通 |
+| CloudBase PG Storage | $0（免费额度内） | 个人版通常含一定免费存储与流量 |
+| **合计** | **$0** | 本轮 PoC 阶段 |
+
+### 6.2 内部稳定版（3 用户内部团队）
+
+| 项 | 月度成本 | 说明 |
+|----|---------|------|
+| Vercel Hobby | $0 | 3 用户内部团队用量预计远低于 Hobby 限制 |
+| CloudBase 个人版 | 参考 19.9 元/月 | 实际以账号地区和控制台报价为准；包含 PG + Storage 个人额度 |
+| **合计** | **参考 19.9 元/月** | 不再使用固定 `$20—25/月` 结论 |
+
+### 6.3 商业用途（未来若转为商业）
+
+- 重新审查 Vercel Pro（$20/月）与 CloudBase 正式环境费用。
+- Vercel Pro 提供 800s maxDuration 与扩展最大 1800s（Beta），适用于更长任务。
+- CloudBase 正式环境计费按 PG 实例规格、Storage 容量、出站流量计算。
+- **本轮不冻结商业用途预算**；转为商业用途时由用户重新决策。
 
 ## 7. 迁移、备份、删除、回滚
 
 ### 7.1 迁移路径
 
-- **当前 → Vercel+R2+Workflow**：
-  1. Vercel Postgres 创建数据库（同区域）；Kysely/Drizzle 建 schema。
-  2. Cloudflare R2 创建私有桶；记录 R2_ACCESS_KEY_ID、R2_SECRET_ACCESS_KEY、R2_BUCKET、R2_ACCOUNT_ID 到 Vercel 环境变量。
-  3. Vercel Function 加 `@aws-sdk/client-s3` 调用 R2；ObjectStore 适配器实现 put/getSignedUrl/delete/exists。
-  4. Vercel Workflow（`workflow` npm 包）实现 JobExecutor.enqueue/cancel。
+- **当前 → 候选 A（PERSIST-001 实施阶段）**：
+  1. 用户在 CloudBase 控制台创建 PG 实例 + 私有 Storage bucket。
+  2. 在 Vercel Dashboard 配置 CloudBase 连接串与凭据环境变量。
+  3. PERSIST-001 实施 `src/server/infrastructure/persistence/cloudbase.ts` 真实 adapter（基于 mock 的字段映射与 lease 模式）。
+  4. 真实 adapter 在 `src/server/infrastructure/persistence/index.ts` 注册（不动 mock 与 local）。
   5. 旧 `/api/edit` 转为受控兼容层，新持久化链路通过 feature flag 启用。
   6. 旧 `edit_history` 先备份为只读 JSON，再显式导入可恢复条目（D-009）。
 
-- **Vercel+R2 → AWS S3**（如果未来需要迁出 Cloudflare）：
-  - S3 兼容 API，仅需改 endpoint 和 credentials；lifecycle rules 等价迁移。
+- **候选 A → Cloudflare R2（未来 S3 迁移备选）**：
+  - R2 S3 兼容 API 可作为对象存储替换；PG 元数据不动。
+  - 仅替换 ObjectStore adapter 实现。
+  - 当前不实施，仅登记。
 
 ### 7.2 备份策略
 
-- **元数据**：Vercel Postgres (Neon) 支持 branching 和 point-in-time restore（Neon 原生能力）。
-- **对象存储**：R2 object versioning 启用，防误删；定期 `list + copy` 到另一 R2 桶或 AWS S3。
-- **Workflow state**：Vercel Workflow 托管持久层，Beta 期间由 Vercel 管理；导出能力待 GA。
+- **元数据**：CloudBase PG 个人版通常含日备；PERSIST-001 阶段确认实例规格与备份窗口。
+- **对象存储**：应用层定期 `list + copy` 到另一 bucket；PERSIST-001 可补 Cron 兜底。
+- **Workflow state**：本轮不使用 Vercel Workflow 或 CloudBase Workflow；Job 状态由 PG 持久化。
 
 ### 7.3 级联删除
 
-- **Project 删除**：Postgres 外键 `ON DELETE CASCADE` 删除 Asset/Version/Job 元数据 → 应用层 `deleteObjects(keys)` 删除 R2 对象 → Vercel Cron 兜底扫描孤立对象（key 不在元数据中的对象）。
-- **孤立对象诊断**：R2 `listObjectsV2` + Postgres `SELECT key FROM assets` 对比，差异列表写入 `orphan_objects` 表，Cron 定期清理。
+- **Project 删除**：PG 外键 `ON DELETE CASCADE` 删除 Asset/Version/Job 元数据 → 应用层 `deleteObjects(keys)` 删除 Storage 对象 → 可选 Cron 兜底扫描孤立对象。
+- **孤立对象诊断**：Storage `listObjects` + PG `SELECT key FROM assets` 对比，差异列表写入 `orphan_objects` 表，定期清理。
 
 ### 7.4 回滚
 
-- **方案未冻结时**：删除 PoC 资源（本地临时目录、测试数据库分支），无生产变更。
+- **方案未冻结时**：删除 PoC 资源（mock adapter 文件、测试），无生产变更。
 - **方案冻结后失败**：
   - feature flag 关闭新生成入口，保留项目和版本只读恢复（INTERNAL-FAST-TRACK-DESIGN §9）。
   - 旧 `/api/edit` 受控兼容层保留，可作为应急路径。
   - 不删除用户资产或旧 history 备份。
-- **Cloudflare R2 不可用**：切换 ObjectStore 适配器到 AWS S3（同 S3 API，仅环境变量变更）。
-- **Vercel Workflow Beta 严重问题**：JobExecutor 降级为同步 Vercel Function 调用（800s maxDuration），放弃 durable execution，保留基本可用性。
+- **CloudBase PG 不可用**：切换 ObjectStore + Persistence adapter 到本地 fallback（紧急情况，仅限只读恢复）。
+- **候选 A 整体失败**：可切换到候选 C（Supabase）；接口契约不变，只替换 adapter 实现。
 
-## 8. 环境变量清单（Vercel+R2+Workflow 冻结后）
+## 8. 环境变量清单（候选 A 冻结后 PERSIST-001 阶段配置）
 
 ```env
 # Auth (PERSIST-001 Task 5)
@@ -305,29 +407,26 @@ JWT_SECRET=<32+ chars>
 PROVIDER_ENCRYPTION_KEY=<32+ chars>
 CORS_ALLOWLIST=https://app.example.com,https://preview.example.com
 
-# Vercel Postgres
-POSTGRES_URL=<neon connection string>
+# CloudBase PostgreSQL
+CLOUDBASE_PG_URL=<CloudBase Postgres connection string>
+CLOUDBASE_PG_REGION=<CloudBase region, e.g. ap-shanghai>
 
-# Cloudflare R2
-R2_ACCOUNT_ID=<account id>
-R2_ACCESS_KEY_ID=<access key>
-R2_SECRET_ACCESS_KEY=<secret key>
-R2_BUCKET=<bucket name>
-R2_REGION=auto
-
-# Vercel Cron
-CRON_SECRET=<16+ chars random>
+# CloudBase PG Storage
+CLOUDBASE_STORAGE_BUCKET=<private bucket name>
+CLOUDBASE_STORAGE_SECRET_ID=<CloudBase secret id>
+CLOUDBASE_STORAGE_SECRET_KEY=<CloudBase secret key>
+CLOUDBASE_STORAGE_SIGNED_URL_TTL=900
 
 # Provider Keys (at least one enabled)
 SEEDREAM_API_KEY=<volcengine key>
 # 或 OPENAI_API_KEY / GEMINI_API_KEY / GLM_API_KEY
-
-# Vercel Workflow (Beta，无额外环境变量，通过 Vercel Dashboard 启用)
 ```
 
-## 9. 稳定接口契约（在 Task 2 PoC 中冻结）
+**本轮不写入任何真实凭据**。PERSIST-001 实施阶段由用户在 Vercel Dashboard 手动配置。
 
-STORAGE-001 Task 2 将在 `src/server/domain/persistence.ts` 冻结以下接口，PERSIST-001 不变消费：
+## 9. 稳定接口契约（STORAGE-001 Task 2 冻结，本轮修订保持不变）
+
+`src/server/domain/persistence.ts` 冻结以下接口，PERSIST-001 不变消费：
 
 - `ProjectRepository`：create/get/updatePointers/deleteCascade
 - `AssetRepository`：create/get/listByProject
@@ -339,19 +438,37 @@ STORAGE-001 Task 2 将在 `src/server/domain/persistence.ts` 冻结以下接口�
 - `PersistenceDependencies`：聚合上述 7 个接口
 - `JobExecutor`：enqueue(jobId)/cancel(jobId)
 
-本地 PoC 适配器在测试提供的临时目录下持久化（不入仓库、不入用户家目录、不入生产路径），重新实例化同目录可恢复记录。
+本地 PoC 适配器与 CloudBase mock adapter 在测试提供的临时目录或内存中持久化（不入仓库、不入用户家目录、不入生产路径）。
 
 ## 10. 冻结状态
 
 ```yaml
-decision: pending_user_approval
-recommended_candidate: Candidate 1 (Vercel + Cloudflare R2 + Vercel Workflow)
-account_gate: user
-decision_authority: user
+decision: pending_gpt_acceptance
+recommended_candidate: Candidate A (Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage)
+account_gate: user  # PERSIST-001 实施前用户需在 CloudBase 控制台开通真实环境
+decision_authority: gpt  # 用户已授权 GPT 进行技术判断
 frozen_at: null
 ```
 
-GPT/用户冻结后：
+GPT 验收通过后：
 - 在本文件追加 `## 11. 冻结记录`，写入 `decision: frozen`、冻结日期、冻结决策者、最终方案。
 - 更新 STATE.json 激活 PERSIST-001（`currentTask=PERSIST-001`、`status=ready_for_trae`、`nextActor=trae`、从 `blockedTasks` 移除 PERSIST-001）。
 - PERSIST-001 按既有 12 项实施计划 + 快速计划 Task 5—7 三个内部安全单元连续执行。
+
+## 11. 修订历史
+
+### 2026-07-18 修订（用户重新打开局部选型）
+
+- 触发：用户重新打开 STORAGE-001 局部选型修订，明确首选架构为 Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage。
+- 修正过时事实：
+  - Vercel Blob 现支持私有 Blob 与签名 URL（前版拒绝理由不成立）。
+  - Vercel Hobby Function maxDuration 300s 已覆盖 80—100s Provider 调用（前版 Pro 800s 必需结论不成立）。
+  - Vercel Postgres 已停止，新项目需 Marketplace Postgres（前版「Pro 包含」结论不成立）。
+  - Vercel Workflow 计费修正（前版「Beta 期间免费」不准确）。
+  - 最终 STORAGE 提交为 `d85bae2`（前版「待提交」状态已修正）。
+- 新增候选 A：Vercel Hobby + CloudBase PG + CloudBase PG Storage。
+- 新增 CloudBase mock adapter PoC：`src/server/infrastructure/persistence/cloudbase-mock.ts` + 6 用例测试。
+- 重算 100 分矩阵：A = 83，B = 78，C = 82；推荐 A。
+- 边界声明：GitHub/CloudBase/生产路径/接口冻结四类边界明确。
+- 成本表达：按阶段（PoC / 内部稳定版 / 商业用途），不再使用固定 `$20—25/月`。
+- 状态：`awaiting_gpt_acceptance / nextActor=gpt`，不写 `decision: frozen`，等待 GPT 验收冻结。
