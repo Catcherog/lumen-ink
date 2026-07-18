@@ -1,9 +1,9 @@
 /**
- * STORAGE-001 local persistence adapter.
+ * PERSIST-001 local persistence adapter (D-040 converged).
  *
- * File-backed PoC adapter used by:
+ * File-backed adapter used by:
  *  - the contract test (proves the frozen surface is implementable);
- *  - Windows local development (no Vercel/Supabase account required);
+ *  - Windows local development (no CloudBase/Vercel account required);
  *  - integration tests in PERSIST-001 (no external services required).
  *
  * The adapter persists beneath a caller-provided `rootDir`. It must NEVER
@@ -13,8 +13,9 @@
  *
  * Persistence model:
  *  - `metadata.json` holds all entities (projects, assets, versions, jobs,
- *    authThrottle buckets) as a single JSON document. Atomic writes use
- *    `write-temp-then-rename` so a crash never leaves a partial file.
+ *    authThrottle buckets, idempotency index) as a single JSON document.
+ *    Atomic writes use `write-temp-then-rename` so a crash never leaves a
+ *    partial file.
  *  - `objects/<storageKey>` holds raw object bytes. Cascade deletion removes
  *    these files alongside metadata.
  *
@@ -25,8 +26,19 @@
  *  - Nested `run` calls execute the function without additional snapshotting
  *    (top-level rollback covers them).
  *
- * This adapter is NOT concurrent-safe. PERSIST-001 production deployments use
- * Vercel Postgres or Supabase; the local adapter is for PoC and local dev.
+ * Lease/idempotency semantics:
+ *  - `createIdempotent` keys on `idempotencyKey` (Version: per-project;
+ *    Job: global). Replaying the same key returns the existing record.
+ *  - `claim` is atomic: succeeds only if no other worker holds a non-expired
+ *    lease. `heartbeat` extends the lease but only for the current holder.
+ *  - `updateIfClaimed` refuses to apply patches when the lease token does
+ *    not match, so a stale worker cannot mutate the job after takeover.
+ *  - `listLeaseExpired` returns active jobs whose lease has expired; the
+ *    orchestrator uses this to requeue or fail them.
+ *
+ * This adapter is NOT concurrent-safe across processes. PERSIST-001 production
+ * deployments use CloudBase PostgreSQL; the local adapter is for PoC, local
+ * dev, and tests that run single-process.
  */
 
 import { promises as fs } from 'fs';
@@ -54,6 +66,11 @@ interface LocalState {
   versions: Record<string, Version>;
   jobs: Record<string, GenerationJob>;
   authThrottle: Record<string, AuthThrottleBucket>;
+  // Idempotency indexes (PERSIST Task 3).
+  // versionIndex: `${projectId}::${idempotencyKey}` → versionId
+  versionIndex: Record<string, string>;
+  // jobIndex: idempotencyKey → jobId
+  jobIndex: Record<string, string>;
 }
 
 function emptyState(): LocalState {
@@ -63,10 +80,19 @@ function emptyState(): LocalState {
     versions: {},
     jobs: {},
     authThrottle: {},
+    versionIndex: {},
+    jobIndex: {},
   };
 }
 
-const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = ['queued', 'running'];
+const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = [
+  'queued',
+  'uploading',
+  'analyzing',
+  'generating',
+  'postprocessing',
+  'saving',
+];
 
 function cloneState(state: LocalState): LocalState {
   return {
@@ -75,6 +101,8 @@ function cloneState(state: LocalState): LocalState {
     versions: { ...state.versions },
     jobs: { ...state.jobs },
     authThrottle: { ...state.authThrottle },
+    versionIndex: { ...state.versionIndex },
+    jobIndex: { ...state.jobIndex },
   };
 }
 
@@ -100,13 +128,15 @@ export function createLocalPersistence(
     loaded = true;
     try {
       const raw = await fs.readFile(metadataPath, 'utf8');
-      const parsed = JSON.parse(raw) as LocalState;
+      const parsed = JSON.parse(raw) as Partial<LocalState>;
       state = {
         projects: parsed.projects ?? {},
         assets: parsed.assets ?? {},
         versions: parsed.versions ?? {},
         jobs: parsed.jobs ?? {},
         authThrottle: parsed.authThrottle ?? {},
+        versionIndex: parsed.versionIndex ?? {},
+        jobIndex: parsed.jobIndex ?? {},
       };
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -189,16 +219,23 @@ export function createLocalPersistence(
         })
       );
 
-      // Delete versions whose projectId matches.
+      // Delete versions whose projectId matches (and their idempotency rows).
       for (const versionId of Object.keys(state.versions)) {
         if (state.versions[versionId].projectId === id) {
           delete state.versions[versionId];
         }
       }
+      for (const indexKey of Object.keys(state.versionIndex)) {
+        if (indexKey.startsWith(`${id}::`)) {
+          delete state.versionIndex[indexKey];
+        }
+      }
 
-      // Delete jobs whose projectId matches.
+      // Delete jobs whose projectId matches (and their idempotency rows).
       for (const jobId of Object.keys(state.jobs)) {
         if (state.jobs[jobId].projectId === id) {
+          const job = state.jobs[jobId];
+          if (job.idempotencyKey) delete state.jobIndex[job.idempotencyKey];
           delete state.jobs[jobId];
         }
       }
@@ -255,6 +292,28 @@ export function createLocalPersistence(
       return { ...input };
     },
 
+    async createIdempotent(
+      projectId: string,
+      idempotencyKey: string,
+      version: Version
+    ): Promise<Version> {
+      await ensureLoaded();
+      const indexKey = `${projectId}::${idempotencyKey}`;
+      const existingId = state.versionIndex[indexKey];
+      if (existingId) {
+        const existing = state.versions[existingId];
+        if (existing) return { ...existing };
+        // Index stale (record was removed); fall through and recreate.
+      }
+      if (state.versions[version.id]) {
+        throw new Error(`VERSION_ALREADY_EXISTS:${version.id}`);
+      }
+      state.versions[version.id] = { ...version };
+      state.versionIndex[indexKey] = version.id;
+      await persist();
+      return { ...version };
+    },
+
     async get(id: string): Promise<Version | null> {
       await ensureLoaded();
       const found = state.versions[id];
@@ -278,8 +337,33 @@ export function createLocalPersistence(
         throw new Error(`JOB_ALREADY_EXISTS:${input.id}`);
       }
       state.jobs[input.id] = { ...input };
+      if (input.idempotencyKey) {
+        state.jobIndex[input.idempotencyKey] = input.id;
+      }
       await persist();
       return { ...input };
+    },
+
+    async createIdempotent(
+      input: GenerationJob
+    ): Promise<{ job: GenerationJob; created: boolean }> {
+      await ensureLoaded();
+      if (input.idempotencyKey) {
+        const existingId = state.jobIndex[input.idempotencyKey];
+        if (existingId) {
+          const existing = state.jobs[existingId];
+          if (existing) return { job: { ...existing }, created: false };
+        }
+      }
+      if (state.jobs[input.id]) {
+        throw new Error(`JOB_ALREADY_EXISTS:${input.id}`);
+      }
+      state.jobs[input.id] = { ...input };
+      if (input.idempotencyKey) {
+        state.jobIndex[input.idempotencyKey] = input.id;
+      }
+      await persist();
+      return { job: { ...input }, created: true };
     },
 
     async get(id: string): Promise<GenerationJob | null> {
@@ -307,6 +391,72 @@ export function createLocalPersistence(
       return { ...updated };
     },
 
+    async updateIfClaimed(
+      id: string,
+      leaseToken: string,
+      patch: Partial<GenerationJob>
+    ): Promise<GenerationJob | null> {
+      await ensureLoaded();
+      const found = state.jobs[id];
+      if (!found) return null;
+      if (!found.leaseToken || found.leaseToken !== leaseToken) return null;
+      const updated: GenerationJob = {
+        ...found,
+        ...patch,
+        id: found.id,
+        projectId: found.projectId,
+        updatedAt: patch.updatedAt ?? new Date().toISOString(),
+      };
+      state.jobs[id] = updated;
+      await persist();
+      return { ...updated };
+    },
+
+    async claim(
+      id: string,
+      input: { workerId: string; leaseToken: string; leaseExpiresAt: string; now: string }
+    ): Promise<boolean> {
+      await ensureLoaded();
+      const found = state.jobs[id];
+      if (!found) throw new Error(`JOB_NOT_FOUND:${id}`);
+      // Allow claim if no lease, lease expired, or same worker re-claiming.
+      const nowMs = Date.parse(input.now);
+      const currentExpiry = found.leaseExpiresAt ? Date.parse(found.leaseExpiresAt) : 0;
+      const heldByOther =
+        found.leaseToken &&
+        found.leaseToken !== input.leaseToken &&
+        currentExpiry > nowMs;
+      if (heldByOther) return false;
+      const updated: GenerationJob = {
+        ...found,
+        workerId: input.workerId,
+        leaseToken: input.leaseToken,
+        leaseExpiresAt: input.leaseExpiresAt,
+        updatedAt: input.now,
+      };
+      state.jobs[id] = updated;
+      await persist();
+      return true;
+    },
+
+    async heartbeat(
+      id: string,
+      input: { leaseToken: string; leaseExpiresAt: string; now: string }
+    ): Promise<boolean> {
+      await ensureLoaded();
+      const found = state.jobs[id];
+      if (!found) return false;
+      if (!found.leaseToken || found.leaseToken !== input.leaseToken) return false;
+      const updated: GenerationJob = {
+        ...found,
+        leaseExpiresAt: input.leaseExpiresAt,
+        updatedAt: input.now,
+      };
+      state.jobs[id] = updated;
+      await persist();
+      return true;
+    },
+
     async listActiveByProject(projectId: string): Promise<GenerationJob[]> {
       await ensureLoaded();
       return Object.values(state.jobs)
@@ -315,6 +465,18 @@ export function createLocalPersistence(
             j.projectId === projectId &&
             ACTIVE_JOB_STATUSES.includes(j.status)
         )
+        .map((j) => ({ ...j }));
+    },
+
+    async listLeaseExpired(now: string): Promise<GenerationJob[]> {
+      await ensureLoaded();
+      const nowMs = Date.parse(now);
+      return Object.values(state.jobs)
+        .filter((j) => {
+          if (!ACTIVE_JOB_STATUSES.includes(j.status)) return false;
+          if (!j.leaseExpiresAt) return false;
+          return Date.parse(j.leaseExpiresAt) <= nowMs;
+        })
         .map((j) => ({ ...j }));
     },
   };
@@ -330,8 +492,8 @@ export function createLocalPersistence(
     },
 
     async getSignedUrl(key: string): Promise<string> {
-      // Local PoC returns a file:// URL. Production adapters (R2, Supabase)
-      // return time-limited HTTPS presigned URLs.
+      // Local PoC returns a file:// URL. Production adapters (CloudBase PG
+      // Storage) return time-limited HTTPS presigned URLs.
       const filePath = objectPath(key);
       return `file://${filePath}`;
     },

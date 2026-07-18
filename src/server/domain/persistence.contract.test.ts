@@ -113,13 +113,13 @@ describe('STORAGE-001 persistence contract (local PoC)', () => {
 
     // Step 4: update the Job and observe the patched state.
     const running = await reloaded.jobs.update(job.id, {
-      status: 'running',
+      status: 'generating',
       updatedAt: new Date('2026-07-18T00:00:05Z').toISOString(),
     });
-    expect(running.status).toBe('running');
-    expect((await reloaded.jobs.get(job.id))?.status).toBe('running');
+    expect(running.status).toBe('generating');
+    expect((await reloaded.jobs.get(job.id))?.status).toBe('generating');
 
-    // listActiveByProject must include running jobs but exclude terminal ones.
+    // listActiveByProject must include active jobs but exclude terminal ones.
     const activeBefore = await reloaded.jobs.listActiveByProject(project.id);
     expect(activeBefore.map((j) => j.id)).toContain(job.id);
 

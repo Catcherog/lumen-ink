@@ -8,25 +8,27 @@ import type {
 import { createCloudBaseMockPersistence } from '../infrastructure/persistence/cloudbase-mock.js';
 
 /**
- * STORAGE-001 CloudBase mock adapter PoC tests.
+ * PERSIST-001 CloudBase mock adapter contract tests (D-040 converged).
  *
  * Validates the preferred candidate (Vercel Hobby + CloudBase PostgreSQL +
- * CloudBase PG Storage) against the frozen `PersistenceDependencies`
- * interface, plus PoC-only helpers for lease/heartbeat and idempotency.
+ * CloudBase PG Storage) against the converged `PersistenceDependencies`
+ * interface, including the 9-stage Job state machine, idempotent Version/Job
+ * create, and lease-aware Job claim/heartbeat/listLeaseExpired.
  *
- * Required scenarios (per STORAGE-001 revision):
+ * Required scenarios (per PERSIST Task 3 convergence):
  *  1. repository CRUD with field mapping (camelCase ↔ snake_case)
  *  2. transaction failure produces no partial Version/Job success state
  *  3. private object signed URL adaptation
  *  4. project deletion cleans metadata and objects
  *  5. job lease expiry allows safe retry
  *  6. same idempotencyKey does not produce duplicate Version
+ *  7. idempotent Job create + lease-aware updateIfClaimed
  *
  * This file does NOT connect to CloudBase. It does not read credentials.
  * It does not migrate production Provider/Upload/Job/Version paths.
  */
 
-describe('STORAGE-001 CloudBase mock adapter PoC', () => {
+describe('PERSIST-001 CloudBase mock adapter (D-040 converged)', () => {
   let adapter: ReturnType<typeof createCloudBaseMockPersistence>;
 
   beforeEach(() => {
@@ -328,57 +330,98 @@ describe('STORAGE-001 CloudBase mock adapter PoC', () => {
       id: 'job_cb_lease_005',
       projectId: 'proj_cb_lease_005',
       prompt: 'lease retry PoC',
-      status: 'running',
+      status: 'generating',
       createdAt: t0.toISOString(),
       updatedAt: t0.toISOString(),
     };
     await adapter.deps.jobs.create(job);
 
     // Worker A acquires a 30-second lease.
-    const leaseA = await adapter.acquireJobLease(job.id, 30);
-    expect(leaseA.acquired).toBe(true);
-    expect(leaseA.currentHolder).not.toBeNull();
+    const leaseA = await adapter.deps.jobs.claim(job.id, {
+      workerId: 'worker-A',
+      leaseToken: 'token-A',
+      leaseExpiresAt: new Date('2026-07-18T12:00:30Z').toISOString(),
+      now: t0.toISOString(),
+    });
+    expect(leaseA).toBe(true);
 
     // Worker B tries immediately — must fail because lease is still valid.
-    const leaseB = await adapter.acquireJobLease(job.id, 30);
-    expect(leaseB.acquired).toBe(false);
-    expect(leaseB.currentHolder).toBe(leaseA.currentHolder);
+    const leaseB = await adapter.deps.jobs.claim(job.id, {
+      workerId: 'worker-B',
+      leaseToken: 'token-B',
+      leaseExpiresAt: new Date('2026-07-18T12:00:30Z').toISOString(),
+      now: t0.toISOString(),
+    });
+    expect(leaseB).toBe(false);
 
     // Worker A heartbeats — lease extends.
     const tPlus10 = new Date('2026-07-18T12:00:10Z');
-    const heartbeatOk = await adapter.heartbeatJobLease(job.id, 30, tPlus10);
+    const heartbeatOk = await adapter.deps.jobs.heartbeat(job.id, {
+      leaseToken: 'token-A',
+      leaseExpiresAt: new Date('2026-07-18T12:00:40Z').toISOString(),
+      now: tPlus10.toISOString(),
+    });
     expect(heartbeatOk).toBe(true);
     const heartbeated = await adapter.deps.jobs.get(job.id);
     expect(heartbeated?.updatedAt).toBe(tPlus10.toISOString());
+    expect(heartbeated?.leaseExpiresAt).toBe(
+      new Date('2026-07-18T12:00:40Z').toISOString()
+    );
+
+    // Worker B attempts heartbeat with wrong token — must fail.
+    const heartbeatBad = await adapter.deps.jobs.heartbeat(job.id, {
+      leaseToken: 'token-B',
+      leaseExpiresAt: new Date('2026-07-18T12:00:50Z').toISOString(),
+      now: tPlus10.toISOString(),
+    });
+    expect(heartbeatBad).toBe(false);
 
     // At t0+45s (past original lease but within heartbeat-extended window),
     // the heartbeat extension (tPlus10 + 30s = tPlus40) has also expired.
     const tPlus45 = new Date('2026-07-18T12:00:45Z');
-    const expired = await adapter.listLeaseExpiredJobs(tPlus45);
+    const expired = await adapter.deps.jobs.listLeaseExpired(
+      tPlus45.toISOString()
+    );
     expect(expired.map((j) => j.id)).toContain(job.id);
 
     // Worker B can now safely acquire the lease again (retry).
-    const leaseBRetry = await adapter.acquireJobLease(job.id, 30, tPlus45);
-    expect(leaseBRetry.acquired).toBe(true);
-    expect(leaseBRetry.currentHolder).not.toBe(leaseA.currentHolder);
+    const leaseBRetry = await adapter.deps.jobs.claim(job.id, {
+      workerId: 'worker-B',
+      leaseToken: 'token-B',
+      leaseExpiresAt: new Date('2026-07-18T12:01:15Z').toISOString(),
+      now: tPlus45.toISOString(),
+    });
+    expect(leaseBRetry).toBe(true);
 
-    // Worker B explicitly releases the lease.
+    // Stale worker A attempts updateIfClaimed with old token — must return null.
+    const staleUpdate = await adapter.deps.jobs.updateIfClaimed(
+      job.id,
+      'token-A',
+      { status: 'saving' }
+    );
+    expect(staleUpdate).toBeNull();
+
+    // Worker B uses updateIfClaimed to advance state — succeeds.
     const tPlus60 = new Date('2026-07-18T12:01:00Z');
-    await adapter.releaseJobLease(job.id, tPlus60);
-    const released = await adapter.deps.jobs.get(job.id);
-    // PG row's lease_expires_at is null again.
-    const rows = adapter.dumpPgStyleRows();
-    expect(rows.jobs[0].lease_expires_at).toBeNull();
-    expect(released?.updatedAt).toBe(tPlus60.toISOString());
+    const advance = await adapter.deps.jobs.updateIfClaimed(
+      job.id,
+      'token-B',
+      {
+        status: 'saving',
+        updatedAt: tPlus60.toISOString(),
+      }
+    );
+    expect(advance?.status).toBe('saving');
+    expect(advance?.updatedAt).toBe(tPlus60.toISOString());
 
-    // A new worker can immediately acquire after release.
-    const leaseC = await adapter.acquireJobLease(job.id, 30, tPlus60);
-    expect(leaseC.acquired).toBe(true);
+    // PG row's lease_token still belongs to worker B.
+    const rows = adapter.dumpPgStyleRows();
+    expect(rows.jobs[0].lease_token).toBe('token-B');
   });
 
   // --- Scenario 6: Idempotency key prevents duplicate Version -------------
 
-  it('6. createVersionIdempotent returns the same Version for the same idempotencyKey', async () => {
+  it('6. createIdempotent returns the same Version for the same idempotencyKey', async () => {
     const now = '2026-07-18T00:00:00Z';
     const project: Project = {
       id: 'proj_cb_idem_006',
@@ -407,7 +450,7 @@ describe('STORAGE-001 CloudBase mock adapter PoC', () => {
     };
 
     // First call creates the Version.
-    const first = await adapter.createVersionIdempotent(
+    const first = await adapter.deps.versions.createIdempotent(
       project.id,
       idempotencyKey,
       versionInput
@@ -415,7 +458,7 @@ describe('STORAGE-001 CloudBase mock adapter PoC', () => {
     expect(first).toEqual(versionInput);
 
     // Second call with the SAME idempotencyKey returns the existing Version.
-    const second = await adapter.createVersionIdempotent(
+    const second = await adapter.deps.versions.createIdempotent(
       project.id,
       idempotencyKey,
       // Caller passes a different Version.id, but the adapter must ignore it
@@ -431,7 +474,7 @@ describe('STORAGE-001 CloudBase mock adapter PoC', () => {
     );
 
     // A different idempotencyKey creates a new Version.
-    const third = await adapter.createVersionIdempotent(
+    const third = await adapter.deps.versions.createIdempotent(
       project.id,
       'retry-key-def-002',
       { ...versionInput, id: 'ver_cb_idem_007', label: 'v1' }
@@ -447,5 +490,59 @@ describe('STORAGE-001 CloudBase mock adapter PoC', () => {
       'ver_cb_idem_006',
       'ver_cb_idem_007',
     ]);
+  });
+
+  // --- Scenario 7: Idempotent Job create + lease-aware updateIfClaimed ----
+
+  it('7. Job createIdempotent deduplicates by idempotencyKey', async () => {
+    const now = '2026-07-18T00:00:00Z';
+    const project: Project = {
+      id: 'proj_cb_job_idem_007',
+      name: 'Job Idempotency PoC',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await adapter.deps.projects.create(project);
+
+    const idempotencyKey = 'job-retry-key-001';
+    const jobInput: GenerationJob = {
+      id: 'job_cb_idem_007',
+      projectId: project.id,
+      prompt: 'job idempotency PoC',
+      status: 'queued',
+      idempotencyKey,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // First call creates the Job.
+    const first = await adapter.deps.jobs.createIdempotent(jobInput);
+    expect(first.created).toBe(true);
+    expect(first.job).toEqual(jobInput);
+
+    // Second call with the SAME idempotencyKey returns the existing Job.
+    const second = await adapter.deps.jobs.createIdempotent({
+      ...jobInput,
+      id: 'job_cb_idem_duplicate_attempt',
+    });
+    expect(second.created).toBe(false);
+    expect(second.job.id).toBe('job_cb_idem_007');
+
+    // No duplicate Job row was created.
+    expect(await adapter.deps.jobs.listActiveByProject(project.id)).toHaveLength(
+      1
+    );
+
+    // A different idempotencyKey creates a new Job.
+    const third = await adapter.deps.jobs.createIdempotent({
+      ...jobInput,
+      id: 'job_cb_idem_008',
+      idempotencyKey: 'job-retry-key-002',
+    });
+    expect(third.created).toBe(true);
+    expect(third.job.id).toBe('job_cb_idem_008');
+    expect(await adapter.deps.jobs.listActiveByProject(project.id)).toHaveLength(
+      2
+    );
   });
 });

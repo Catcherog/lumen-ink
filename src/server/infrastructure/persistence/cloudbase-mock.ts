@@ -1,33 +1,35 @@
 /**
- * STORAGE-001 CloudBase mock adapter (PoC).
+ * PERSIST-001 CloudBase mock adapter (D-040 converged).
  *
  * Simulates the preferred candidate — Vercel Hobby + CloudBase PostgreSQL +
  * CloudBase PG Storage — without any real CloudBase account, network call, or
- * production secret. Used by `cloudbase-mock.contract.test.ts` to prove the
- * frozen `PersistenceDependencies` interface is implementable for CloudBase.
+ * production secret.
  *
- * Scope constraints (per STORAGE-001 revision):
- *  - Implements the frozen `PersistenceDependencies` surface **unchanged**.
- *  - Adds PoC-only helpers (`createVersionIdempotent`, job lease helpers) on
- *    the returned object so tests can validate lease/idempotency semantics
- *    without widening the frozen `PersistenceDependencies` interface. These
- *    helpers live on the concrete adapter, NOT on the frozen contract.
+ * Scope (per STORAGE-001 revision + D-040 convergence):
+ *  - Implements the frozen `PersistenceDependencies` surface **unchanged**,
+ *    including the converged 9-stage JobStatus, idempotent Version/Job create,
+ *    lease-aware Job update/claim/heartbeat/listLeaseExpired.
  *  - Does NOT connect to CloudBase. Does NOT read environment credentials.
  *  - Does NOT migrate production Provider/Upload/Job/Version paths.
  *
- * Mapping summary (PoC, illustrative — PERSIST-001 finalizes SQL shapes):
+ * Mapping summary (mock, illustrative — production SQL shapes finalized in
+ * PERSIST Task 5 GenerationService):
  *  - `ProjectRepository`     → rows of `projects` (id, name, created_at, updated_at, active_version_id, approved_version_id)
  *  - `AssetRepository`       → rows of `assets` (id, project_id, storage_key, mime_type, size_bytes, created_at)
- *  - `VersionRepository`     → rows of `versions` (id, project_id, asset_id, label, created_at)
- *  - `JobRepository`         → rows of `generation_jobs` (id, project_id, prompt, status, provider_id, model, result_version_id, error, created_at, updated_at, lease_expires_at)
+ *  - `VersionRepository`     → rows of `versions` (id, project_id, asset_id, label, created_at) +
+ *                              `version_idempotency` (project_id, key, version_id)
+ *  - `JobRepository`         → rows of `generation_jobs` (id, project_id, prompt, status, provider_id,
+ *                              model, result_version_id, error, error_code, idempotency_key, worker_id,
+ *                              lease_token, lease_expires_at, attempt, created_at, updated_at) +
+ *                              `job_idempotency` (key, job_id)
  *  - `ObjectStore`           → CloudBase PG Storage private bucket (in-memory map keyed by storageKey)
  *  - `UnitOfWork`            → PostgreSQL transaction (snapshot + commit/rollback simulation)
  *  - `AuthThrottleRepository`→ rows of `auth_throttle` (key, failures, window_started_at)
  *
- * Field-name mapping: domain uses camelCase; PG layer would use snake_case.
- * The mock stores the domain shape directly and exposes a `dumpPgStyleRows`
- * helper so tests can assert the field-mapping layer (camelCase ↔ snake_case)
- * is well-defined.
+ * Field-name mapping: domain uses camelCase; PG layer uses snake_case.
+ * The mock stores PG-style rows and exposes a `dumpPgStyleRows` helper so
+ * tests can assert the field-mapping layer (camelCase ↔ snake_case) is
+ * well-defined.
  */
 
 import type {
@@ -84,9 +86,14 @@ interface JobRow {
   model: string | null;
   result_version_id: string | null;
   error: string | null;
+  error_code: string | null;
+  idempotency_key: string | null;
+  worker_id: string | null;
+  lease_token: string | null;
+  lease_expires_at: string | null;
+  attempt: number | null;
   created_at: string;
   updated_at: string;
-  lease_expires_at: string | null;
 }
 
 interface AuthThrottleRow {
@@ -103,7 +110,10 @@ interface MockDbState {
   authThrottle: Record<string, AuthThrottleRow>;
   // PG-style index for idempotent version creation.
   // Key format: `${projectId}::${idempotencyKey}` → versionId
-  idempotencyIndex: Record<string, string>;
+  versionIdempotency: Record<string, string>;
+  // PG-style index for idempotent job creation.
+  // Key format: idempotencyKey → jobId
+  jobIdempotency: Record<string, string>;
 }
 
 // --- Object storage simulation --------------------------------------------
@@ -190,9 +200,14 @@ function jobToRow(j: GenerationJob): JobRow {
     model: j.model ?? null,
     result_version_id: j.resultVersionId ?? null,
     error: j.error ?? null,
+    error_code: j.errorCode ?? null,
+    idempotency_key: j.idempotencyKey ?? null,
+    worker_id: j.workerId ?? null,
+    lease_token: j.leaseToken ?? null,
+    lease_expires_at: j.leaseExpiresAt ?? null,
+    attempt: j.attempt ?? null,
     created_at: j.createdAt,
     updated_at: j.updatedAt,
-    lease_expires_at: null,
   };
 }
 
@@ -206,6 +221,12 @@ function jobFromRow(r: JobRow): GenerationJob {
     model: r.model ?? undefined,
     resultVersionId: r.result_version_id ?? undefined,
     error: r.error ?? undefined,
+    errorCode: r.error_code ?? undefined,
+    idempotencyKey: r.idempotency_key ?? undefined,
+    workerId: r.worker_id ?? undefined,
+    leaseToken: r.lease_token ?? undefined,
+    leaseExpiresAt: r.lease_expires_at ?? undefined,
+    attempt: r.attempt ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -226,7 +247,14 @@ function throttleFromRow(r: AuthThrottleRow): AuthThrottleBucket {
   };
 }
 
-const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = ['queued', 'running'];
+const ACTIVE_JOB_STATUSES: GenerationJobStatus[] = [
+  'queued',
+  'uploading',
+  'analyzing',
+  'generating',
+  'postprocessing',
+  'saving',
+];
 
 function emptyState(): MockDbState {
   return {
@@ -235,7 +263,8 @@ function emptyState(): MockDbState {
     versions: {},
     jobs: {},
     authThrottle: {},
-    idempotencyIndex: {},
+    versionIdempotency: {},
+    jobIdempotency: {},
   };
 }
 
@@ -246,32 +275,13 @@ function cloneDbState(state: MockDbState): MockDbState {
     versions: { ...state.versions },
     jobs: { ...state.jobs },
     authThrottle: { ...state.authThrottle },
-    idempotencyIndex: { ...state.idempotencyIndex },
+    versionIdempotency: { ...state.versionIdempotency },
+    jobIdempotency: { ...state.jobIdempotency },
   };
 }
 
 export interface CloudBaseMockPersistence {
   deps: PersistenceDependencies;
-  // PoC-only helpers — NOT part of the frozen PersistenceDependencies
-  // surface. PERSIST-001 production adapter may expose equivalent helpers
-  // without widening the frozen interface.
-  createVersionIdempotent: (
-    projectId: string,
-    idempotencyKey: string,
-    version: Version
-  ) => Promise<Version>;
-  acquireJobLease: (
-    jobId: string,
-    leaseSeconds: number,
-    now?: Date
-  ) => Promise<{ acquired: boolean; currentHolder: string | null }>;
-  heartbeatJobLease: (
-    jobId: string,
-    leaseSeconds: number,
-    now?: Date
-  ) => Promise<boolean>;
-  releaseJobLease: (jobId: string, now?: Date) => Promise<void>;
-  listLeaseExpiredJobs: (now?: Date) => Promise<GenerationJob[]>;
   /** Returns a PG-style snapshot (snake_case rows) for field-mapping tests. */
   dumpPgStyleRows: () => {
     projects: ProjectRow[];
@@ -352,16 +362,25 @@ export function createCloudBaseMockPersistence(
         objectStore.delete(key);
       }
 
-      // Delete versions whose project_id matches.
+      // Delete versions whose project_id matches (and their idempotency rows).
       for (const vId of Object.keys(state.versions)) {
         if (state.versions[vId].project_id === id) {
           delete state.versions[vId];
         }
       }
+      for (const indexKey of Object.keys(state.versionIdempotency)) {
+        if (indexKey.startsWith(`${id}::`)) {
+          delete state.versionIdempotency[indexKey];
+        }
+      }
 
-      // Delete jobs whose project_id matches.
+      // Delete jobs whose project_id matches (and their idempotency rows).
       for (const jId of Object.keys(state.jobs)) {
         if (state.jobs[jId].project_id === id) {
+          const job = state.jobs[jId];
+          if (job.idempotency_key) {
+            delete state.jobIdempotency[job.idempotency_key];
+          }
           delete state.jobs[jId];
         }
       }
@@ -410,6 +429,27 @@ export function createCloudBaseMockPersistence(
       return { ...input };
     },
 
+    async createIdempotent(
+      projectId: string,
+      idempotencyKey: string,
+      version: Version
+    ): Promise<Version> {
+      const indexKey = `${projectId}::${idempotencyKey}`;
+      const existingId = state.versionIdempotency[indexKey];
+      if (existingId) {
+        const existingRow = state.versions[existingId];
+        if (existingRow) {
+          return versionFromRow(existingRow);
+        }
+      }
+      if (state.versions[version.id]) {
+        throw new Error(`VERSION_ALREADY_EXISTS:${version.id}`);
+      }
+      state.versions[version.id] = versionToRow(version);
+      state.versionIdempotency[indexKey] = version.id;
+      return { ...version };
+    },
+
     async get(id: string): Promise<Version | null> {
       const row = state.versions[id];
       return row ? versionFromRow(row) : null;
@@ -424,13 +464,76 @@ export function createCloudBaseMockPersistence(
 
   // --- JobRepository ------------------------------------------------------
 
+  function applyJobPatch(row: JobRow, patch: Partial<GenerationJob>): JobRow {
+    return {
+      id: row.id,
+      project_id: row.project_id,
+      prompt: row.prompt,
+      status: patch.status ?? row.status,
+      provider_id:
+        patch.providerId === undefined
+          ? row.provider_id
+          : (patch.providerId ?? null),
+      model:
+        patch.model === undefined ? row.model : (patch.model ?? null),
+      result_version_id:
+        patch.resultVersionId === undefined
+          ? row.result_version_id
+          : (patch.resultVersionId ?? null),
+      error:
+        patch.error === undefined ? row.error : (patch.error ?? null),
+      error_code:
+        patch.errorCode === undefined
+          ? row.error_code
+          : (patch.errorCode ?? null),
+      idempotency_key: row.idempotency_key,
+      worker_id:
+        patch.workerId === undefined ? row.worker_id : (patch.workerId ?? null),
+      lease_token:
+        patch.leaseToken === undefined ? row.lease_token : (patch.leaseToken ?? null),
+      lease_expires_at:
+        patch.leaseExpiresAt === undefined
+          ? row.lease_expires_at
+          : (patch.leaseExpiresAt ?? null),
+      attempt:
+        patch.attempt === undefined ? row.attempt : (patch.attempt ?? null),
+      created_at: row.created_at,
+      updated_at: patch.updatedAt ?? now().toISOString(),
+    };
+  }
+
   const jobs: JobRepository = {
     async create(input: GenerationJob): Promise<GenerationJob> {
       if (state.jobs[input.id]) {
         throw new Error(`JOB_ALREADY_EXISTS:${input.id}`);
       }
       state.jobs[input.id] = jobToRow(input);
+      if (input.idempotencyKey) {
+        state.jobIdempotency[input.idempotencyKey] = input.id;
+      }
       return { ...input };
+    },
+
+    async createIdempotent(
+      input: GenerationJob
+    ): Promise<{ job: GenerationJob; created: boolean }> {
+      if (input.idempotencyKey) {
+        const existingId = state.jobIdempotency[input.idempotencyKey];
+        if (existingId) {
+          const existingRow = state.jobs[existingId];
+          if (existingRow) {
+            return { job: jobFromRow(existingRow), created: false };
+          }
+        }
+      }
+      if (state.jobs[input.id]) {
+        throw new Error(`JOB_ALREADY_EXISTS:${input.id}`);
+      }
+      state.jobs[input.id] = jobToRow(input);
+      if (input.idempotencyKey) {
+        state.jobIdempotency[input.idempotencyKey] = input.id;
+      }
+      return { job: { ...input }, created: true };
     },
 
     async get(id: string): Promise<GenerationJob | null> {
@@ -444,26 +547,62 @@ export function createCloudBaseMockPersistence(
     ): Promise<GenerationJob> {
       const row = state.jobs[id];
       if (!row) throw new Error(`JOB_NOT_FOUND:${id}`);
-      const updated: JobRow = {
-        ...row,
-        status: patch.status ?? row.status,
-        provider_id:
-          patch.providerId === undefined
-            ? row.provider_id
-            : (patch.providerId ?? null),
-        model:
-          patch.model === undefined ? row.model : (patch.model ?? null),
-        result_version_id:
-          patch.resultVersionId === undefined
-            ? row.result_version_id
-            : (patch.resultVersionId ?? null),
-        error:
-          patch.error === undefined ? row.error : (patch.error ?? null),
-        updated_at: patch.updatedAt ?? now().toISOString(),
-        lease_expires_at: row.lease_expires_at,
-      };
+      const updated = applyJobPatch(row, patch);
       state.jobs[id] = updated;
       return jobFromRow(updated);
+    },
+
+    async updateIfClaimed(
+      id: string,
+      leaseToken: string,
+      patch: Partial<GenerationJob>
+    ): Promise<GenerationJob | null> {
+      const row = state.jobs[id];
+      if (!row) return null;
+      if (!row.lease_token || row.lease_token !== leaseToken) return null;
+      const updated = applyJobPatch(row, patch);
+      state.jobs[id] = updated;
+      return jobFromRow(updated);
+    },
+
+    async claim(
+      id: string,
+      input: { workerId: string; leaseToken: string; leaseExpiresAt: string; now: string }
+    ): Promise<boolean> {
+      const row = state.jobs[id];
+      if (!row) throw new Error(`JOB_NOT_FOUND:${id}`);
+      const nowMs = Date.parse(input.now);
+      const currentExpiry = row.lease_expires_at
+        ? Date.parse(row.lease_expires_at)
+        : 0;
+      const heldByOther =
+        row.lease_token &&
+        row.lease_token !== input.leaseToken &&
+        currentExpiry > nowMs;
+      if (heldByOther) return false;
+      state.jobs[id] = {
+        ...row,
+        worker_id: input.workerId,
+        lease_token: input.leaseToken,
+        lease_expires_at: input.leaseExpiresAt,
+        updated_at: input.now,
+      };
+      return true;
+    },
+
+    async heartbeat(
+      id: string,
+      input: { leaseToken: string; leaseExpiresAt: string; now: string }
+    ): Promise<boolean> {
+      const row = state.jobs[id];
+      if (!row) return false;
+      if (!row.lease_token || row.lease_token !== input.leaseToken) return false;
+      state.jobs[id] = {
+        ...row,
+        lease_expires_at: input.leaseExpiresAt,
+        updated_at: input.now,
+      };
+      return true;
     },
 
     async listActiveByProject(projectId: string): Promise<GenerationJob[]> {
@@ -473,6 +612,17 @@ export function createCloudBaseMockPersistence(
             j.project_id === projectId &&
             ACTIVE_JOB_STATUSES.includes(j.status)
         )
+        .map(jobFromRow);
+    },
+
+    async listLeaseExpired(now: string): Promise<GenerationJob[]> {
+      const nowMs = Date.parse(now);
+      return Object.values(state.jobs)
+        .filter((j) => {
+          if (!ACTIVE_JOB_STATUSES.includes(j.status)) return false;
+          if (!j.lease_expires_at) return false;
+          return Date.parse(j.lease_expires_at) <= nowMs;
+        })
         .map(jobFromRow);
     },
   };
@@ -570,91 +720,7 @@ export function createCloudBaseMockPersistence(
     },
   };
 
-  // --- PoC-only helpers (NOT on the frozen interface) ---------------------
-
-  async function createVersionIdempotent(
-    projectId: string,
-    idempotencyKey: string,
-    version: Version
-  ): Promise<Version> {
-    const indexKey = `${projectId}::${idempotencyKey}`;
-    const existing = state.idempotencyIndex[indexKey];
-    if (existing) {
-      const existingRow = state.versions[existing];
-      if (existingRow) {
-        return versionFromRow(existingRow);
-      }
-    }
-    const created = await versions.create(version);
-    state.idempotencyIndex[indexKey] = created.id;
-    return created;
-  }
-
-  async function acquireJobLease(
-    jobId: string,
-    leaseSeconds: number,
-    nowOverride?: Date
-  ): Promise<{ acquired: boolean; currentHolder: string | null }> {
-    const at = nowOverride ?? now();
-    const row = state.jobs[jobId];
-    if (!row) throw new Error(`JOB_NOT_FOUND:${jobId}`);
-    if (
-      row.lease_expires_at &&
-      new Date(row.lease_expires_at).getTime() > at.getTime()
-    ) {
-      return { acquired: false, currentHolder: row.lease_expires_at };
-    }
-    const expiresAt = new Date(at.getTime() + leaseSeconds * 1000).toISOString();
-    state.jobs[jobId] = {
-      ...row,
-      lease_expires_at: expiresAt,
-      updated_at: at.toISOString(),
-    };
-    return { acquired: true, currentHolder: expiresAt };
-  }
-
-  async function heartbeatJobLease(
-    jobId: string,
-    leaseSeconds: number,
-    nowOverride?: Date
-  ): Promise<boolean> {
-    const at = nowOverride ?? now();
-    const row = state.jobs[jobId];
-    if (!row) throw new Error(`JOB_NOT_FOUND:${jobId}`);
-    if (!row.lease_expires_at) return false;
-    if (new Date(row.lease_expires_at).getTime() <= at.getTime()) {
-      return false;
-    }
-    const expiresAt = new Date(at.getTime() + leaseSeconds * 1000).toISOString();
-    state.jobs[jobId] = {
-      ...row,
-      lease_expires_at: expiresAt,
-      updated_at: at.toISOString(),
-    };
-    return true;
-  }
-
-  async function releaseJobLease(jobId: string, nowOverride?: Date): Promise<void> {
-    const at = nowOverride ?? now();
-    const row = state.jobs[jobId];
-    if (!row) return;
-    state.jobs[jobId] = {
-      ...row,
-      lease_expires_at: null,
-      updated_at: at.toISOString(),
-    };
-  }
-
-  async function listLeaseExpiredJobs(nowOverride?: Date): Promise<GenerationJob[]> {
-    const at = nowOverride ?? now();
-    return Object.values(state.jobs)
-      .filter(
-        (j) =>
-          j.lease_expires_at !== null &&
-          new Date(j.lease_expires_at).getTime() <= at.getTime()
-      )
-      .map(jobFromRow);
-  }
+  // --- Test-only helpers (NOT on the frozen interface) --------------------
 
   function dumpPgStyleRows() {
     return {
@@ -680,11 +746,6 @@ export function createCloudBaseMockPersistence(
       unitOfWork,
       authThrottle,
     },
-    createVersionIdempotent,
-    acquireJobLease,
-    heartbeatJobLease,
-    releaseJobLease,
-    listLeaseExpiredJobs,
     dumpPgStyleRows,
     setFixedNow,
   };
