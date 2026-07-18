@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import editRouter from './routes/edit.js';
+import { createEditRouter } from './routes/edit.js';
 import authRouter from './routes/auth.js';
 import providersRouter from './routes/providers.js';
 import detectRouter from './routes/detect.js';
@@ -88,7 +88,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/providers', authMiddleware, providersRouter);
-app.use('/api/edit', authMiddleware, editRouter);
+app.use('/api/edit', authMiddleware, createEditRouter(generationService));
 app.use('/api/detect', authMiddleware, detectRouter);
 app.use(
   '/api/projects',
