@@ -7,8 +7,10 @@ import ApiSettingsModal from './components/ApiSettingsModal';
 import EditorHeader from './components/v2/EditorHeader';
 import TaskRail from './components/v2/TaskRail';
 import ContextPanel from './components/v2/ContextPanel';
-import VersionStripPlaceholder from './components/v2/VersionStripPlaceholder';
+import VersionStrip from './components/v2/VersionStrip';
+import JobStatusPanel from './components/v2/JobStatusPanel';
 import useEditor from './hooks/useEditor';
+import { useProject } from './hooks/useProject';
 import { serializeError } from './utils/error';
 import { downloadImage } from './utils/image';
 import { defaultRecipeBook, compilePrompt } from './utils/recipe';
@@ -33,6 +35,13 @@ export default function AppV2() {
   // - CTA 触发时统一 compilePrompt → submitEdit 闭环
   const [activeTask, setActiveTask] = useState<V2TaskId>('project');
   const [recipeBook, setRecipeBook] = useState<Record<V2TaskId, EditRecipe>>(() => defaultRecipeBook());
+
+  // PERSIST-001: server-backed Project/Version/Job state.
+  // - useProject is the long-term truth; useEditor's viewer state is derived
+  //   from snapshot + viewedVersionId when a Project is loaded.
+  // - viewedVersionId: when null, the viewer shows the active Version's URL.
+  const [viewedVersionId, setViewedVersionId] = useState<string | null>(null);
+  const project = useProject();
 
   const currentRecipe = recipeBook[activeTask];
   const compiled = useMemo(() => compilePrompt(currentRecipe), [currentRecipe]);
@@ -162,29 +171,57 @@ export default function AppV2() {
     setToken(null);
   };
 
-  const handleImageUpload = useCallback((data: { base64: string; mimeType: string; file: File }) => {
+  const handleImageUpload = useCallback(async (data: { base64: string; mimeType: string; file: File }) => {
     setProjectName(stripExtension(data.file.name) || '未命名项目');
+    // PERSIST-001: upload to server FIRST so the Project + V0 are durably
+    // stored. The viewer continues to use the base64 from the file picker
+    // for instant display (no fetch round-trip).
     uploadImage(data);
-  }, [uploadImage]);
+    setViewedVersionId(null);
+    try {
+      await project.upload(data.file, stripExtension(data.file.name) || '未命名项目');
+    } catch (err) {
+      // Server upload failed; surface the error but keep the local viewer
+      // state so the user can retry. The error is already in project.error.
+      dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '项目上传失败' });
+    }
+  }, [uploadImage, project, dispatch]);
 
   // FLOW-001: Recipe 变更写回 recipeBook[activeTask]
   const handleRecipeChange = useCallback((next: EditRecipe) => {
     setRecipeBook((prev) => ({ ...prev, [activeTask]: next }));
   }, [activeTask]);
 
-  // FLOW-001: 单一 CTA → compilePrompt → submitEdit（只消费编译后的请求）
-  // - 不会绕过 recipe 直接调 /api/edit
-  // - tool 来自 V2_TASK_TOOL_MAP[taskId]，由 defaultRecipe 写入 recipe.tool
-  // - recipe 完整存入 params.recipe 供历史回放（不修改 /api/edit 协议）
-  // - P0-01 防御：URL-only 结果（currentImage=null）不发起编辑，避免提交旧 base64
+  // FLOW-001 + PERSIST-001: 单一 CTA → compilePrompt → V2 Job creation (or legacy submitEdit)
+  // - 当 useProject.snapshot 存在（V2 模式）：通过 /api/projects/:id/jobs 创建 Job，
+  //   轮询成功后 snapshot 自动刷新，viewer 切换到新 Version 的 signed URL。
+  // - 当 snapshot 不存在（legacy 模式）：回退到 /api/edit 同步路径。
+  // - P0-01 防御仅在 legacy 路径生效；V2 路径由服务端从 ObjectStore 取 bytes，
+  //   不依赖请求体中的 base64，天然避免旧 base64 问题。
   // - P0-02：显式传递 referenceImages，保证编译 Prompt、Recipe 计数与请求 payload 一致
   const handleGeneratePreview = useCallback(() => {
+    const result = compilePrompt(currentRecipe);
+
+    // V2 path: server-backed Project exists
+    if (project.snapshot) {
+      const idempotencyKey = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      void project.generate({
+        prompt: result.prompt,
+        idempotencyKey,
+        inputVersionId: project.activeVersion?.id,
+        providerId: state.selectedProvider || undefined,
+        model: state.selectedModel,
+        recipe: currentRecipe,
+      });
+      return;
+    }
+
+    // Legacy path: no server Project, fall back to synchronous /api/edit
     // P0-01 防御性检查：可提交判定已在 ContextPanel 完成，此处再校验避免任何路径绕过
     if (!state.currentImage) {
       dispatch({ type: 'SET_ERROR', payload: '当前结果为 URL，无法继续编辑，请下载后重新上传' });
       return;
     }
-    const result = compilePrompt(currentRecipe);
     submitEdit(result.prompt, {
       tool: currentRecipe.tool ?? undefined,
       params: { recipe: currentRecipe, compiledVersion: result.version },
@@ -195,7 +232,81 @@ export default function AppV2() {
         ? state.referenceImages
         : undefined,
     });
-  }, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, dispatch]);
+  }, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, state.selectedProvider, state.selectedModel, dispatch, project]);
+
+  // PERSIST-001: Viewer sync — when a V2 Job succeeds, the snapshot refreshes
+  // with a new activeVersion. We auto-switch the viewer to the new Version's
+  // signed URL and reset viewedVersionId so the user sees the latest result.
+  // Tracks the last synced resultVersionId to avoid re-dispatching on every render.
+  const lastSyncedResultIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const job = project.activeJob;
+    const snapshot = project.snapshot;
+    if (!job || !snapshot) return;
+    if (job.status !== 'succeeded' || !job.resultVersionId) return;
+    if (lastSyncedResultIdRef.current === job.resultVersionId) return;
+
+    const version = snapshot.versions.find((v) => v.id === job.resultVersionId);
+    if (!version) return; // snapshot not yet refreshed
+    const asset = snapshot.assets.find((a) => a.id === version.assetId);
+    if (!asset) return;
+    const signedUrl = snapshot.signedUrls[asset.storageKey];
+    if (!signedUrl) return;
+
+    lastSyncedResultIdRef.current = job.resultVersionId;
+    setViewedVersionId(job.resultVersionId);
+    dispatch({
+      type: 'SET_RESULT',
+      payload: {
+        imageData: null,
+        imageUrl: signedUrl,
+        text: null,
+        mimeType: asset.mimeType,
+        history: state.history, // preserve legacy history
+        meta: undefined,
+      },
+    });
+  }, [project.activeJob, project.snapshot, dispatch, state.history]);
+
+  // PERSIST-001: When the user clicks a Version chip, switch the viewer to
+  // that Version's signed URL without dispatching SET_RESULT (which would
+  // append to history). Use SET_CURRENT_IMAGE so the next edit cycle uses
+  // the viewed Version as input.
+  const handleViewVersion = useCallback((versionId: string) => {
+    setViewedVersionId(versionId);
+    const snapshot = project.snapshot;
+    if (!snapshot) return;
+    const version = snapshot.versions.find((v) => v.id === versionId);
+    if (!version) return;
+    const asset = snapshot.assets.find((a) => a.id === version.assetId);
+    if (!asset) return;
+    const signedUrl = snapshot.signedUrls[asset.storageKey];
+    if (!signedUrl) return;
+    dispatch({
+      type: 'SET_CURRENT_IMAGE',
+      payload: { image: null, imageUrl: signedUrl, mimeType: asset.mimeType },
+    });
+  }, [project.snapshot, dispatch]);
+
+  const handleActivateVersion = useCallback(async (versionId: string) => {
+    await project.activate(versionId);
+    setViewedVersionId(versionId);
+  }, [project]);
+
+  const handleApproveVersion = useCallback(async (versionId: string) => {
+    await project.approve(versionId);
+  }, [project]);
+
+  const handleCancelJob = useCallback(async (jobId: string) => {
+    await project.cancel();
+  }, [project]);
+
+  const handleRetryJob = useCallback(async (jobId: string) => {
+    await project.retry();
+  }, [project]);
+
+  // Surface useProject errors alongside useEditor errors
+  const displayError = state.error || (project.error ? project.error.message : null);
 
   // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
   // canExport 必须与 handleExport 支持的结果类型完全一致（仅 base64 / URL），
@@ -249,15 +360,22 @@ export default function AppV2() {
             />
 
             <main className="flex-1 min-w-0 min-h-0 relative flex flex-col bg-white dark:bg-gray-900">
-              {state.error && (
+              {displayError && (
                 <div className="absolute top-3 left-3 right-3 z-20">
                   <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl px-4 py-2.5 shadow-sm">
                     <p className="text-sm text-red-600 dark:text-red-300">
-                      {typeof state.error === 'string' ? state.error : serializeError(state.error)}
+                      {typeof displayError === 'string' ? displayError : serializeError(displayError)}
                     </p>
                   </div>
                 </div>
               )}
+
+              {/* PERSIST-001: Job status overlay — shown when a V2 Job is active */}
+              <JobStatusPanel
+                job={project.activeJob}
+                onCancel={handleCancelJob}
+                onRetry={handleRetryJob}
+              />
 
               <ResultViewer
                 originalImage={state.originalImage}
@@ -266,7 +384,7 @@ export default function AppV2() {
                 resultImageUrl={state.resultImageUrl}
                 resultText={state.resultText}
                 resultMimeType={state.resultMimeType}
-                isLoading={state.isLoading}
+                isLoading={state.isLoading || project.isLoading}
                 onImageUpload={handleImageUpload}
                 lastCallMeta={state.lastCallMeta}
                 lastPrompt={state.history.length > 0 ? state.history[state.history.length - 1].prompt : null}
@@ -289,7 +407,14 @@ export default function AppV2() {
             />
           </div>
 
-          <VersionStripPlaceholder />
+          {/* PERSIST-001: Server-backed Version strip — replaces placeholder */}
+          <VersionStrip
+            snapshot={project.snapshot}
+            viewedVersionId={viewedVersionId}
+            onViewVersion={handleViewVersion}
+            onActivate={handleActivateVersion}
+            onApprove={handleApproveVersion}
+          />
         </div>
       </ErrorBoundary>
 
