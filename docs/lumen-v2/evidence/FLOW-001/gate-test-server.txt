@@ -1,8 +1,4 @@
 ﻿
-> lumen-ink-server@0.1.0 test
-> vitest run
-
-
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/360Downloads/Trae 项目/picture-edit/src/server[39m
 
  [32m✓[39m dist/services/providers/operationType.test.js [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
@@ -10,7 +6,7 @@
 
 [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
 [2m      Tests [22m [1m[32m16 passed[39m[22m[90m (16)[39m
-[2m   Start at [22m 00:54:59
-[2m   Duration [22m 345ms[2m (transform 146ms, setup 0ms, import 195ms, tests 6ms, environment 0ms)[22m
+[2m   Start at [22m 11:47:10
+[2m   Duration [22m 204ms[2m (transform 32ms, setup 0ms, import 60ms, tests 5ms, environment 0ms)[22m
 
 EXIT=0

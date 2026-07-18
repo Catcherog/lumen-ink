@@ -10,9 +10,9 @@
   "nextActor": "gpt",
   "lastAcceptedTask": "UI-001",
   "latestTraeReport": "docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md",
-  "latestGptReview": "docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md",
+  "latestGptReview": "docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md",
   "productionV2Flag": "off",
-  "lastUpdatedAt": "2026-07-17",
+  "lastUpdatedAt": "2026-07-18",
   "lastUpdatedBy": "trae",
   "requiredReads": [
     "AGENTS.md",
@@ -21,13 +21,12 @@
     "docs/lumen-v2/state/DECISION-LOG.md",
     "docs/lumen-v2/tasks/active/FLOW-001.md",
     "docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md",
-    "docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md",
+    "docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md",
     "docs/lumen-v2/state/SESSION-HANDOFF.md"
   ],
   "blockedTasks": [
     "STORAGE-001",
-    "VERSION-001",
-    "JOB-001"
+    "PERSIST-001"
   ],
   "publicRepoSafety": "required"
 }

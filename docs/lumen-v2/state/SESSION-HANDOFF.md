@@ -4,46 +4,72 @@
 
 ## 当前状态
 
-- 日期：2026-07-17
+- 日期：2026-07-18
 - 当前任务：`FLOW-001`
 - 状态：`awaiting_gpt_acceptance / nextActor=gpt`
-- 前置任务：UI-001 已由 GPT 第三轮验收通过（`MVP_PASS`）
-- 活跃任务：`docs/lumen-v2/tasks/active/FLOW-001.md`
-- 最近 Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`
-- 最近 GPT 审查：`docs/lumen-v2/reviews/UI-001-GPT-REVIEW.md`（UI-001 `MVP_PASS`；按契约由 Trae 一并 commit/push）
+- Trae 返工 commit：待 push 后回填
+- 分支：`lumen/flow-001-trae`
+- Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`（已追加 §14 P0 返工记录）
+- GPT 驳回报告：`docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`
 
-## FLOW-001 实施摘要
+## 本轮返工事实
 
-Trae 在 `lumen/flow-001-trae` 分支完成端到端扩大执行包，一次交付：
+Trae 按 FIX_PACKET 最小返工，未扩大范围：
 
-1. **EditRecipe（schemaVersion=1）**：五档 Tier 参数、5 项保护项（默认开启）、补充要求、参考图、区域、导出格式；
-2. **V2_TASK_TOOL_MAP 1:1 映射**：`project=null` 不发起编辑；`subject=face` / `color=color` / `cleanup=repair` / `local=liquify` / `export=export`；
-3. **Prompt 编译器 v1（version=1）**：纯函数，首行 `# lumen-prompt v1` 显式版本标记；身份锚定 / 保护（全分支）/ 修改（全档位）/ 补充要求（trim）/ 参考图 / 区域 / 限制七段；
-4. **V2 右栏单 CTA**：删除旧 ParamPanel / PromptInput / "应用" / "提交" 入口与 UI-001 临时债务提示；只保留一个真实"生成预览"主 CTA；完整 Prompt 默认折叠只读；
-5. **`/api/edit` 接线**：`handleGeneratePreview` → `compilePrompt` → `submitEdit`，保持 Provider 输出兼容；
-6. **自动化测试**：76 client tests + 16 server tests = 92 tests passed（新增 71 tests，无既有回归）；
-7. **8 条门禁全绿**：client lint 0/0、client/server typecheck、client 76 tests、server 16 tests、root 92 tests、build、安全扫描；
-8. **证据与状态**：`docs/lumen-v2/evidence/FLOW-001/` 8 条脱敏输出；STATE/PROJECT-MEMORY/DECISION-LOG/CHANGELOG/SESSION-HANDOFF 同步更新。
+### P0-01 修复：URL-only 结果不可继续编辑
 
-未实施 STORAGE/JOB/VERSION；未修改 Provider/API/存储实现；未覆盖工作区中与 FLOW-001 无关的既有修改。
+- 根因：`useEditor.SET_RESULT` 在仅返回 `imageUrl` 时保留旧 `currentImage` base64；首轮 `canSubmit = currentImage || currentImageUrl` 放行提交但 `submitEdit` 只发 base64 → 提交上一轮残留。
+- 修复：`ContextPanel` `canSubmit` 改为仅要求 `state.currentImage`；新增 `hasUrlOnlyResult` 检测；显示琥珀色提示；`AppV2.handleGeneratePreview` 加防御性检查。
 
-## GPT 下一轮验收指令
+### P0-02 修复：恢复 V2 参考图入口
 
-按变更风险驱动验收：
+- 根因：首轮 `ContextPanel` 移除参考图入口；`AppV2` 未解构 `setReferenceImages` → `referenceImageCount`、编译 Prompt 与 payload 不可达。
+- 修复：`ContextPanel` 新增 `ReferenceImages` 唯一入口；`handleReferenceImagesChange` 同步 `state.referenceImages` 与 `recipe.auxiliary.referenceImageCount`；`AppV2.handleGeneratePreview` 显式传 `referenceImages`。
 
-1. 只审 FLOW-001 diff（`lumen/flow-001-trae` 分支对比 `050c321`）；
-2. 复核关键行为测试：单 CTA 唯一性、无隐藏提交入口、保护项全分支、portrait 全档位、round-trip 稳定性、project 禁用、loading 状态、任务切换；
-3. 复核统一 8 条门禁：lint / client typecheck / client test / server typecheck / server test / root test / build / 安全扫描；
-4. 未变更的 UI-001 截图与已冻结事实不重复审计；
-5. 验收结论：`MVP_PASS` / `MVP_PASS_WITH_DEBT` / `MVP_FAIL` 三选一；
-6. 验收结果写入 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`。
+### 回归测试（19 用例）
 
-## 加速验收约定
+- P0-01：6 用例（URL-only 禁用、琥珀色提示、不显示"请先上传"、点击不触发 onSubmit、base64 优先、无图无 URL 禁用）
+- P0-02：11 用例（入口渲染、project 不渲染、计数显示、添加按钮、编译 Prompt 含/不含【参考图】段、删除回调、计数同步、计数未变不冗余触发）
+- 端到端一致性：2 用例（Recipe/Prompt/payload 三层一致）
 
-- 仅 P0/P1 阻塞放行；P2 记录技术债，不触发无必要返工。
-- 若验收通过，激活 STORAGE-001 进入技术选型阶段。
-- 若驳回，按 FIX_PACKET 仅修指定 P0/P1 及直接回归。
+## 8 条门禁重跑（全部 EXIT=0）
 
-## 工作区提醒
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc -b --noEmit`（client） | exit 0 |
+| `npm test --prefix src/client` | 3 files / **94 passed**（首轮 76 + P0 新增 18） |
+| `npx tsc --noEmit`（server） | exit 0 |
+| `npm test --prefix src/server` | 2 files / 16 passed |
+| `npm test` | 5 files / **110 passed**（94 client + 16 server） |
+| `npm run build` | client + server 通过 |
+| `node scripts/check-lumen-collab.mjs` | 通过 |
 
-工作区仍有与当前任务无关的既有修改（如 `.trae/` / `docs/ai/` / `docs/lumen-v2/CONTRIBUTION-WORKFLOW.md` / `.gitignore` 等）。Trae 本次 commit 仅包含 FLOW-001 直接相关文件 + GPT 验收文档 + 任务/状态文件，保留其他修改原状。
+证据文件已就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`。
+
+## GPT 验收指引
+
+按变更风险驱动验收，建议聚焦：
+
+1. P0-01 修复 diff：`ContextPanel.tsx` 的 `canSubmit` / `hasUrlOnlyResult` 与 `AppV2.tsx` 的防御检查
+2. P0-02 修复 diff：`ContextPanel.tsx` 的 `ReferenceImages` 入口与 `handleReferenceImagesChange`，`AppV2.tsx` 的 `referenceImages` 传递
+3. 三层数据一致性：`state.referenceImages` ↔ `recipe.auxiliary.referenceImageCount` ↔ 编译 Prompt【参考图】段 ↔ `submitEdit` payload
+4. 19 个 P0 回归用例
+5. 8 条门禁重跑结果
+
+无需重审 UI-001 视觉证据（已冻结）；未变更的首轮文件不重审。
+
+## 范围边界
+
+- 仅修 P0-01 与 P0-02；
+- 仅补对应回归测试；
+- 未启动 STORAGE/JOB/VERSION；
+- 未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer 逻辑。
+
+## 下一步
+
+GPT 验收 → 若通过：激活 STORAGE-001 进入方案比较；若驳回：按新 FIX_PACKET 最小返工。
+
+## 后续加速方向（已确认，尚未激活）
+
+用户已确认：FLOW-001 通过后，STORAGE-001 仍单独完成方案比较、PoC 与 GPT/用户冻结；冻结后激活扩大执行包 `PERSIST-001`，一次交付原 VERSION-001 与 JOB-001 的项目、不可变版本和可恢复生成闭环。设计、任务包与实施计划已落盘，但当前不得提前实施。

@@ -387,3 +387,171 @@ it('tierToLegacyValue(tier) maps back to the same tier via legacyValueToTier', (
 - GPT 下一轮按变更风险驱动验收：只审 FLOW-001 diff、关键行为测试（单 CTA、无隐藏提交入口、保护项全分支、round-trip 稳定性）与统一 8 条门禁；未变更的 UI-001 视觉证据不重跑。
 - 若 GPT 验收通过，建议激活 STORAGE-001 进入技术选型阶段。
 - 若 GPT 驳回，按 FIX_PACKET 仅修指定 P0/P1 及直接回归，不主动处理 P2。
+
+---
+
+## 14. P0 返工（2026-07-18，changes_requested → awaiting_gpt_acceptance）
+
+### 14.1 驳回依据
+
+GPT 首轮验收结论 `MVP_FAIL`（见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`），8 条工程门禁全绿，但存在两个端到端 P0：
+
+- **FLOW001-P0-01**：URL 图片结果后二次生成会提交旧 base64，而非当前显示的新结果。
+- **FLOW001-P0-02**：V2 已移除参考图入口，`referenceImageCount`、编译 Prompt 与请求 payload 在真实 UI 中不可达。
+
+状态机已更新为 `changes_requested / nextActor=trae`，本轮按 FIX_PACKET 最小修复，未启动 STORAGE/JOB/VERSION。
+
+### 14.2 P0-01 修复：URL-only 结果不可继续编辑
+
+**根因**：
+- `useEditor.ts` 的 `SET_RESULT` reducer（L58-L70）：`currentImage: action.payload.imageData || state.currentImage` — 仅返回 URL 时保留旧 base64；
+- `submitEdit`（L200-L284）：`image: state.currentImage || undefined` — 只发送 base64，不发 URL；
+- 首轮 ContextPanel：`canSubmit = editable && (state.currentImage || state.currentImageUrl) && !state.isLoading` — URL-only 也算可提交，但实际 `submitEdit` 发的是上一轮残留的旧 base64。
+
+**修复**（`src/client/src/components/v2/ContextPanel.tsx` + `src/client/src/AppV2.tsx`）：
+
+```typescript
+// ContextPanel.tsx
+const hasCurrentImage = !!state.currentImage;
+const hasUrlOnlyResult = !state.currentImage && !!state.currentImageUrl;
+const canSubmit = editable && hasCurrentImage && !state.isLoading;
+```
+
+- URL-only 结果时 CTA 禁用；
+- 显示琥珀色提示"当前结果为 URL，无法继续编辑，请下载后重新上传"；
+- 不再显示"请先上传图片"（区分无图状态 vs URL-only 状态）；
+- `AppV2.handleGeneratePreview` 增加防御性检查：`if (!state.currentImage) { dispatch SET_ERROR; return; }`，任何路径绕过 CTA 也不会发请求。
+
+**能力判定与请求实际支持的输入类型 1:1 对齐**：`canSubmit` 仅要求 `state.currentImage`，与 `submitEdit` 只发送 base64 完全一致。
+
+### 14.3 P0-02 修复：恢复 V2 参考图入口
+
+**根因**：
+- 首轮 `ContextPanel` 移除了旧 `ParamPanel` 中的 `ReferenceImages` 入口；
+- `AppV2` 未解构 `setReferenceImages`；
+- `recipe.auxiliary.referenceImageCount` 无法在 UI 中变更，编译 Prompt 的【参考图】段永远不出现，请求 payload 也永远不带参考图。
+
+**修复**（`ContextPanel.tsx` + `AppV2.tsx`）：
+
+```typescript
+// ContextPanel.tsx — 唯一参考图入口（可编辑任务均显示）
+{editable && (
+  <section data-testid="reference-images-section">
+    <ReferenceImages
+      images={referenceImages}
+      onImagesChange={handleReferenceImagesChange}
+    />
+  </section>
+)}
+
+// 参考图增删同步 state.referenceImages 与 recipe.auxiliary.referenceImageCount
+const handleReferenceImagesChange = (next: ReferenceImage[]) => {
+  onReferenceImagesChange(next);
+  if (recipe.auxiliary.referenceImageCount !== next.length) {
+    onRecipeChange({
+      ...recipe,
+      auxiliary: { ...recipe.auxiliary, referenceImageCount: next.length },
+    });
+  }
+};
+```
+
+```typescript
+// AppV2.tsx — 解构 setReferenceImages + 显式传递 referenceImages
+const { ..., setReferenceImages } = useEditor();
+
+const handleGeneratePreview = useCallback(() => {
+  if (!state.currentImage) { /* P0-01 防御 */ }
+  const result = compilePrompt(currentRecipe);
+  submitEdit(result.prompt, {
+    tool: currentRecipe.tool ?? undefined,
+    params: { recipe: currentRecipe, compiledVersion: result.version },
+    regions: currentRecipe.auxiliary.regions.length > 0 ? currentRecipe.auxiliary.regions : undefined,
+    referenceImages: state.referenceImages.length > 0 ? state.referenceImages : undefined,
+  });
+}, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, dispatch]);
+
+<ContextPanel
+  ...
+  referenceImages={state.referenceImages}
+  onReferenceImagesChange={setReferenceImages}
+  ...
+/>
+```
+
+**三层数据一致性**：
+1. `state.referenceImages`（来自 `useEditor`）= 用户实际增删的参考图数组；
+2. `recipe.auxiliary.referenceImageCount` = `state.referenceImages.length`，由 `handleReferenceImagesChange` 同步；
+3. 编译 Prompt 的【参考图】段由 `referenceImageCount > 0` 触发，输出"参考 N 张参考图进行创作"；
+4. `handleGeneratePreview` 显式传 `referenceImages: state.referenceImages.length > 0 ? state.referenceImages : undefined` 到 `submitEdit`，与 Recipe 计数同源。
+
+### 14.4 回归测试（19 用例）
+
+在 `src/client/src/components/v2/ContextPanel.test.tsx` 新增 3 个 describe 块，共 19 个回归用例：
+
+**P0-01: URL-only 结果不可提交旧 base64（6 用例）**：
+- URL-only 结果时 CTA 处于禁用态；
+- URL-only 结果时显示琥珀色"无法继续编辑"提示；
+- URL-only 结果时不显示"请先上传图片"提示（区分无图状态）；
+- URL-only 结果时点击 CTA 不触发 onSubmit；
+- 有 base64 时 URL 同时存在仍可提交（base64 优先）；
+- 完全无图无 URL 时 CTA 禁用并显示"请先上传图片"。
+
+**P0-02: V2 参考图入口与 Recipe/Prompt 一致（11 用例）**：
+- 可编辑任务渲染参考图入口（`data-testid="reference-images-section"`）；
+- project 任务不渲染参考图入口（不可编辑）；
+- 参考图入口显示"参考图"标题与 0/14 计数；
+- 已有参考图时显示对应计数；
+- 参考图入口存在"+ 添加参考图"按钮；
+- `referenceImageCount > 0` 时编译 Prompt 含【参考图】段；
+- `referenceImageCount = 0` 时编译 Prompt 不含【参考图】段；
+- 删除参考图时 `onReferenceImagesChange` 被调用；
+- 删除参考图导致计数变化时 `onRecipeChange` 被调用同步 `referenceImageCount`；
+- 计数未变化时不重复触发 `onRecipeChange`（避免冗余更新）。
+
+**P0 端到端：Recipe/Prompt/payload 三者一致（2 用例）**：
+- `referenceImageCount=N → 编译 Prompt 含"参考 N 张" → 提交时 referenceImages 长度=N`；
+- `referenceImageCount=0 → 编译 Prompt 无【参考图】段 → 提交时 referenceImages=空`。
+
+### 14.5 验证结果（8 条门禁重跑）
+
+全部 `EXIT_CODE = 0`：
+
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc -b --noEmit`（client） | exit 0 |
+| `npm test --prefix src/client` | 3 files / **94 passed**（首轮 76 + P0 新增 18） |
+| `npx tsc --noEmit`（server） | exit 0 |
+| `npm test --prefix src/server` | 2 files / 16 passed |
+| `npm test` | 5 files / **110 passed**（94 client + 16 server） |
+| `npm run build` | client `tsc -b && vite build` + server `tsc` 通过 |
+| `node scripts/check-lumen-collab.mjs` | `Lumen collaboration state and basic public-repo safety checks passed.` |
+
+证据文件已就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`。
+
+### 14.6 P0 返工修改文件清单
+
+**修改**：
+
+- `src/client/src/components/v2/ContextPanel.tsx` — P0-01：`canSubmit` 仅要求 `state.currentImage`，新增 `hasUrlOnlyResult` 与琥珀色提示；P0-02：新增 `referenceImages` / `onReferenceImagesChange` props 与 `ReferenceImages` 组件入口，`handleReferenceImagesChange` 同步 state 与 recipe 计数
+- `src/client/src/AppV2.tsx` — 解构 `setReferenceImages`；`handleGeneratePreview` 加 P0-01 防御检查 + P0-02 显式传 `referenceImages`；ContextPanel 传入 `referenceImages` / `onReferenceImagesChange`
+- `src/client/src/components/v2/ContextPanel.test.tsx` — `renderPanel` 适配新 props；新增 19 个 P0 回归用例（3 个 describe 块）
+
+**首轮文件保持不变**：`src/shared/types.ts`、`src/client/src/utils/recipe.ts`、`src/client/src/utils/recipe.test.ts`、10 个 recipe 面板组件、`TaskRail.tsx`、`ReferenceImages.tsx`、`useEditor.ts`。
+
+### 14.7 状态推进
+
+- `STATE.json`：`status: changes_requested → awaiting_gpt_acceptance`，`nextActor: trae → gpt`，`latestTraeReport` 指向本报告；
+- `SESSION-HANDOFF.md`：更新 P0 返工交接信息；
+- `PROJECT-MEMORY.md` / `DECISION-LOG.md` / `CHANGELOG.md`：追加 P0 返工记录；
+- 分支 `lumen/flow-001-trae` 追加 commit `feat(lumen-v2): FLOW-001 P0 fix` 并 push 到 GitHub。
+
+### 14.8 范围边界重申
+
+本轮严格遵守 FIX_PACKET 范围：
+- 仅修 P0-01 与 P0-02 两个端到端缺陷；
+- 仅补对应回归测试；
+- 未启动 STORAGE/JOB/VERSION；
+- 未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer 逻辑；
+- 未触碰 UI-001 已冻结的视觉证据。

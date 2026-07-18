@@ -3,12 +3,14 @@ import type {
   HistoryEntry,
   CompiledPrompt,
   EditRecipe,
+  ReferenceImage,
 } from '../../../../shared/types';
 import { V2_TASK_META, V2_TASK_EDITABLE } from '../../../../shared/types';
 import RecipePanel from './recipe/RecipePanel';
 import CompiledPromptPreview from './recipe/CompiledPromptPreview';
 import HistoryPanel from '../HistoryPanel';
-import { Sparkles, Loader2, History } from 'lucide-react';
+import ReferenceImages from '../ReferenceImages';
+import { Sparkles, Loader2, History, Image as ImageIcon } from 'lucide-react';
 
 interface ContextPanelProps {
   /** 当前任务对应的 Recipe（由 AppV2 根据 activeTask 选取） */
@@ -21,6 +23,10 @@ interface ContextPanelProps {
   state: EditorState;
   /** 主 CTA：触发 compilePrompt → submitEdit 闭环 */
   onSubmit: () => void;
+  /** 参考图列表（来自 useEditor.state.referenceImages） */
+  referenceImages: ReferenceImage[];
+  /** 参考图变更回调（同步 useEditor.state.referenceImages 与 recipe.auxiliary.referenceImageCount） */
+  onReferenceImagesChange: (images: ReferenceImage[]) => void;
   /** 历史回调（可选，未传则不渲染历史区） */
   onRestoreHistory?: (entry: HistoryEntry, index: number) => void;
   onViewHistory?: (entry: HistoryEntry) => void;
@@ -28,14 +34,16 @@ interface ContextPanelProps {
 }
 
 /**
- * V2 右栏上下文面板（FLOW-001 重写版本）。
+ * V2 右栏上下文面板（FLOW-001 重写版本 + P0 返工）。
  *
- * 设计要点（任务规格第 4 项）：
+ * 设计要点（任务规格第 4 项 + P0 返工）：
  * - 删除临时债务提示与旧 ParamPanel / PromptInput / 应用 / 提交入口；
  * - 只保留一个真实"生成预览"主 CTA（disabled 当 !canSubmit）；
  * - Recipe 编辑区由 RecipePanel 根据 taskId 自动分派；
  * - 完整 Prompt 默认折叠只读（CompiledPromptPreview）；
- * - History 区保留为只读记录，不影响主操作。
+ * - History 区保留为只读记录，不影响主操作；
+ * - P0-01：可提交判定要求 `state.currentImage`（base64），URL-only 结果不可继续编辑；
+ * - P0-02：恢复参考图入口，增删同步 state.referenceImages 与 recipe.auxiliary.referenceImageCount。
  */
 export default function ContextPanel({
   recipe,
@@ -43,16 +51,35 @@ export default function ContextPanel({
   compiled,
   state,
   onSubmit,
+  referenceImages,
+  onReferenceImagesChange,
   onRestoreHistory,
   onViewHistory,
   onDeleteHistory,
 }: ContextPanelProps) {
   const meta = V2_TASK_META[recipe.taskId];
   const editable = V2_TASK_EDITABLE[recipe.taskId];
-  const hasCurrentImage = !!(state.currentImage || state.currentImageUrl);
+  // P0-01: 可提交判定必须与 submitEdit 实际支持的输入类型 1:1 对齐。
+  // submitEdit 只发送 state.currentImage（base64）；URL-only 结果不可继续编辑。
+  const hasCurrentImage = !!state.currentImage;
+  const hasUrlOnlyResult = !state.currentImage && !!state.currentImageUrl;
   const canSubmit = editable && hasCurrentImage && !state.isLoading;
 
   const showHistory = !!onRestoreHistory && state.history.length > 0;
+
+  // P0-02: 参考图增删同步更新 state.referenceImages 与 recipe.auxiliary.referenceImageCount。
+  const handleReferenceImagesChange = (next: ReferenceImage[]) => {
+    onReferenceImagesChange(next);
+    if (recipe.auxiliary.referenceImageCount !== next.length) {
+      onRecipeChange({
+        ...recipe,
+        auxiliary: {
+          ...recipe.auxiliary,
+          referenceImageCount: next.length,
+        },
+      });
+    }
+  };
 
   return (
     <aside
@@ -75,6 +102,24 @@ export default function ContextPanel({
           onChange={onRecipeChange}
           disabled={state.isLoading || !editable}
         />
+
+        {/* P0-02: 参考图入口（唯一入口，可编辑任务均显示） */}
+        {editable && (
+          <section
+            className="mt-5"
+            data-reference-images-section
+            data-testid="reference-images-section"
+          >
+            <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1.5">
+              <ImageIcon className="w-3.5 h-3.5" />
+              参考图
+            </h3>
+            <ReferenceImages
+              images={referenceImages}
+              onImagesChange={handleReferenceImagesChange}
+            />
+          </section>
+        )}
 
         {/* 折叠只读编译 Prompt */}
         <div className="mt-4">
@@ -132,9 +177,15 @@ export default function ContextPanel({
             当前任务不发起编辑，请切换到其他任务
           </p>
         )}
-        {editable && !hasCurrentImage && (
+        {editable && !hasCurrentImage && !hasUrlOnlyResult && (
           <p className="mt-1.5 text-[11px] text-center text-gray-400 dark:text-gray-500">
             请先上传图片再生成预览
+          </p>
+        )}
+        {/* P0-01: URL-only 结果明确不可继续编辑提示 */}
+        {editable && !hasCurrentImage && hasUrlOnlyResult && (
+          <p className="mt-1.5 text-[11px] text-center text-amber-500 dark:text-amber-400">
+            当前结果为 URL，无法继续编辑，请下载后重新上传
           </p>
         )}
       </div>

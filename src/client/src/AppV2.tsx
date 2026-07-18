@@ -48,6 +48,7 @@ export default function AppV2() {
     setProvider,
     setModel,
     setShowApiSettings,
+    setReferenceImages,
   } = useEditor();
 
   // Set axios default auth header when token changes + handle auth 401 globally
@@ -175,7 +176,14 @@ export default function AppV2() {
   // - 不会绕过 recipe 直接调 /api/edit
   // - tool 来自 V2_TASK_TOOL_MAP[taskId]，由 defaultRecipe 写入 recipe.tool
   // - recipe 完整存入 params.recipe 供历史回放（不修改 /api/edit 协议）
+  // - P0-01 防御：URL-only 结果（currentImage=null）不发起编辑，避免提交旧 base64
+  // - P0-02：显式传递 referenceImages，保证编译 Prompt、Recipe 计数与请求 payload 一致
   const handleGeneratePreview = useCallback(() => {
+    // P0-01 防御性检查：可提交判定已在 ContextPanel 完成，此处再校验避免任何路径绕过
+    if (!state.currentImage) {
+      dispatch({ type: 'SET_ERROR', payload: '当前结果为 URL，无法继续编辑，请下载后重新上传' });
+      return;
+    }
     const result = compilePrompt(currentRecipe);
     submitEdit(result.prompt, {
       tool: currentRecipe.tool ?? undefined,
@@ -183,8 +191,11 @@ export default function AppV2() {
       regions: currentRecipe.auxiliary.regions.length > 0
         ? currentRecipe.auxiliary.regions
         : undefined,
+      referenceImages: state.referenceImages.length > 0
+        ? state.referenceImages
+        : undefined,
     });
-  }, [currentRecipe, submitEdit]);
+  }, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, dispatch]);
 
   // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
   // canExport 必须与 handleExport 支持的结果类型完全一致（仅 base64 / URL），
@@ -270,6 +281,8 @@ export default function AppV2() {
               compiled={compiled}
               state={state}
               onSubmit={handleGeneratePreview}
+              referenceImages={state.referenceImages}
+              onReferenceImagesChange={setReferenceImages}
               onRestoreHistory={restoreFromHistory}
               onViewHistory={viewHistory}
               onDeleteHistory={deleteHistory}

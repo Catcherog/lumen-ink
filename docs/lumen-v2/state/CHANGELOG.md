@@ -1,5 +1,33 @@
 # 10｜变更日志
 
+## 2026-07-18 - FLOW-001 P0 返工完成（awaiting_gpt_acceptance）
+
+- 触发：GPT 首轮验收 `MVP_FAIL`，附最小 FIX_PACKET（P0-01 URL-only 旧 base64 + P0-02 参考图入口缺失）；状态 `changes_requested / nextActor=trae`；
+- 返工范围：严格按 FIX_PACKET，未启动 STORAGE/JOB/VERSION，未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer；
+- P0-01 修复（`ContextPanel.tsx` + `AppV2.tsx`）：`canSubmit` 仅要求 `state.currentImage`，与 `submitEdit` 实际输入 1:1 对齐；新增 `hasUrlOnlyResult` 检测与琥珀色"当前结果为 URL，无法继续编辑，请下载后重新上传"提示；`handleGeneratePreview` 加防御性检查 `if (!state.currentImage) { dispatch SET_ERROR; return; }`；
+- P0-02 修复（`ContextPanel.tsx` + `AppV2.tsx`）：恢复 V2 唯一参考图入口（复用 Legacy `ReferenceImages` 组件，可编辑任务均显示，`data-testid="reference-images-section"`）；`handleReferenceImagesChange` 同步 `state.referenceImages` 与 `recipe.auxiliary.referenceImageCount`；`AppV2` 解构 `setReferenceImages`；`handleGeneratePreview` 显式传 `referenceImages: state.referenceImages.length > 0 ? state.referenceImages : undefined`；三层数据一致：state ↔ recipe 计数 ↔ 编译 Prompt【参考图】段 ↔ submitEdit payload；
+- 回归测试（`ContextPanel.test.tsx`）：新增 19 用例（6 P0-01 + 11 P0-02 + 2 端到端一致性），覆盖 URL-only 禁用/提示/不触发 onSubmit、base64 优先、参考图入口渲染/计数同步/删除回调/编译 Prompt 含【参考图】段、Recipe/Prompt/payload 三层一致；
+- 8 条门禁重跑全绿：client 94 tests（首轮 76 + P0 新增 18）、server 16 tests、root 110 tests、lint/typecheck/build/安全扫描通过；证据文件就地更新到 `docs/lumen-v2/evidence/FLOW-001/gate-*.txt`；
+- 状态推进：`STATE.json` → `awaiting_gpt_acceptance / nextActor=gpt`；`SESSION-HANDOFF.md` / `PROJECT-MEMORY.md` / `DECISION-LOG.md`（新增 D-030）/ 本日志同步更新；
+- 待 GPT 验收：按变更风险驱动，聚焦 P0 修复 diff、三层数据一致性、19 个回归用例与 8 条门禁结果；未变更的首轮文件与 UI-001 视觉证据不重审。
+
+## 2026-07-18 - 用户确认 PERSIST-001 合并执行方案
+
+- 用户确认 STORAGE-001 继续作为独立选型、PoC 与冻结门禁；
+- 原 VERSION-001 与 JOB-001 合并为 `PERSIST-001`，降低任务切换与重复接线成本；
+- 新增 `specs/09-PERSISTENT-GENERATION-CLOSURE-DESIGN.md`、`plans/PERSIST-001-IMPLEMENTATION-PLAN.md` 与 `tasks/backlog/PERSIST-001.md`；
+- VERSION-001 / JOB-001 标记为 superseded，仅保留审计；
+- `STATE.json.blockedTasks` 同步为 STORAGE-001 / PERSIST-001；FLOW-001 仍为 `changes_requested / nextActor=trae`，未提前激活后续任务。
+
+## 2026-07-18 - FLOW-001 GPT 首轮验收驳回（MVP_FAIL）
+
+- GPT 审查 commit `2574abf`，按风险驱动方式复核 FLOW-001 diff 与关键数据流；
+- 8 条门禁独立重跑全部 `EXIT_CODE=0`：client 76 tests、server 16 tests、root 92 tests、lint/typecheck/build/安全扫描通过；
+- P0 `FLOW001-P0-01`：URL-only 新结果显示后，下一次生成仍提交旧 `currentImage` base64；
+- P0 `FLOW001-P0-02`：V2 移除参考图入口，Recipe 的 `referenceImageCount` 与实际 payload 在真实 UI 中不可达；
+- 新增 `reviews/FLOW-001-GPT-REVIEW.md` 与最小 FIX_PACKET；
+- 状态改为 `changes_requested / nextActor=trae`，STORAGE-001 继续阻塞。
+
 ## 2026-07-17 - FLOW-001 实施完成（awaiting_gpt_acceptance，端到端扩大执行包）
 
 - 触发：UI-001 第三轮 GPT 验收 `MVP_PASS`，FLOW-001 激活为 `ready_for_trae / nextActor=trae`；GPT 指令要求一次完成 EditRecipe、五档参数、Prompt 编译器 v1、单 CTA、`/api/edit` 接线、自动化测试、证据与状态回传，不得拆成 UI/类型/编译器小批次；

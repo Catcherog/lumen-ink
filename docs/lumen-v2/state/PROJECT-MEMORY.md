@@ -105,21 +105,21 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `REPO-SEC-001` 公开仓库内容安全审查（GPT 已验收，Option A 已执行）。
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
-- [x] `FLOW-001` 配方和单一操作（Trae 端到端实施完成，`awaiting_gpt_acceptance / nextActor=gpt`，2026-07-17；92 tests passed）。
+- [ ] `FLOW-001` 配方和单一操作（GPT 首轮验收 `MVP_FAIL`，`changes_requested / nextActor=trae`；仅返工 URL 当前结果与参考图链路两个 P0）。
 - [ ] `STORAGE-001` 技术选型。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：FLOW-001（awaiting_gpt_acceptance）
+### 6.1 当前任务：FLOW-001（changes_requested）
 
 任务 ID：`FLOW-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`。
+状态：`changes_requested`，`nextActor=trae`。
 前置依赖：`UI-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-17）。
 任务目标：一次完成 EditRecipe、五档参数与保护项、Prompt 编译器 v1、V2 单一"生成预览"CTA、现有 `/api/edit` 请求接线、自动化测试和脱敏证据。
 任务文件：`docs/lumen-v2/tasks/active/FLOW-001.md`。
 实施约束：继续使用同步 `/api/edit`；不做 STORAGE/JOB/VERSION；保持 Provider 输出兼容；完整 Prompt 默认折叠只读。
-验收策略：变更风险驱动，只复核 FLOW-001 diff、关键行为与统一门禁；不重复未变更的 UI-001 视觉证据。
+验收结论：首轮 `MVP_FAIL`；工程门禁全绿，但 URL-only 结果后二次编辑提交旧 base64，且参考图在 V2/Recipe/请求真实链路中不可达。FIX_PACKET 见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md`。
 
 #### FLOW-001 实施摘要（2026-07-17）
 
@@ -151,8 +151,8 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 
 ```text
 BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
-  → FLOW-001 (awaiting_gpt_acceptance, 当前) → STORAGE-001 → VERSION-001 → JOB-001 → HARDEN-001
-支线: ROUTING-001 (前置 JOB-001)
+  → FLOW-001 (changes_requested, 当前) → STORAGE-001 → PERSIST-001 → HARDEN-001
+支线: ROUTING-001 (前置 PERSIST-001)
 模板: ACCEPTANCE-FIX (按需插入任意任务驳回场景)
 ```
 
@@ -163,13 +163,12 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 | 1 | UI-001 | V2 工作台外壳 | BASE-001 通过 | Gate UI-001：`VITE_EDITOR_V2` flag、顶栏不显示 Provider/模型、左栏文字标签、EMPTY/READY 布局、版本条仅占位、Legacy 不变 | 首轮验收驳回；仅返工顶栏空入口与任务栏越界路由/双高亮 |
 | 2 | FLOW-001 | 配方模型与单一生成操作 | UI-001 通过 | Gate FLOW-001：单一"生成预览"CTA、EditRecipe、五档参数、保护项默认开启、补充要求无独立提交、Prompt 编译器 v1 | 页面只剩一个模型调用主按钮；旧"应用/提交"全部移除或降级；Recipe 与编译器有单元测试 |
 | 3 | STORAGE-001 | 持久化与任务基础设施技术选型 | FLOW-001 通过 | Gate STORAGE-001：至少 2 个方案对比、PoC 证据、成本/迁移/备份/删除/回滚、Vercel 适配、本地开发替代 | GPT/用户冻结方案并输出 `docs/lumen-v2/storage-options.md`；不接入生产数据；IndexedDB 仅作缓存/PoC |
-| 4 | VERSION-001 | 项目、资产与不可变版本 | STORAGE-001 方案冻结 | 上传创建 Project+原图 Asset+V0；成功生成创建子 Version；版本条显示真实版本；查看/对比/激活/采用；刷新恢复；删除级联清理；旧 `edit_history` 先备份再显式导入 | history 不再被改名冒充 Version；旧数据不静默丢弃；不自动导入失效 URL |
-| 5 | JOB-001 | 可恢复生成任务 | VERSION-001 通过 | jobId、真实阶段（queued/uploading/analyzing/generating/postprocessing/saving/succeeded/failed/cancelled）、取消/重试、断线恢复、errorCode/diagnosticId；失败不创建成功版本；测试超时/额度/网络/保存失败 | `/api/edit` 转为受控兼容层并提供弃用计划；不再以 100 秒同步请求为唯一工作模式；禁止伪造百分比 |
-| 6 | HARDEN-001 | 安全、可靠性与发布 | 上述任务基本就绪 | Gate D：secret fail-fast、删除默认密码/JWT/加密 Key fallback、CORS allowlist、登录限流、上传 MIME/大小/像素/解码校验、Provider Key 不返回前端、Provider 配置迁离 `/tmp`、health 与日志脱敏、删除清理、安全回归测试、Production flag 切换与回滚文档 | S0=0、S1=0；S2 有明确清单和计划；任何 S0/S1 不得作为已知限制放行 |
+| 4 | PERSIST-001 | 项目版本与可恢复生成闭环 | STORAGE-001 方案冻结 | 上传创建 Project+原图 Asset+V0；Job 真实状态、取消/重试/刷新恢复；成功原子顺序 Asset→Version→Job succeeded；真实版本条、查看/对比/激活/采用；删除级联清理；旧 `edit_history` 先备份再显式导入 | 失败/取消不创建成功 Version；`/api/edit` 转为受控兼容层；禁止伪进度；旧数据不静默丢弃；详见 `plans/PERSIST-001-IMPLEMENTATION-PLAN.md` |
+| 5 | HARDEN-001 | 安全、可靠性与发布 | 上述任务基本就绪 | Gate D：secret fail-fast、删除默认密码/JWT/加密 Key fallback、CORS allowlist、登录限流、上传 MIME/大小/像素/解码校验、Provider Key 不返回前端、Provider 配置迁离 `/tmp`、health 与日志脱敏、删除清理、安全回归测试、Production flag 切换与回滚文档 | S0=0、S1=0；S2 有明确清单和计划；任何 S0/S1 不得作为已知限制放行 |
 
 支线任务：
 
-- **ROUTING-001（智能模型路由）**：前置为 JOB-001 通过。集中能力矩阵、质量/均衡/速度策略、fallbackChain、失败转移、高级模型抽屉、路由证据与成本档位。MVP 收尾判定：前端默认不显示 Provider/模型；能力矩阵有单元测试；不暴露 API Key；高级模型设置不回一级顶栏。
+- **ROUTING-001（智能模型路由）**：前置为 PERSIST-001 通过。集中能力矩阵、质量/均衡/速度策略、fallbackChain、失败转移、高级模型抽屉、路由证据与成本档位。MVP 收尾判定：前端默认不显示 Provider/模型；能力矩阵有单元测试；不暴露 API Key；高级模型设置不回一级顶栏。
 - **ACCEPTANCE-FIX（缺陷修复模板）**：非主线任务，用于任意任务驳回后的缺陷修复。规则：只修指定缺陷、先复现再修改、增加阻止回归的测试、不将 S0/S1 降级为"已知限制"、不顺手重构无关代码。
 
 ### 6.3 任务验收两种场景应对流程（通用模板，BASE-001 已按场景 A 处理完毕）
@@ -193,10 +192,18 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 
 ### 6.4 当前阻塞
 
-- FLOW-001 已完成端到端实施并提交 `awaiting_gpt_acceptance / nextActor=gpt`；GPT 验收通过前 STORAGE-001 / VERSION-001 / JOB-001 保持阻塞。
-- `STATE.json.blockedTasks` 仍列 STORAGE-001 / VERSION-001 / JOB-001；FLOW-001 验收通过后由 GPT 激活 STORAGE-001。
+- FLOW-001 P0 返工已交付（2026-07-18），状态 `awaiting_gpt_acceptance / nextActor=gpt`；STORAGE-001 / PERSIST-001 保持阻塞。
+- `STATE.json.blockedTasks` 仍列 STORAGE-001 / PERSIST-001；FLOW-001 通过后才由 GPT 激活 STORAGE-001。
 - 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
-- 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 VERSION-001）。
+- 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 PERSIST-001）。
+
+### 6.5 FLOW-001 P0 返工要点（2026-07-18）
+
+- **P0-01**：URL-only 结果不可继续编辑。`ContextPanel.canSubmit` 仅要求 `state.currentImage`；新增 `hasUrlOnlyResult` 显示琥珀色提示；`AppV2.handleGeneratePreview` 加防御检查。能力判定与 `submitEdit` 实际支持的输入类型 1:1 对齐。
+- **P0-02**：恢复 V2 参考图入口。`ContextPanel` 复用 Legacy `ReferenceImages` 组件；`handleReferenceImagesChange` 同步 `state.referenceImages` 与 `recipe.auxiliary.referenceImageCount`；`AppV2.handleGeneratePreview` 显式传 `referenceImages`。三层数据一致：state ↔ recipe 计数 ↔ 编译 Prompt【参考图】段 ↔ submitEdit payload。
+- **回归测试**：19 用例（6 P0-01 + 11 P0-02 + 2 端到端一致性）。
+- **8 条门禁**：全绿，client 94 tests + server 16 tests = 110 tests passed。
+- **范围遵守**：未启动 STORAGE/JOB/VERSION；未修改 `/api/edit` 协议、Provider 实现、`useEditor` reducer。
 
 ## 7. 仍需确认但不阻塞 UI-001
 

@@ -15,7 +15,7 @@ dist/index.html                   0.45 kB │ gzip:   0.30 kB
 dist/assets/index-CCwoNV0P.css   43.58 kB │ gzip:   8.45 kB
 dist/assets/index-BTgP9B6K.js   346.64 kB │ gzip: 105.90 kB
 
-[32m✓ built in 355ms[39m
+[32m✓ built in 218ms[39m
 
 > lumen-ink-server@0.1.0 build
 > tsc
