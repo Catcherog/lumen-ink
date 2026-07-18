@@ -1,0 +1,17 @@
+﻿
+> lumen-ink-server@0.1.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/360Downloads/Trae 项目/picture-edit/src/server[39m
+
+ [32m✓[39m dist/services/providers/operationType.test.js [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m services/providers/operationType.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m domain/persistence.contract.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 506[2mms[22m[39m
+     [33m[2m✓[22m[39m recovers records after adapter re-instantiation and cascades deletion [33m 401[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m19 passed[39m[22m[90m (19)[39m
+[2m   Start at [22m 13:53:00
+[2m   Duration [22m 1.17s[2m (transform 276ms, setup 0ms, import 372ms, tests 511ms, environment 0ms)[22m
+

@@ -106,20 +106,35 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `BASE-001` 工程基线修复（GPT 已验收，`MVP_PASS_WITH_DEBT`，2026-07-17；5 项 P2/Process 债务已登记 `docs/ai/TECH_DEBT.md`）。
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
-- [ ] `STORAGE-001` 技术选型（`ready_for_trae / nextActor=trae`）。
+- [ ] `STORAGE-001` 技术选型（Trae 已交付两方案对比 + 本地 PoC + 稳定接口契约 + 合约测试 + 8 门禁；`awaiting_user_decision / nextActor=user`，未冻结）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：STORAGE-001（ready_for_trae）
+### 6.1 当前任务：STORAGE-001（awaiting_user_decision）
 
 任务 ID：`STORAGE-001`
-状态：`ready_for_trae`，`nextActor=trae`（FLOW-001 第三轮验收通过后激活，2026-07-18）。
+状态：`awaiting_user_decision`，`nextActor=user`（Trae 已交付两方案对比 + 本地 PoC + 稳定接口契约 + 合约测试 + 8 门禁全绿，2026-07-18）。
 前置依赖：`FLOW-001` 已通过 GPT 验收（`MVP_PASS`，2026-07-18）。
 任务目标：比较至少两个完整持久化/任务基础设施方案，完成合成数据最小 PoC、评分矩阵、成本/迁移/备份/删除/回滚分析，并产出 PERSIST-001 所需的稳定接口与合约测试。
 任务文件：`docs/lumen-v2/tasks/active/STORAGE-001.md`。
+Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`。
+选型报告：`docs/lumen-v2/storage-options.md`（推荐 Vercel + Cloudflare R2 + Vercel Workflow，84/100 vs 82/100）。
+PoC 证据：`docs/lumen-v2/evidence/STORAGE-001/poc-result.md`（3 合约测试通过）。
+分支：`lumen/storage-001-trae`（commits `37c381d` → `d59abbd` → `13342b0` → 待提交状态推进 commit）。
 实施约束：本任务只做技术选型、接口契约与最小 PoC，不接入生产数据；未经 GPT/用户冻结不得进入 PERSIST-001。
-FLOW-001 验收摘要：commit `7fca3f5` 关闭第二轮两个 P0；GPT 独立 8 条门禁全绿（client 104 / server 16 / root 120），结论 `MVP_PASS`；详见 `docs/lumen-v2/reviews/FLOW-001-GPT-REVIEW.md` 第三轮验收。
+冻结状态：**未冻结**。`decision: pending_user_approval`。
+待用户决策：Cloudflare 账号 + Vercel Pro 升级 + 月度预算 + Vercel Workflow Beta 风险 + 不可逆迁移审批。
+
+#### STORAGE-001 实施摘要（2026-07-18）
+
+- 两方案对比：Vercel+R2+Workflow（84/100）vs Supabase all-in-one（82/100）；Vercel Blob 因不满足「私有对象/签名 URL」硬条件被拒绝。
+- 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`（官方 URL + 访问日期 2026-07-18）。
+- 稳定接口契约：`src/server/domain/persistence.ts` 冻结 9 个接口（ProjectRepository / AssetRepository / VersionRepository / JobRepository / ObjectStore / UnitOfWork / AuthThrottleRepository / PersistenceDependencies / JobExecutor）。
+- 本地 PoC：`src/server/infrastructure/persistence/local.ts` + `src/server/infrastructure/executor/local.ts`，证明适配器重建恢复、级联删除、UnitOfWork 回滚、ObjectStore 缺失键行为。
+- 合约测试：`src/server/domain/persistence.contract.test.ts` 3 用例全部通过。
+- 8 条门禁：client 104 / server 19 / root 123 tests passed，lint/typecheck/build/安全扫描全绿。
+- 范围遵守：未启动 PERSIST-001；未修改生产 Provider/存储实现；未写 `decision: frozen`。
 
 #### FLOW-001 实施摘要（2026-07-17）
 

@@ -1,5 +1,27 @@
 # 10｜变更日志
 
+## 2026-07-18 - STORAGE-001 Trae 实施完成（awaiting_user_decision）
+
+- 触发：FLOW-001 第三轮验收通过后激活 STORAGE-001（`ready_for_trae / nextActor=trae`）；用户授权连续执行 INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md Task 0—3，禁止启动 PERSIST-001。
+- 分支：`lumen/storage-001-trae`（基于 `lumen/flow-001-trae`）。
+- 提交：
+  - `37c381d` `docs(lumen-v2): accept FLOW-001 and start internal fast track`（Task 0 控制面，17 文件 +2170/-81）
+  - `d59abbd` `docs(lumen-v2): STORAGE-001 compare two complete stacks`（Task 1，2 文件 +549）
+  - `13342b0` `feat(lumen-v2): STORAGE-001 persistence contract PoC`（Task 2，7 文件 +937）
+  - 待提交 `feat(lumen-v2): STORAGE-001 decision and PoC`（Task 3，报告 + 状态推进 + 8 门禁证据）
+- 范围：仅执行 STORAGE-001；严格保留工作区无关修改（精确 `git add <path>`）；非必要 S2/S3 不登记新项；未启动 PERSIST-001；未写 `decision: frozen`。
+- 两方案对比：Vercel+R2+Workflow（84/100）vs Supabase all-in-one（82/100）；Vercel Blob 因不满足「私有对象/签名 URL」硬条件被拒绝（详见 `docs/lumen-v2/storage-options.md` §1）。
+- 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`（官方 URL + 访问日期 2026-07-18）。
+- 推荐方案：Vercel + Cloudflare R2 + Vercel Workflow（保留 Node.js/Express/Sharp 栈；Vercel Workflow 是唯一 durable execution；Edge Function 不支持 sharp）。
+- 稳定接口契约：`src/server/domain/persistence.ts` 冻结 9 个接口；PERSIST-001 必须消费不变（详见 D-036）。
+- 本地 PoC：`src/server/infrastructure/persistence/local.ts` + `src/server/infrastructure/executor/local.ts`，证明适配器重建恢复 + 级联删除 + UoW 回滚 + ObjectStore 缺失键行为。
+- 合约测试：`src/server/domain/persistence.contract.test.ts` 3 用例全部通过（TDD：先红后绿）。
+- 8 条门禁：client 104 / server 19（含 3 个新合约测试）/ root 123 tests passed；lint/typecheck/build/安全扫描全绿；证据文件 `docs/lumen-v2/evidence/STORAGE-001/gate-*.txt`。
+- 账号门槛：`account_gate: user`、`decision_authority: user`；待用户决策 5 项（Cloudflare 账号 + Vercel Pro 升级 + 月度预算 + Vercel Workflow Beta 风险 + 不可逆迁移审批）。
+- 决策日志：追加 D-035（推荐候选 1，提议待用户冻结）+ D-036（接口契约冻结）。
+- 状态推进：`STATE.json` → `awaiting_user_decision / nextActor=user`；`SESSION-HANDOFF.md` / `PROJECT-MEMORY.md` / `DECISION-LOG.md` / 本日志同步更新；`latestTraeReport` 指向 `STORAGE-001-TRAE-REPORT.md`；PERSIST-001 继续阻塞。
+- 下一步：用户决策账号与预算 → GPT 写入 `decision: frozen` 到 `storage-options.md` → STATE.json 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae` → 解除 PERSIST-001 阻塞。
+
 ## 2026-07-18 - FLOW-001 GPT 第三轮验收通过（MVP_PASS）
 
 - GPT 复核并确认本地/远端 commit `7fca3f5` 一致，`7601274` 已一并推送；

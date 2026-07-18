@@ -39,6 +39,10 @@
 
 | D-034 | 2026-07-18 | 冻结 | 内部稳定版优先采用“STORAGE 快速决策门 → PERSIST 连续扩大执行包 + 内部安全底线”的加速路径，非必要问题统一延期 | 用户明确选择优先让 3 人内部团队稳定使用；通过减少交接和延后 ROUTING/公开发布优化提速，同时保留数据一致性、恢复、删除和凭据安全硬门 | STORAGE 仍保留冻结门但压缩为两个方案与合成 PoC；PERSIST 加入最小内部安全单元；S0/S1 不得延期；完整 HARDEN 与 ROUTING 后移 |
 
+| D-035 | 2026-07-18 | 提议（待用户冻结） | STORAGE-001 推荐候选 1：Vercel + Cloudflare R2 + Vercel Workflow；评分 84/100 vs Supabase 82/100；Vercel Blob 因不满足「私有对象/签名 URL」硬条件被拒绝 | 保留现有 Node.js/Express/Sharp 栈；Vercel Workflow 是两候选中唯一 durable execution；Edge Function 不支持 sharp；80—100s Provider 调用在 Pro 800s maxDuration 内有充足余量 | `account_gate: user`、`decision_authority: user`；待用户决策 Cloudflare 账号 + Vercel Pro 升级 + 月度预算 + Workflow Beta 风险 + 不可逆迁移审批；`storage-options.md` 未写 `decision: frozen`；PERSIST-001 继续阻塞 |
+
+| D-036 | 2026-07-18 | 冻结 | STORAGE-001 冻结持久化与执行器稳定接口契约（9 个接口）：`ProjectRepository` / `AssetRepository` / `VersionRepository` / `JobRepository` / `ObjectStore` / `UnitOfWork` / `AuthThrottleRepository` / `PersistenceDependencies` / `JobExecutor` | PERSIST-001 必须消费这些接口不变；本地 PoC 已证明合约可实现（适配器重建恢复 + 级联删除 + UoW 回滚 + ObjectStore 缺失键行为，3 合约测试通过） | 接口签名不得在 PERSIST-001 期间重命名/删除/扩宽；新增字段必须可选且不破坏现有合约测试；生产 adapter（Vercel Postgres + R2 / Supabase）在 `src/server/infrastructure/persistence/` 与 `src/server/infrastructure/executor/` 注册 |
+
 ## 新增决策格式
 
 ```text

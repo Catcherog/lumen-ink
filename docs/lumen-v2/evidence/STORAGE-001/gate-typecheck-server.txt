@@ -1,0 +1,16 @@
+# Gate: server typecheck
+
+Command: `npx tsc --noEmit -p src/server/tsconfig.json`
+Date: 2026-07-18
+Exit code: 0
+
+Output: (empty — tsc emits no output on success)
+Result: PASS
+
+Notes: New files typechecked successfully:
+- src/server/domain/persistence.ts
+- src/server/domain/persistence.contract.test.ts
+- src/server/infrastructure/persistence/index.ts
+- src/server/infrastructure/persistence/local.ts
+- src/server/infrastructure/executor/index.ts
+- src/server/infrastructure/executor/local.ts

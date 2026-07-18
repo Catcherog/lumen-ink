@@ -6,7 +6,67 @@
 
 - 日期：2026-07-18
 - 当前任务：`STORAGE-001`
-- 状态：`ready_for_trae / nextActor=trae`
+- 状态：`awaiting_user_decision / nextActor=user`
+- 分支：`lumen/storage-001-trae`（基于 `lumen/flow-001-trae`）
+- Trae 报告：`docs/lumen-v2/reports/STORAGE-001-TRAE-REPORT.md`
+- 选型报告：`docs/lumen-v2/storage-options.md`（推荐 Vercel + Cloudflare R2 + Vercel Workflow，84/100 vs 82/100）
+- PoC 证据：`docs/lumen-v2/evidence/STORAGE-001/poc-result.md`（3 合约测试通过）
+- 主源登记：`docs/lumen-v2/evidence/STORAGE-001/source-register.md`
+- 冻结状态：**未冻结**。`decision: pending_user_approval`。
+- 待用户决策：Cloudflare 账号 + Vercel Pro 升级 + 月度预算 + Vercel Workflow Beta 风险 + 不可逆迁移审批。
+
+## STORAGE-001 提交记录
+
+| 顺序 | Commit | 说明 |
+|------|--------|------|
+| 0 | `37c381d` | `docs(lumen-v2): accept FLOW-001 and start internal fast track` |
+| 1 | `d59abbd` | `docs(lumen-v2): STORAGE-001 compare two complete stacks` |
+| 2 | `13342b0` | `feat(lumen-v2): STORAGE-001 persistence contract PoC` |
+| 3 | (待提交) | `feat(lumen-v2): STORAGE-001 decision and PoC`（含报告 + 状态推进 + 8 门禁证据） |
+
+## STORAGE-001 8 条门禁（全部 EXIT=0）
+
+| 命令 | 结果 |
+|------|------|
+| `npm run lint --prefix src/client` | 0 errors / 0 warnings |
+| `npx tsc --noEmit -p src/client/tsconfig.json` | exit 0 |
+| `npm test --prefix src/client` | 4 files / **104 passed** |
+| `npx tsc --noEmit -p src/server/tsconfig.json` | exit 0 |
+| `npm test --prefix src/server` | 3 files / **19 passed**（含 3 个新合约测试） |
+| `npm test` | 7 files / **123 passed**（104 client + 19 server） |
+| `npm run build` | client + server 通过 |
+| `node scripts/check-lumen-collab.mjs` | 通过 |
+
+证据文件：`docs/lumen-v2/evidence/STORAGE-001/gate-*.txt`。
+
+## STORAGE-001 范围遵守
+
+- ✅ 仅执行 STORAGE-001，未启动 PERSIST-001。
+- ✅ 严格保留工作区无关修改：精确 `git add <path>`。
+- ✅ 非必要 S2/S3 不登记新项（既有 6 项延期项保持不变）。
+- ✅ STORAGE 未经 GPT/用户冻结，未启动 PERSIST-001。
+- ✅ 未写 `decision: frozen`。
+
+## 用户决策项（待答复）
+
+1. 是否注册 Cloudflare 账号（R2 免费额度内不收费，需信用卡验证）。
+2. 是否将 Vercel 升级到 Pro（$20/月）。
+3. 月度预算上限（推荐 $20—25/月）。
+4. 是否接受 Vercel Workflow Beta 风险。
+5. 是否批准不可逆迁移（生产数据写入 R2 / Vercel Postgres 后回滚需手动导出）。
+
+可选：若拒绝候选 1 的账号门槛，可切换到候选 2（Supabase），但需接受 Edge Function 不支持 `sharp` 的限制。
+
+## 下一步
+
+1. 用户决策账号与预算 → GPT 写入 `decision: frozen` 到 `storage-options.md` 并更新 DECISION-LOG.md → STATE.json 推进至 `PERSIST-001 / ready_for_trae / nextActor=trae` → 解除 PERSIST-001 阻塞。
+2. 用户未决策前，PERSIST-001 保持阻塞；任何窗口不得提前实施 PERSIST-001。
+3. 冻结后执行 `INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 4—8（PERSIST-001 主体）+ Task 5—7（内部安全底线）。
+
+---
+
+## 历史快照（FLOW-001 已归档）
+
 - FLOW-001 验收 commit：`7fca3f5`（已 push，含 `7601274`）
 - 分支：`lumen/flow-001-trae`
 - Trae 报告：`docs/lumen-v2/reports/FLOW-001-TRAE-REPORT.md`（已追加 §15 第二轮 R2 返工记录）
