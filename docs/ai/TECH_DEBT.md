@@ -162,7 +162,7 @@
 
 ### DEBT-HARDEN-001A-04: 后续清理 dist 测试重复计数
 
-- Status: OPEN
+- Status: RESOLVED
 - Severity: P2
 - Introduced By: HARDEN-001A
 - Context: Gate 5 server tests 报告 `52 files / 514 tests` 包含 `dist/*.js` 编译产物重复计数。PERSIST-001 FINAL-CLOSURE-FIX-01 已清理 dist/ 后真实计数为 `224 tests / 25 files`；但 HARDEN-001A 证据中 `52 files / 514 tests` 仍包含 dist 重复（257 source + 257 dist）。报告与实际 unique 测试数不一致。
@@ -171,9 +171,11 @@
 - Resolve Before: HARDEN-001B 启动前或 HARDEN-001C 完成前。
 - Related Files:
   - src/server/dist/
+  - src/server/vitest.config.ts
   - docs/lumen-v2/evidence/HARDEN-001A/gate-results.md
   - docs/lumen-v2/reports/HARDEN-001A-TRAE-REPORT.md
-- Resolution Requirements: 在 HARDEN-001B 启动前清理 `src/server/dist/`；更新 `.gitignore` 确保 dist/ 不被 git 跟踪；HARDEN-001B/C 门禁证据中真实测试计数应为 `client 194 + server 224 + HARDEN-001B/C 新增`，不含 dist 重复。
+  - docs/lumen-v2/evidence/HARDEN-001B/gate-results.md
+- Resolution: 2026-07-21 HARDEN-001B 通过新建 `src/server/vitest.config.ts` 根本解决。`test.exclude` 显式包含 `'**/dist/**'`，使 vitest 不再扫描编译产物。HARDEN-001B 门禁真实计数：27 files / 269 tests（纯源码），无需手动清理 dist/。后续任务无需再依赖手动 `Remove-Item src/server/dist` 维护测试计数准确性。
 
 <!--
   说明：

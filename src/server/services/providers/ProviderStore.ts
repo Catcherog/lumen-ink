@@ -40,9 +40,14 @@ function findProjectRoot(startDir: string): string {
 }
 
 const projectRoot = findProjectRoot(__dirname);
-const DEFAULT_DATA_DIR = process.env.VERCEL
-  ? path.join('/tmp', 'lumen-ink-data')
-  : path.join(projectRoot, 'src', 'server', 'data');
+// D-011 (HARDEN-001B): Production Provider configuration must NOT depend on
+// `/tmp`. In deployed (env-managed) mode, ProviderStore reconstructs Provider
+// metadata from environment variables on each cold start and performs zero
+// filesystem operations (see loadFromEnv / save no-op). The dataDir below is
+// only used in local/test mode where the operator has approved a persistent
+// path; VERCEL must switch to env-managed mode via runtime config, not rely
+// on a /tmp fallback that disappears between cold starts.
+const DEFAULT_DATA_DIR = path.join(projectRoot, 'src', 'server', 'data');
 const DEFAULT_DATA_FILE = path.join(DEFAULT_DATA_DIR, 'providers.json');
 
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
@@ -206,8 +211,14 @@ export class ProviderStore {
       } catch (error) {
         // D-034 Task 7: use redactError so the log never echoes file
         // contents (which may contain encrypted apiKeys or paths).
+        // HARDEN-001B AC-B05: serialize the structured log as JSON so the
+        // redacted errorCode is actually visible in the console output
+        // (console.error on a Record<string, unknown> prints [object Object]).
         const redacted = redactError(error, { errorCode: 'PROVIDER_STORE_LOAD_FAILED' });
-        console.error('[ProviderStore] Failed to load providers.json', redacted.log);
+        console.error(
+          '[ProviderStore] Failed to load providers.json',
+          JSON.stringify(redacted.log)
+        );
         this.providers = [];
       }
     }
