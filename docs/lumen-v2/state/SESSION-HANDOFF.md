@@ -1,6 +1,101 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，POST-MERGE-PARALLEL-ACTIVATION-01 激活后）
+## 当前状态（2026-07-21，HARDEN-001A 实施完成，等待 GPT 证据审查）
+
+- 日期：2026-07-21
+- **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001A`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- 主任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`
+- **当前批次分支**：`lumen/harden-001a-trae`（基于 main `e08eb3e`）
+- **当前批次 Trae 报告**：`docs/lumen-v2/reports/HARDEN-001A-TRAE-REPORT.md`
+- **当前批次证据**：`docs/lumen-v2/evidence/HARDEN-001A/gate-results.md`
+- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`（未变化）
+- **并行任务 2（PERSIST-001，未归档）**：`gpt_evidence_review_pass / nextActor=gpt`（未变化）
+- blockedTasks：`["ROUTING-001"]`（HARDEN-001A 通过后仍禁止启动 ROUTING-001；需 HARDEN-001B/C 也通过）
+- `production_cron_registration`：`PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
+- `production_cron_execution`：`NOT_TESTED`（保持，不得提前改 PASS）
+- `mergeCompletedHead`：`f0e28dd`（保持，PERSIST-001 已合并到 main）
+- 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
+
+## HARDEN-001A 完成交接（2026-07-21，Trae → GPT）
+
+### 实施摘要
+
+- **任务 ID**：HARDEN-001A-AUTH-BOUNDARY（D-012 P0 认证边界）
+- **基线 commit**：`e08eb3e`（POST-MERGE-PARALLEL-ACTIVATION-01 激活 commit）
+- **分支**：`lumen/harden-001a-trae`
+- **风险等级**：High
+- **推荐路径**：R3，但当前阶段 Codex NOT_REQUIRED
+- **实施方式**：TDD specification-test 模式（先 red，再 green，无生产代码改动）
+
+### 关键产出
+
+1. **新增测试文件**：`src/server/security/auth.boundary.test.ts`（547 行，33 测试，覆盖 AC-A02 ~ AC-A13）
+2. **认证攻击面矩阵**：见 Trae 报告 §4.1，列出全部受保护路由 × 认证规则 × 授权规则 × 期望行为 × 风险
+3. **TDD red → green 证据**：
+   - Red: 1 failed | 32 passed (fixture bug — supertest IP 格式问题)
+   - Green: 33 passed (修正 fixture 预阻塞所有 3 种 IP 格式)
+4. **8 门禁全绿**：client 194 + server 514（含新 33）= 708 root tests passed
+5. **范围遵守**：
+   - 不修改 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置、ROUTING 代码
+   - 不修改生产认证代码（`middleware/auth.ts`、`routes/auth.ts`、`security/authThrottle.ts`、`config/runtime.ts` 全部未变）
+   - 仅新增测试文件 + 报告 + 证据 + 状态文件
+   - check-lumen-collab PASS（无真实秘密）
+
+### 关键发现
+
+PERSIST-001 已落地的 D-034 内部安全底线已满足 HARDEN-001A 任务卡 AC-A02 ~ AC-A13 全部认证边界要求：
+
+- ✅ `createAuthMiddleware` JWT 验证无 fallback（AC-A02/A03/A05/A07）
+- ✅ `createLogin` 密码匹配签 JWT，不匹配返回 null（AC-A05/A06）
+- ✅ `createAuthThrottle` HMAC-derived IP key + 固定窗口限流（AC-A08/A09）
+- ✅ `loadRuntimeConfig` deployed 模式 fail-fast 拒绝短 secret / 默认密码（AC-A06）
+- ✅ `redactString` / `redactValue` / `redactError` 凭据脱敏（AC-A10/A11）
+- ✅ 路由挂载集中化在 `src/server/index.ts`（AC-A13）
+- ✅ 无硬编码默认密码、无 NODE_ENV bypass、无 jwt.decode 路径、无验证失败 fallback
+
+D-012 P0 单工作区模型无 RBAC，因此 AC-A04（403 路径）以文档化形式覆盖，待 P1 RBAC 落地时再补充测试。
+
+### 状态推进
+
+- `status`: `ready_for_trae` → `awaiting_gpt_acceptance`
+- `nextActor`: `trae` → `gpt`
+- `latestTraeReport`: `docs/lumen-v2/reports/HARDEN-001A-TRAE-REPORT.md`
+- `lastUpdatedAt`: 2026-07-21
+- `lastUpdatedBy`: trae
+
+### GPT 下一步（证据审查）
+
+GPT 在新窗口启动后，按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板加载状态，然后：
+
+1. 读取本文件 + `docs/lumen-v2/reports/HARDEN-001A-TRAE-REPORT.md` + `docs/lumen-v2/evidence/HARDEN-001A/gate-results.md`
+2. 审查 `e08eb3e` → 分支 HEAD diff（仅含新增测试文件 + 报告/证据/状态文件）
+3. 核查 8 门禁真实输出（client 194 + server 514 = 708 root tests passed）
+4. 核查 TDD red → green 证据（fixture bug 修正，无生产代码改动）
+5. 核查范围遵守（grep 验证无 PERSIST/Cron/ROUTING 关键词）
+6. 核查测试 fixture 秘密安全（全部低于 check-lumen-collab 阈值）
+7. 评估是否需要 Codex 窄范围只读安全审计（任务卡允许但当前 NOT_REQUIRED）
+8. 给出验收结论：
+   - 通过 → 状态推进为下一批次 `HARDEN-001B ready_for_trae / nextActor=trae`
+   - 驳回 → 生成 FIX_PACKET，状态改为 `changes_requested / nextActor=trae`
+
+### Codex 升级条件（来自任务卡）
+
+本任务涉及认证、权限、JWT 和限流，满足 Codex 高风险使用条件。以下阶段调用一次窄范围 Codex：
+
+- **时机**：Trae 修复完成、GPT 第一轮证据审查后、合并前
+- **模式**：只读安全审计
+- **范围**：认证边界、权限区分、fallback、限流绕过、Secret 泄露和测试盲区
+- **禁止**：代替 Trae 做常规实现、扩大到 HARDEN-001B/C
+- **例外**：若 GPT 审查已经发现明确机械问题，先由 Trae 修复，不浪费 Codex 审计额度
+
+### 未归档说明
+
+HARDEN-001A 是 HARDEN-001 三个批次（A/B/C）中的第一个。即使 GPT 验收通过，HARDEN-001 任务整体不归档，需等 B/C 也通过后才归档。ROUTING-001 仍保持阻塞。
+
+---
+
+## 历史状态（2026-07-21，POST-MERGE-PARALLEL-ACTIVATION-01 激活后保留参考）
 
 - 日期：2026-07-21
 - **项目主任务（currentTask）**：`HARDEN-001`（`ready_for_trae / nextActor=trae`）
