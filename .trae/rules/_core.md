@@ -21,6 +21,8 @@ description: 项目核心规则 — 文件结构、AI工作流、三层体系、
 
 **禁止**：根目录散落文件、跨目录混放、嵌套超过3层。
 
+**根目录允许的文件**：`README.md`、构建工具配置（`package.json`、`tsconfig.json` 等）、`AGENTS.md`（AI 协作合约）。
+
 ---
 
 ## AI 工作流
@@ -107,3 +109,5 @@ finishing-a-development-branch（收尾集成）
 3. `_temp_script.md`（若涉及临时脚本，在 file_management 之后执行）
 4. `_memory.md`（会话启动时执行，优先于 experience）
 5. `_experience.md`（任务结束时执行，在 memory 写入之后）
+6. `_trae-execution.md`（Trae 收到任务卡 / 开始执行任务时生效，定义 Preflight、完成包、Codex 协作）
+7. `_lumen-collab.md`（Lumen V2 协作任务时生效，状态机与落盘位置优先于通用执行规则）
