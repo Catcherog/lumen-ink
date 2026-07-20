@@ -102,6 +102,18 @@
       "nextActor": "gpt",
       "unarchivedReason": "等 PROD-CRON-VERIFY 通过后才归档到 tasks/completed/",
       "notes": "Merged to main (f0e28dd); GPT evidence review pass on 2026-07-20; production_cron_* fields remain PENDING_POST_MERGE / NOT_TESTED"
+    },
+    {
+      "id": "JOB-PORTFOLIO-LUMEN-01",
+      "path": "docs/lumen-v2/tasks/active/JOB-PORTFOLIO-LUMEN-01.md",
+      "status": "ready_for_trae",
+      "nextActor": "trae",
+      "branch": "lumen/job-portfolio-lumen-01-trae",
+      "baselineCommit": "7be5f76",
+      "track": "B",
+      "scope": "Portfolio evidence collection + public access verification + persistence recovery verification; Track B for PROD-CRON-VERIFY (PENDING_PRODUCTION_VERIFICATION)",
+      "blocks": [],
+      "notes": "User-authorized parallel task; does not block HARDEN-001C GPT review; does not modify core business logic; only fixes directly blocking issues"
     }
   ],
   "requiredReads": [
