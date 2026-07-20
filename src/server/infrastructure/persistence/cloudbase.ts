@@ -61,6 +61,7 @@ import type {
   Version,
   GenerationJob,
   GenerationJobStatus,
+  JobPatch,
   ProjectRepository,
   AssetRepository,
   VersionRepository,
@@ -660,6 +661,76 @@ export function createCloudBasePersistence(
     };
   }
 
+  // --- Job patch three-state semantics (PERSIST-001 FINAL-CLOSURE) -------
+  //
+  // The Job patch must distinguish three states for every nullable field:
+  //   - field NOT in patch (undefined) → keep the existing DB value
+  //   - field in patch with null       → write NULL (explicit clear)
+  //   - field in patch with value      → write the new value
+  //
+  // The previous implementation used `patch.field ?? null` everywhere, which
+  // collapsed "not in patch" and "explicit null" into the same NULL — making
+  // it impossible to advance a Job's status without clobbering its lease
+  // token / worker id. The dynamic SET builder below only emits a SET
+  // clause for fields that are actually present in the patch, so absent
+  // fields keep their row values and present-null fields write NULL.
+  //
+  // `updatedAt` is always set (it's a metadata field, not a leased field),
+  // so callers may pass it through the patch for an explicit timestamp.
+
+  const JOB_PATCH_FIELDS: ReadonlyArray<{ jsField: keyof GenerationJob; sqlCol: string }> = [
+    { jsField: 'status', sqlCol: 'status' },
+    { jsField: 'providerId', sqlCol: 'provider_id' },
+    { jsField: 'model', sqlCol: 'model' },
+    { jsField: 'inputVersionId', sqlCol: 'input_version_id' },
+    { jsField: 'resultVersionId', sqlCol: 'result_version_id' },
+    { jsField: 'error', sqlCol: 'error' },
+    { jsField: 'errorCode', sqlCol: 'error_code' },
+    { jsField: 'workerId', sqlCol: 'worker_id' },
+    { jsField: 'leaseToken', sqlCol: 'lease_token' },
+    { jsField: 'leaseExpiresAt', sqlCol: 'lease_expires_at' },
+    { jsField: 'attempt', sqlCol: 'attempt' },
+    { jsField: 'parentJobId', sqlCol: 'parent_job_id' },
+    { jsField: 'updatedAt', sqlCol: 'updated_at' },
+  ];
+
+  /**
+   * Build a dynamic SET clause for a Job patch. Returns the joined SET
+   * fragment (without the leading "SET " keyword) and the param array.
+   * `paramOffset` is the number of positional params already used by the
+   * surrounding WHERE clause (e.g., 1 for `WHERE id = $1`, 2 for
+   * `WHERE id = $1 AND lease_token = $2`). The first SET param starts at
+   * `$paramOffset + 1`.
+   *
+   * `updatedAt` is forced to NOW() when not present in the patch so every
+   * update bumps the row's updated_at column.
+   */
+  function buildJobPatchSet(
+    patch: JobPatch,
+    paramOffset: number
+  ): { setFragment: string; params: unknown[] } {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+    let paramIdx = paramOffset;
+
+    let hasUpdatedAt = false;
+    for (const { jsField, sqlCol } of JOB_PATCH_FIELDS) {
+      if (patch[jsField] === undefined) continue;
+      if (jsField === 'updatedAt') hasUpdatedAt = true;
+      paramIdx += 1;
+      const value = patch[jsField] ?? null;
+      // lease_expires_at is a TIMESTAMPTZ column; pass ISO strings through
+      // unchanged so PostgreSQL can coerce them. NULL is also acceptable.
+      params.push(value);
+      setClauses.push(`${sqlCol} = $${paramIdx}`);
+    }
+    if (!hasUpdatedAt) {
+      setClauses.push('updated_at = NOW()');
+    }
+
+    return { setFragment: setClauses.join(', '), params };
+  }
+
   const jobs: JobRepository = {
     async create(input: GenerationJob): Promise<GenerationJob> {
       assertReady();
@@ -776,42 +847,20 @@ export function createCloudBasePersistence(
     },
     async update(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob> {
       assertReady();
       return withClient(async (client) => {
+        // Three-state patch semantics (PERSIST-001 FINAL-CLOSURE):
+        // only fields present in the patch are written; absent fields keep
+        // their row values, present-null fields write NULL. WHERE id = $1
+        // uses one positional param, so SET params start at $2.
+        const { setFragment, params } = buildJobPatchSet(patch, 1);
         const result = await client.query<JobRow>(
-          `UPDATE generation_jobs SET
-             status = COALESCE($2, status),
-             provider_id = COALESCE($3, provider_id),
-             model = COALESCE($4, model),
-             input_version_id = COALESCE($5, input_version_id),
-             result_version_id = COALESCE($6, result_version_id),
-             error = COALESCE($7, error),
-             error_code = COALESCE($8, error_code),
-             worker_id = COALESCE($9, worker_id),
-             lease_token = COALESCE($10, lease_token),
-             lease_expires_at = COALESCE($11, lease_expires_at),
-             attempt = COALESCE($12, attempt),
-             parent_job_id = COALESCE($13, parent_job_id),
-             updated_at = NOW()
+          `UPDATE generation_jobs SET ${setFragment}
            WHERE id = $1
            RETURNING *`,
-          [
-            id,
-            patch.status ?? null,
-            patch.providerId ?? null,
-            patch.model ?? null,
-            patch.inputVersionId ?? null,
-            patch.resultVersionId ?? null,
-            patch.error ?? null,
-            patch.errorCode ?? null,
-            patch.workerId ?? null,
-            patch.leaseToken ?? null,
-            patch.leaseExpiresAt ?? null,
-            patch.attempt ?? null,
-            patch.parentJobId ?? null,
-          ]
+          [id, ...params]
         );
         if (result.rows.length === 0) {
           throw new Error(`JOB_NOT_FOUND:${id}`);
@@ -822,45 +871,20 @@ export function createCloudBasePersistence(
     async updateIfClaimed(
       id: string,
       leaseToken: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       assertReady();
       return withClient(async (client) => {
+        // WHERE id = $1 AND lease_token = $2 AND status NOT IN (...)
+        // uses two positional params, so SET params start at $3.
+        const { setFragment, params } = buildJobPatchSet(patch, 2);
         const result = await client.query<JobRow>(
-          `UPDATE generation_jobs SET
-             status = COALESCE($3, status),
-             provider_id = COALESCE($4, provider_id),
-             model = COALESCE($5, model),
-             input_version_id = COALESCE($6, input_version_id),
-             result_version_id = COALESCE($7, result_version_id),
-             error = COALESCE($8, error),
-             error_code = COALESCE($9, error_code),
-             worker_id = COALESCE($10, worker_id),
-             lease_token = CASE WHEN $11::text IS NULL THEN NULL ELSE COALESCE(lease_token, lease_token) END,
-             lease_expires_at = CASE WHEN $12::timestamptz IS NULL THEN NULL ELSE COALESCE(lease_expires_at, lease_expires_at) END,
-             attempt = COALESCE($13, attempt),
-             parent_job_id = COALESCE($14, parent_job_id),
-             updated_at = NOW()
+          `UPDATE generation_jobs SET ${setFragment}
            WHERE id = $1
              AND lease_token = $2
              AND status NOT IN ('succeeded', 'failed', 'cancelled')
            RETURNING *`,
-          [
-            id,
-            leaseToken,
-            patch.status ?? null,
-            patch.providerId ?? null,
-            patch.model ?? null,
-            patch.inputVersionId ?? null,
-            patch.resultVersionId ?? null,
-            patch.error ?? null,
-            patch.errorCode ?? null,
-            patch.workerId ?? null,
-            patch.leaseToken ?? null,
-            patch.leaseExpiresAt ?? null,
-            patch.attempt ?? null,
-            patch.parentJobId ?? null,
-          ]
+          [id, leaseToken, ...params]
         );
         if (result.rows.length === 0) return null;
         return jobFromRow(result.rows[0]);
@@ -868,43 +892,19 @@ export function createCloudBasePersistence(
     },
     async updateIfActive(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       assertReady();
       return withClient(async (client) => {
+        // WHERE id = $1 AND status NOT IN (...) uses one positional param,
+        // so SET params start at $2.
+        const { setFragment, params } = buildJobPatchSet(patch, 1);
         const result = await client.query<JobRow>(
-          `UPDATE generation_jobs SET
-             status = COALESCE($2, status),
-             provider_id = COALESCE($3, provider_id),
-             model = COALESCE($4, model),
-             input_version_id = COALESCE($5, input_version_id),
-             result_version_id = COALESCE($6, result_version_id),
-             error = COALESCE($7, error),
-             error_code = COALESCE($8, error_code),
-             worker_id = CASE WHEN $9::text IS NULL THEN NULL ELSE COALESCE(worker_id, worker_id) END,
-             lease_token = CASE WHEN $10::text IS NULL THEN NULL ELSE COALESCE(lease_token, lease_token) END,
-             lease_expires_at = CASE WHEN $11::timestamptz IS NULL THEN NULL ELSE COALESCE(lease_expires_at, lease_expires_at) END,
-             attempt = COALESCE($12, attempt),
-             parent_job_id = COALESCE($13, parent_job_id),
-             updated_at = NOW()
+          `UPDATE generation_jobs SET ${setFragment}
            WHERE id = $1
              AND status NOT IN ('succeeded', 'failed', 'cancelled')
            RETURNING *`,
-          [
-            id,
-            patch.status ?? null,
-            patch.providerId ?? null,
-            patch.model ?? null,
-            patch.inputVersionId ?? null,
-            patch.resultVersionId ?? null,
-            patch.error ?? null,
-            patch.errorCode ?? null,
-            patch.workerId ?? null,
-            patch.leaseToken ?? null,
-            patch.leaseExpiresAt ?? null,
-            patch.attempt ?? null,
-            patch.parentJobId ?? null,
-          ]
+          [id, ...params]
         );
         if (result.rows.length === 0) return null;
         return jobFromRow(result.rows[0]);

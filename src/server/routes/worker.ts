@@ -1,13 +1,15 @@
 /**
- * PERSIST-001 P0-01C: explicit Vercel-cron worker recovery route.
+ * PERSIST-001 P0-01C + FINAL-CLOSURE AC-07/AC-08: explicit Vercel-cron
+ * worker recovery route.
  *
  * Mounted under `/api/worker/recover`. Authentication uses a separate
  * `CRON_SECRET` bearer token (Vercel Cron sends this header on every
  * invocation) — NOT the user JWT auth middleware, because cron ticks have
  * no user session.
  *
- * Endpoint:
- *   POST /api/worker/recover
+ * Endpoints (both reuse the same handler — PERSIST-001 FINAL-CLOSURE):
+ *   GET  /api/worker/recover    ← invoked by Vercel Cron (cron sends GET)
+ *   POST /api/worker/recover    ← safe for manual / admin invocation
  *     Authorization: Bearer <CRON_SECRET>
  *     → 200 { startedAt, finishedAt, workerId, discovered, recovered, skipped, failed }
  *     → 401 if CRON_SECRET missing or mismatched
@@ -21,9 +23,10 @@
  *     `acquireJobLease` step (only one worker instance wins).
  *  3. Executes the won Jobs to a terminal state within the request lifetime.
  *
- * This endpoint is invoked by Vercel Cron (see `vercel.json::crons`) on a
- * fixed schedule. It is also safe to invoke manually (e.g., from an admin
- * dashboard) by sending the CRON_SECRET bearer token.
+ * Vercel Cron invokes the configured `path` via GET, so the GET route is
+ * the production entrypoint. POST is retained for manual / admin triggers
+ * (e.g., an internal dashboard) — both verbs share the same handler so
+ * there is exactly one recovery code path to maintain.
  *
  * In local/dev mode, CRON_SECRET is typically unset. The route returns
  * 503 (recovery disabled) so a missing secret does not break the server.
@@ -66,7 +69,13 @@ export function createWorkerRouter(deps: WorkerRouterDeps): Router {
     return mismatch === 0;
   }
 
-  router.post('/recover', async (req: Request, res: Response) => {
+  /**
+   * Shared recovery handler for GET and POST. Vercel Cron sends GET to the
+   * configured cron path; POST is retained for manual / admin invocation.
+   * Both verbs MUST run identical recovery logic — there is exactly one
+   * recovery code path.
+   */
+  async function recoverHandler(req: Request, res: Response): Promise<void> {
     const expected = deps.cronSecret ?? process.env.CRON_SECRET;
     if (!expected) {
       res.status(503).json({
@@ -106,7 +115,13 @@ export function createWorkerRouter(deps: WorkerRouterDeps): Router {
         message,
       });
     }
-  });
+  }
+
+  // PERSIST-001 FINAL-CLOSURE AC-07: Vercel Cron invokes the configured
+  // path via GET, so GET must hit the real handler (not 404 / 405).
+  router.get('/recover', recoverHandler);
+  // POST is retained for manual / admin invocation — same handler.
+  router.post('/recover', recoverHandler);
 
   return router;
 }

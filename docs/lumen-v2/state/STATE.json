@@ -14,6 +14,9 @@
   "productionV2Flag": "off",
   "lastUpdatedAt": "2026-07-20",
   "lastUpdatedBy": "trae",
+  "finalClosureRound": "PERSIST-001-FINAL-CLOSURE",
+  "finalClosureScope": "AC-01 ~ AC-12 (JobPatch three-state semantics, lease lifecycle contract, transaction rollback regression, worker GET+POST route, Hobby config comment fix, state/evidence sync)",
+  "finalClosureGateResult": "8/8 PASS (194 client + 436 server = 630 root tests)",
   "requiredReads": [
     "AGENTS.md",
     "docs/lumen-v2/state/STATE.json",

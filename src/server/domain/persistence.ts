@@ -86,6 +86,44 @@ export interface GenerationJob {
   updatedAt: string;
 }
 
+/**
+ * Patch type for Job updates.
+ *
+ * Three-state semantics (PERSIST-001 FINAL-CLOSURE):
+ *  - field is ABSENT from the patch object → preserve the existing value
+ *  - field is PRESENT with value `null`    → write NULL to the database
+ *  - field is PRESENT with a value         → write the new value
+ *
+ * `Partial<GenerationJob>` cannot express the "present null" state because
+ * the domain type uses `field?: string` (i.e., `string | undefined`).
+ * `JobPatch` mirrors the optional fields but explicitly allows `null` so
+ * callers like `cancelJob` can clear `workerId`/`leaseToken`/`leaseExpiresAt`
+ * by passing `null` rather than `undefined` (which would mean "keep").
+ *
+ * Non-nullable fields (id, projectId, prompt, status, createdAt, updatedAt)
+ * do not allow `null` — only optional fields do.
+ */
+export type JobPatch = {
+  id?: string;
+  projectId?: string;
+  prompt?: string;
+  status?: GenerationJobStatus;
+  providerId?: string | null;
+  model?: string | null;
+  inputVersionId?: string | null;
+  resultVersionId?: string | null;
+  error?: string | null;
+  errorCode?: string | null;
+  idempotencyKey?: string | null;
+  workerId?: string | null;
+  leaseToken?: string | null;
+  leaseExpiresAt?: string | null;
+  attempt?: number | null;
+  parentJobId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 // --- Repositories ---------------------------------------------------------
 
 export interface ProjectRepository {
@@ -121,7 +159,7 @@ export interface JobRepository {
   /** Idempotent create: returns existing job if idempotencyKey matches. */
   createIdempotent(input: GenerationJob): Promise<{ job: GenerationJob; created: boolean }>;
   get(id: string): Promise<GenerationJob | null>;
-  update(id: string, patch: Partial<GenerationJob>): Promise<GenerationJob>;
+  update(id: string, patch: JobPatch): Promise<GenerationJob>;
   /**
    * Conditional update — only applies if the caller holds the current lease
    * AND the job is still in an active (non-terminal) state. Returns null if
@@ -134,7 +172,7 @@ export interface JobRepository {
   updateIfClaimed(
     id: string,
     leaseToken: string,
-    patch: Partial<GenerationJob>
+    patch: JobPatch
   ): Promise<GenerationJob | null>;
   /**
    * Conditional update — only applies if the job is still in an active
@@ -147,7 +185,7 @@ export interface JobRepository {
    */
   updateIfActive(
     id: string,
-    patch: Partial<GenerationJob>
+    patch: JobPatch
   ): Promise<GenerationJob | null>;
   /**
    * Atomic lease claim. Returns true if this caller acquired the lease;

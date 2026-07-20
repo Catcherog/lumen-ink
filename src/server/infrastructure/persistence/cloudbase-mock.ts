@@ -39,6 +39,7 @@ import type {
   Version,
   GenerationJob,
   GenerationJobStatus,
+  JobPatch,
   ProjectRepository,
   AssetRepository,
   VersionRepository,
@@ -480,7 +481,7 @@ export function createCloudBaseMockPersistence(
 
   // --- JobRepository ------------------------------------------------------
 
-  function applyJobPatch(row: JobRow, patch: Partial<GenerationJob>): JobRow {
+  function applyJobPatch(row: JobRow, patch: JobPatch): JobRow {
     return {
       id: row.id,
       project_id: row.project_id,
@@ -567,7 +568,7 @@ export function createCloudBaseMockPersistence(
 
     async update(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob> {
       const row = state.jobs[id];
       if (!row) throw new Error(`JOB_NOT_FOUND:${id}`);
@@ -579,7 +580,7 @@ export function createCloudBaseMockPersistence(
     async updateIfClaimed(
       id: string,
       leaseToken: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       const row = state.jobs[id];
       if (!row) return null;
@@ -596,7 +597,7 @@ export function createCloudBaseMockPersistence(
 
     async updateIfActive(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       const row = state.jobs[id];
       if (!row) return null;

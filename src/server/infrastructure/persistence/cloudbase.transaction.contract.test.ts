@@ -276,4 +276,88 @@ describe('PERSIST-001 P0-02A: UnitOfWork shares one PoolClient', () => {
     const commits = queryLog.filter((r) => r.sql === 'COMMIT');
     expect(commits).toHaveLength(1);
   });
+
+  // PERSIST-001 FINAL-CLOSURE AC-05 / AC-06: the production GenerationService
+  // atomic success boundary wraps Asset.create + Version.createIdempotent +
+  // Project.updatePointers + Job.updateIfClaimed in a single UoW. If the
+  // final Job conditional update returns null (lease was taken over by
+  // another worker between UoW begin and the conditional update), the
+  // service throws JOB_LEASE_EXPIRED inside the UoW so the entire
+  // transaction rolls back — no metadata leak survives. The result object
+  // is then compensated by the outer catch (covered separately by
+  // `GenerationService.p0.test.ts` P0-02 on the local adapter).
+  it('AC-05/AC-06: final Job conditional failure (lease lost) → ROLLBACK on the same client; no COMMIT', async () => {
+    const assetInput = {
+      id: 'asset-stale',
+      projectId: 'proj-1',
+      storageKey: 'proj-1/stale',
+      mimeType: 'image/png',
+      sizeBytes: 4,
+      createdAt: new Date().toISOString(),
+    };
+    const versionInput = {
+      id: 'ver-stale',
+      projectId: 'proj-1',
+      assetId: 'asset-stale',
+      label: 'v-stale',
+      createdAt: new Date().toISOString(),
+    };
+
+    await expect(
+      deps.unitOfWork.run(async () => {
+        await deps.assets.create(assetInput);
+        await deps.versions.createIdempotent('proj-1', 'idem-stale', versionInput);
+        await deps.projects.updatePointers('proj-1', { activeVersionId: 'ver-stale' });
+        // STALE_TOKEN triggers the FakeClient to return 0 rows, simulating
+        // a lease-token mismatch (the lease was taken over by another worker).
+        const updated = await deps.jobs.updateIfClaimed('job-1', 'STALE_TOKEN', {
+          status: 'succeeded',
+          resultVersionId: 'ver-stale',
+        });
+        if (!updated) {
+          // Mirror GenerationService.executeJob's behavior: throw inside
+          // the UoW so the transaction rolls back.
+          throw new Error('JOB_LEASE_EXPIRED: simulated final conditional failure');
+        }
+      })
+    ).rejects.toThrow('JOB_LEASE_EXPIRED');
+
+    // Verify ROLLBACK was issued on the same client that ran BEGIN.
+    const beginRecord = queryLog.find((r) => r.sql === 'BEGIN');
+    expect(beginRecord).toBeDefined();
+    const txClientId = beginRecord!.clientId;
+
+    const rollbackRecord = queryLog.find((r) => r.sql === 'ROLLBACK');
+    expect(rollbackRecord).toBeDefined();
+    expect(rollbackRecord!.clientId).toBe(txClientId);
+
+    // No COMMIT was issued.
+    expect(queryLog.find((r) => r.sql === 'COMMIT')).toBeUndefined();
+
+    // All four writes (Asset.create, Version.createIdempotent,
+    // Project.updatePointers, jobs.updateIfClaimed) used the same client as
+    // BEGIN — proving they were all in the same transaction and would be
+    // rolled back together at the PostgreSQL level.
+    const writeQueries = queryLog.filter(
+      (r) =>
+        r.sql.includes('INSERT INTO assets') ||
+        r.sql.includes('INSERT INTO versions') ||
+        r.sql.includes('INSERT INTO version_idempotency') ||
+        r.sql.includes('UPDATE projects') ||
+        r.sql.includes('UPDATE generation_jobs')
+    );
+    expect(writeQueries.length).toBeGreaterThanOrEqual(4);
+    for (const q of writeQueries) {
+      expect(q.clientId).toBe(txClientId);
+    }
+
+    // The final Job update used STALE_TOKEN and was issued on the tx client.
+    const jobUpdateRecord = queryLog.find(
+      (r) =>
+        r.sql.includes('UPDATE generation_jobs') &&
+        r.params?.[1] === 'STALE_TOKEN'
+    );
+    expect(jobUpdateRecord).toBeDefined();
+    expect(jobUpdateRecord!.clientId).toBe(txClientId);
+  });
 });

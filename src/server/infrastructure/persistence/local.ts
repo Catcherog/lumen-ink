@@ -50,6 +50,7 @@ import type {
   Version,
   GenerationJob,
   GenerationJobStatus,
+  JobPatch,
   ProjectRepository,
   AssetRepository,
   VersionRepository,
@@ -102,6 +103,40 @@ const TERMINAL_JOB_STATUSES: GenerationJobStatus[] = [
 
 function isTerminalStatus(status: GenerationJobStatus): boolean {
   return TERMINAL_JOB_STATUSES.includes(status);
+}
+
+/**
+ * Apply a three-state Job patch to a local Job row (PERSIST-001
+ * FINAL-CLOSURE):
+ *  - field ABSENT from patch → preserve the existing value
+ *  - field PRESENT with `null` → clear to `undefined` (the domain type
+ *    uses `field?: string`, so "no value" is `undefined`, NOT `null`)
+ *  - field PRESENT with a value → write the new value
+ *
+ * This mirrors the production SQL adapter's `buildJobPatchSet` so the
+ * local adapter stays semantically aligned with CloudBase PostgreSQL.
+ */
+function applyJobPatch(found: GenerationJob, patch: JobPatch): GenerationJob {
+  const updated: GenerationJob = {
+    ...found,
+    updatedAt: patch.updatedAt ?? new Date().toISOString(),
+  };
+  if (patch.status !== undefined) updated.status = patch.status;
+  if (patch.providerId !== undefined) updated.providerId = patch.providerId ?? undefined;
+  if (patch.model !== undefined) updated.model = patch.model ?? undefined;
+  if (patch.inputVersionId !== undefined) updated.inputVersionId = patch.inputVersionId ?? undefined;
+  if (patch.resultVersionId !== undefined) updated.resultVersionId = patch.resultVersionId ?? undefined;
+  if (patch.error !== undefined) updated.error = patch.error ?? undefined;
+  if (patch.errorCode !== undefined) updated.errorCode = patch.errorCode ?? undefined;
+  if (patch.idempotencyKey !== undefined) updated.idempotencyKey = patch.idempotencyKey ?? undefined;
+  if (patch.workerId !== undefined) updated.workerId = patch.workerId ?? undefined;
+  if (patch.leaseToken !== undefined) updated.leaseToken = patch.leaseToken ?? undefined;
+  if (patch.leaseExpiresAt !== undefined) updated.leaseExpiresAt = patch.leaseExpiresAt ?? undefined;
+  if (patch.attempt !== undefined) updated.attempt = patch.attempt ?? undefined;
+  if (patch.parentJobId !== undefined) updated.parentJobId = patch.parentJobId ?? undefined;
+  if (patch.createdAt !== undefined) updated.createdAt = patch.createdAt;
+  if (patch.updatedAt !== undefined) updated.updatedAt = patch.updatedAt;
+  return updated;
 }
 
 function cloneState(state: LocalState): LocalState {
@@ -384,18 +419,12 @@ export function createLocalPersistence(
 
     async update(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob> {
       await ensureLoaded();
       const found = state.jobs[id];
       if (!found) throw new Error(`JOB_NOT_FOUND:${id}`);
-      const updated: GenerationJob = {
-        ...found,
-        ...patch,
-        id: found.id,
-        projectId: found.projectId,
-        updatedAt: patch.updatedAt ?? new Date().toISOString(),
-      };
+      const updated = applyJobPatch(found, patch);
       state.jobs[id] = updated;
       await persist();
       return { ...updated };
@@ -404,7 +433,7 @@ export function createLocalPersistence(
     async updateIfClaimed(
       id: string,
       leaseToken: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       await ensureLoaded();
       const found = state.jobs[id];
@@ -415,13 +444,7 @@ export function createLocalPersistence(
       // the lease but a stale worker still presents the old token.
       if (isTerminalStatus(found.status)) return null;
       if (!found.leaseToken || found.leaseToken !== leaseToken) return null;
-      const updated: GenerationJob = {
-        ...found,
-        ...patch,
-        id: found.id,
-        projectId: found.projectId,
-        updatedAt: patch.updatedAt ?? new Date().toISOString(),
-      };
+      const updated = applyJobPatch(found, patch);
       state.jobs[id] = updated;
       await persist();
       return { ...updated };
@@ -429,7 +452,7 @@ export function createLocalPersistence(
 
     async updateIfActive(
       id: string,
-      patch: Partial<GenerationJob>
+      patch: JobPatch
     ): Promise<GenerationJob | null> {
       await ensureLoaded();
       const found = state.jobs[id];
@@ -438,13 +461,7 @@ export function createLocalPersistence(
       // This lets `cancelJob` atomically cancel AND revoke the lease
       // without racing a worker that completes the job concurrently.
       if (isTerminalStatus(found.status)) return null;
-      const updated: GenerationJob = {
-        ...found,
-        ...patch,
-        id: found.id,
-        projectId: found.projectId,
-        updatedAt: patch.updatedAt ?? new Date().toISOString(),
-      };
+      const updated = applyJobPatch(found, patch);
       state.jobs[id] = updated;
       await persist();
       return { ...updated };

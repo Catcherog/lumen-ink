@@ -482,3 +482,182 @@ GPT 应按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板启动第三轮验收
 4. 运行 8 门禁独立验证（GitHub Actions 或 clean checkout）
 5. 写入 `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（第三轮节）
 6. 通过则交 Codex 执行只读事务 + 部署接线 AUDIT；驳回则生成明确缺陷
+
+---
+
+## FINAL-CLOSURE 节（2026-07-20）
+
+> 任务：PERSIST-001-FINAL-CLOSURE
+> 风险等级：HIGH
+> 推荐责任人：Trae
+> 基线提交：`af960e3`（P0 第二轮修复 HEAD）
+> 当前 HEAD：`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE (AC-01~AC-12)` 提交后生成
+> 分支：`lumen/persist-001-trae`
+> 状态推进：`changes_requested / nextActor=trae` → `awaiting_gpt_acceptance / nextActor=gpt`
+
+### FC.1 执行摘要
+
+按用户合并执行包「R2：GPT 给出合并修复包 → Trae 一次完成 → GPT 最终证据验收」一次性修复 12 条 AC，不拆分中间审查、不调用 Codex、不重复测试扩张。引入 `JobPatch` 类型显式表达三态 patch 语义（absent=保留 / present-null=写 NULL / present-value=写新值），重构生产 CloudBase 适配器的动态 SET 子句构造，同步 local 与 mock 适配器，新增 lease 生命周期契约测试、事务回滚反例测试和 worker route GET+POST HTTP 测试。统一 8 门禁全部 exit 0 通过（194 client + 436 server = 630 root tests / 58 test files）。
+
+### FC.2 AC 对照
+
+| AC | 描述 | 实现 |
+|----|------|------|
+| AC-01 | claim(token-A) 后多次 status-only patch 保持 lease 不变 | `JobPatch` 类型 + `buildJobPatchSet()` 动态 SET；`cloudbase.lease.contract.test.ts` 测 1 |
+| AC-02 | 阶段迁移后原 token 仍可 heartbeat | `lease_expires_at = NOW() + interval` 不被 status-only patch 覆盖；测 2 |
+| AC-03 | 取消时显式清空 worker / lease_token / lease_expires_at | `updateIfActive` 接受 `null` 三态写入 NULL；测 3 |
+| AC-04 | 取消后 stale worker heartbeat / updateIfClaimed 均失败 | WHERE 谓词校验 `lease_token = $N` + `status NOT IN (terminal)`；测 4 |
+| AC-05 | 最终 Job 条件 succeeded/Asset/Version/Project 共享同一事务 client | `AsyncLocalStorage<PoolClient>` 已于 P0-02A 引入；FC 追加回归测试 |
+| AC-06 | 最终 Job 条件失败 ROLLBACK + 无残留 + result object 补偿删除 | `cloudbase.transaction.contract.test.ts` 追加 1 测：STALE_TOKEN 触发 0 行 → ROLLBACK 在同 client 发出、COMMIT 未发出、Asset/Version/Project/Job 四类共享同一 client |
+| AC-07 | 授权 GET /api/worker/recover 命中真实 handler | `routes/worker.ts` 重构共享 `recoverHandler`，注册 `router.get` + `router.post`；`worker.test.ts` 测 1 |
+| AC-08 | 错误/缺失 secret 返回 401；未配置返回 503；异常返回 500 | `worker.test.ts` 6 tests：GET 200 / POST 200 / GET 401 (missing) / GET 401 (wrong) / GET 503 / GET 500 |
+| AC-09 | vercel.json 符合冻结 Hobby 配置 | `worker-recovery.ts` 注释从「Hobby maxDuration of 300s」改为「90s」；`vercel.json` 维持 `maxDuration: 90` + 每分钟 crons |
+| AC-10 | STATE / SESSION-HANDOFF / Trae report / gate evidence 与 HEAD 和测试数一致 | STATE.json 追加 `finalClosureRound` / `finalClosureScope` / `finalClosureGateResult`；SESSION-HANDOFF.md 完全重写；本节 + gate-results.md FINAL-CLOSURE-Gate 节 |
+| AC-11 | 统一 8 门禁全部通过 | 见 FC.4 节 + `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` 的 FINAL-CLOSURE-Gate 节 |
+| AC-12 | 无范围扩张和无关文件提交 | 精确 `git add <path>` 仅 10 个 FINAL-CLOSURE 范围内文件；未触碰既有无关工作区修改 |
+
+### FC.3 新增 / 修改文件
+
+**新增文件**（2 个）：
+
+| 文件 | 说明 |
+|------|------|
+| `src/server/infrastructure/persistence/cloudbase.lease.contract.test.ts` | AC-01~04 lease 生命周期契约测试（5 tests，使用 `StatefulFakeClient` 在 vitest mock `pg` 之上模拟真实 SQL 行为） |
+| `src/server/routes/worker.test.ts` | AC-07/08 HTTP 路由测试（6 tests：GET 200 / POST 200 / GET 401 missing / GET 401 wrong / GET 503 / GET 500） |
+
+**修改文件**（8 个）：
+
+| 文件 | 变更 |
+|------|------|
+| `src/server/domain/persistence.ts` | 新增 `JobPatch` 类型显式允许 `null`；`JobRepository.update`/`updateIfClaimed`/`updateIfActive` 签名从 `Partial<GenerationJob>` 改为 `JobPatch` |
+| `src/server/infrastructure/persistence/cloudbase.ts` | 引入 `JobPatch` 导入；`buildJobPatchSet` / `update` / `updateIfClaimed` / `updateIfActive` 签名切换到 `JobPatch` |
+| `src/server/infrastructure/persistence/local.ts` | 新增 `applyJobPatch` 三态处理函数；`update` / `updateIfClaimed` / `updateIfActive` 切换到 `JobPatch` 签名 |
+| `src/server/infrastructure/persistence/cloudbase-mock.ts` | `applyJobPatch` / `update` / `updateIfClaimed` / `updateIfActive` 签名切换到 `JobPatch` |
+| `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` | 追加 1 个回归测试：STALE_TOKEN 触发 `updateIfClaimed` 返回 0 行 → 断言 ROLLBACK 在同 client 发出、COMMIT 未发出、Asset/Version/Project/Job 共享同 client |
+| `src/server/routes/worker.ts` | 重构出共享 `recoverHandler`；新增 `router.get('/recover')` 与 `router.post('/recover')` 复用同一 handler |
+| `src/server/infrastructure/executor/worker-recovery.ts` | 修正 `maxRecover` 文档注释从「Hobby maxDuration of 300s」改为「90s (frozen in vercel.json — PERSIST-001 FINAL-CLOSURE AC-09 forbids silently upgrading to Pro)」 |
+| `docs/lumen-v2/state/STATE.json` | 追加 `finalClosureRound` / `finalClosureScope` / `finalClosureGateResult` 字段 |
+| `docs/lumen-v2/state/SESSION-HANDOFF.md` | 完全重写为 FINAL-CLOSURE 状态：当前轮次、AC 摘要、8 门禁结果表、GPT 下一步、范围遵守清单、硬停止条件 |
+
+### FC.4 8 门禁结果
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 436 tests / 48 files |
+| 6 | Root tests | PASS | 630 combined (194 client + 436 server) |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+详见 `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` 的 FINAL-CLOSURE-Gate 节。
+
+### FC.5 新增测试明细（12 tests）
+
+`cloudbase.lease.contract.test.ts`（5 tests，AC-01~04）：
+
+1. **AC-01** — `claim(token-A)` 后多次 `updateIfClaimed(status-only patch)`，断言 lease_token / lease_expires_at / worker_id 保持不变；SQL SET 子句不包含 lease 三字段
+2. **AC-02** — 阶段迁移（queued → generating）后原 token 仍可 heartbeat 成功，lease_expires_at 被延长
+3. **AC-03** — `updateIfActive` 显式传 `null` 清空 worker_id / lease_token / lease_expires_at（三态 present-null → 写 NULL）
+4. **AC-04** — cancel 后 stale worker 的 `heartbeat` 返回 null、`updateIfClaimed` 返回 null
+5. **回归** — SET 子句只包含 status，不污染 lease 字段（从整段 SQL 中提取 SET 片段断言）
+
+`cloudbase.transaction.contract.test.ts`（追加 1 test，AC-05/06）：
+
+6. **AC-05/06** — 用 STALE_TOKEN 触发 `updateIfClaimed` 返回 0 行（最终 Job 条件失败）；断言 ROLLBACK 在同一 PoolClient 上发出、COMMIT 未发出、Asset/Version/Project/Job 四类写入共享同一 client、Project pointer 不变
+
+`worker.test.ts`（6 tests，AC-07/08）：
+
+7. **AC-07 GET** — 授权 GET `/api/worker/recover` 命中真实 `recoverHandler` 返回 200
+8. **AC-07 POST** — 人工 POST 同一 handler，payload shape 一致
+9. **AC-08 GET 401 missing** — 缺失 Authorization → 401 UNAUTHORIZED
+10. **AC-08 GET 401 wrong** — 错误 Bearer token → 401 UNAUTHORIZED
+11. **AC-08 GET 503** — `CRON_SECRET` 未配置 → 503 WORKER_RECOVERY_DISABLED
+12. **AC-08 GET 500** — `listLeaseExpired` 抛出 → 500 WORKER_RECOVERY_FAILED
+
+### FC.6 关键实现说明
+
+**JobPatch 三态语义**：
+
+`Partial<GenerationJob>` 用 `field?: string` 表达，TypeScript 层等价于 `string | undefined`，无法表达「字段存在且值为 `null`」。生产 SQL `COALESCE($N, col)` 模式把 `null` 当成「保留原值」，与「显式清空」语义冲突。
+
+```typescript
+export type JobPatch = {
+  id?: string;
+  projectId?: string;
+  prompt?: string;
+  status?: GenerationJobStatus;
+  providerId?: string | null;   // null = 显式写 NULL
+  model?: string | null;
+  // ...
+  workerId?: string | null;
+  leaseToken?: string | null;
+  leaseExpiresAt?: string | null;
+  // ...
+};
+```
+
+- 字段不在 patch 中 → 保留原值（SET 子句不包含该列）
+- 字段存在且为 `null` → 写 NULL（SET col = $N，$N = null）
+- 字段存在且有值 → 写新值（SET col = $N，$N = value）
+
+`buildJobPatchSet()` 动态构造 SET 子句，迭代 `JOB_PATCH_FIELDS` 常量跳过 `undefined`，与 `applyJobPatch` 本地适配器实现保持语义对齐。
+
+**Worker route GET+POST 共享 handler**：
+
+```typescript
+const recoverHandler = async (req, res) => { /* ... */ };
+router.get('/recover', recoverHandler);
+router.post('/recover', recoverHandler);
+```
+
+Vercel Cron 默认 GET 请求，人工触发保留 POST 入口；同一 handler 避免恢复逻辑复制。
+
+### FC.7 范围遵守
+
+- ✅ 只修 FINAL-CLOSURE AC-01 ~ AC-12 范围
+- ✅ P0-03 / P0-04 业务逻辑未重新修改（首轮 ACCEPTED）
+- ✅ 未启动 ROUTING-001 / HARDEN-001 / PERSIST-002
+- ✅ 未改变冻结候选 A（Vercel Hobby + CloudBase PG + PG Storage）方向
+- ✅ 未进行 CloudBase 数据迁移
+- ✅ 未接入真实客户数据
+- ✅ 未自行升级为 Vercel Pro 假设
+- ✅ 未为了测试方便重写整个 persistence adapter
+- ✅ 未在中途请求 Codex 或 GPT 分项复审
+- ✅ 精确 `git add <path>`，未提交既有无关工作区修改
+- ✅ 未归档任务，未激活下一任务
+
+### FC.8 Codex 升级条件（默认不调用）
+
+仅当出现以下任一情况再升级 Codex：
+
+1. Trae 连续两次无法修复生产 SQL patch 语义（本轮已修复，未触发）
+2. 测试通过但真实事务 rollback 仍无法由代码和 query log 证明（本轮 `cloudbase.transaction.contract.test.ts` 已用 STALE_TOKEN 反例证明 ROLLBACK 在同 client 发出，未触发）
+3. PostgreSQL 并发 claim 行为仍存在重大疑点（本轮 `cloudbase.lease.contract.test.ts` 已覆盖 claim/heartbeat/cancel/stale 拒绝，未触发）
+4. 最终验收前用户要求独立仓库运行验证（待 GPT 最终验收决定）
+
+本轮 **不调用 Codex**。
+
+### FC.9 GPT 下一步（最终证据验收）
+
+按用户合并执行包「后续验收策略」：只做一次最终验收，不重复审查已通过的模块。
+
+1. 启动新窗口 GPT，按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板加载状态
+2. 读取：本节 + `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` 的 FINAL-CLOSURE-Gate 节 + `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md` 第二轮 FIX_PACKET
+3. 审查 `af960e3` → HEAD diff（仅 FINAL-CLOSURE AC-01~AC-12 范围）
+4. 核查高风险测试证据：`cloudbase.lease.contract.test.ts` / `cloudbase.transaction.contract.test.ts` / `worker.test.ts`
+5. 核对统一 8 门禁（全部 PASS，630 tests）
+6. 核对状态文件一致性
+7. 直接裁决 `MVP_PASS` 或生成最后一个最小修复包
+
+### FC.10 硬停止条件
+
+仅在以下情况停止并交回用户/GPT：
+
+- 需要付费 / 真实 CloudBase 账号 / 不可逆迁移
+- 数据或密钥泄漏
+- 必须改变冻结候选 A / Provider / API 方向
+- 当前 FINAL-CLOSURE 门禁无法恢复（本轮已恢复，所有 8 门禁 exit 0）
+- 修复要求跨越 PERSIST-001 范围

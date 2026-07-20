@@ -57,7 +57,8 @@ export interface WorkerRecoveryOptions {
   /**
    * Max Jobs to process in a single recovery invocation. Default 10.
    * Caps runtime so a single cron tick stays well under the Vercel
-   * Hobby maxDuration of 300s.
+   * Hobby maxDuration of 90s (frozen in vercel.json — PERSIST-001
+   * FINAL-CLOSURE AC-09 forbids silently upgrading to Pro).
    */
   maxRecover?: number;
 }

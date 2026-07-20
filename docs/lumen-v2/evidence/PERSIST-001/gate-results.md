@@ -508,3 +508,181 @@ P0 fix round 2 commits touch only files required by FIX_PACKET `PERSIST001-P0-01
 - `src/server/types/pg.d.ts` — P0-01A made `pg` a real runtime dependency, ambient shim no longer needed
 
 No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
+
+---
+
+## FINAL-CLOSURE-Gate（2026-07-20）
+
+> Captured: 2026-07-20
+> Branch: `lumen/persist-001-trae`
+> Base commit: `af960e3`（P0 round 2 HEAD）
+> HEAD commit: `feat(lumen-v2): PERSIST-001 FINAL-CLOSURE (AC-01~AC-12)`（提交后生成）
+> Scope: AC-01 ~ AC-12 — JobPatch 三态语义 / lease 生命周期契约 / 事务回滚反例 / worker route GET+POST / Hobby 配置注释修正 / 状态记录同步
+
+### FINAL-CLOSURE-Gate 1: Client Lint
+
+```
+npm run lint --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+> client@0.0.0 lint
+> eslint .
+```
+
+No errors, no warnings. (Client code was not touched in FINAL-CLOSURE round.)
+
+### FINAL-CLOSURE-Gate 2: Client TypeScript
+
+```
+npx tsc --noEmit -p src/client/tsconfig.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+### FINAL-CLOSURE-Gate 3: Client Tests
+
+```
+npm test --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  10 passed (10)
+     Tests  194 passed (194)
+  Duration  ~2s
+```
+
+Test files (unchanged from previous rounds):
+- `src/utils/image.test.ts` (5 tests)
+- `src/utils/legacyHistory.test.ts` (20 tests)
+- `src/utils/recipe.test.ts` (54 tests)
+- `src/hooks/useEditor.test.ts` (9 tests)
+- `src/hooks/useProject.test.tsx` (9 tests)
+- `src/components/v2/JobStatusPanel.test.tsx` (26 tests)
+- `src/components/v2/VersionStrip.test.tsx` (16 tests)
+- `src/components/v2/LegacyHistoryImportDialog.test.tsx` (15 tests)
+- `src/components/v2/ProjectSwitcher.test.tsx` (20 tests)
+- `src/api/v2.test.ts` (20 tests)
+
+### FINAL-CLOSURE-Gate 4: Server TypeScript
+
+```
+npx tsc --noEmit -p src/server/tsconfig.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+JobPatch 类型引入后所有 `null` 字面量在 `updateIfActive` / `updateIfClaimed` / `update` patch 参数上类型合法。
+
+### FINAL-CLOSURE-Gate 5: Server Tests
+
+```
+npm test --prefix src/server
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  48 passed (48)
+     Tests  436 passed (436)
+  Duration  ~6s
+```
+
+新增 / 修改的测试文件（本轮 FINAL-CLOSURE 范围）：
+- `src/server/infrastructure/persistence/cloudbase.lease.contract.test.ts` — **新增** 5 tests（AC-01~04 lease 生命周期 + 三态 patch 语义）
+- `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` — **追加** 1 test（AC-05/06 STALE_TOKEN 触发 ROLLBACK 反例）
+- `src/server/routes/worker.test.ts` — **新增** 6 tests（AC-07/08 GET+POST 共享 handler + 200/401/503/500）
+
+新增测试总数：12（5 lease + 1 transaction + 6 worker）
+
+### FINAL-CLOSURE-Gate 6: Root Tests
+
+```
+npm test
+```
+
+Result: **PASS** (exit 0)
+
+```
+> lumen-ink@0.1.0 test
+> npm run test --prefix src/client && npm run test --prefix src/server
+
+Test Files  10 passed (10)         [client]
+     Tests  194 passed (194)
+
+Test Files  48 passed (48)         [server]
+     Tests  436 passed (436)
+```
+
+Combined root: **630 tests / 58 test files** (194 client + 436 server), all PASS.
+
+### FINAL-CLOSURE-Gate 7: Build
+
+```
+npm run build
+```
+
+Result: **PASS** (exit 0)
+
+```
+> lumen-ink@0.1.0 build
+> npm run build --prefix src/client && npm run build --prefix src/server
+
+client build: vite build → dist/ (PASS)
+server build: tsc → dist/ (PASS)
+```
+
+### FINAL-CLOSURE-Gate 8: check-lumen-collab
+
+```
+node scripts/check-lumen-collab.mjs
+```
+
+Result: **PASS** (exit 0, no secrets detected)
+
+```
+Scanning for: API keys, tokens, passwords, customer data, raw logs...
+No secrets detected. No unsanitized evidence detected.
+```
+
+### FINAL-CLOSURE Summary
+
+| # | Gate | Result | Count |
+|---|------|--------|-------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 436 tests / 48 files |
+| 6 | Root tests | PASS | 630 combined (194 client + 436 server) |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+**All 8 gates exit 0.** Unified single-run pass per AC-11. No per-fix intermediate gate runs during FINAL-CLOSURE (per user merged execution package).
+
+### FINAL-CLOSURE Scope Compliance
+
+**Committed files** (precise `git add <path>`, per AC-12):
+
+- `src/server/domain/persistence.ts`
+- `src/server/infrastructure/persistence/cloudbase.ts`
+- `src/server/infrastructure/persistence/local.ts`
+- `src/server/infrastructure/persistence/cloudbase-mock.ts`
+- `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts`
+- `src/server/infrastructure/persistence/cloudbase.lease.contract.test.ts` (new)
+- `src/server/routes/worker.ts`
+- `src/server/routes/worker.test.ts` (new)
+- `src/server/infrastructure/executor/worker-recovery.ts`
+- `docs/lumen-v2/state/STATE.json`
+- `docs/lumen-v2/state/SESSION-HANDOFF.md`
+- `docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md`
+- `docs/lumen-v2/evidence/PERSIST-001/gate-results.md`
+
+**Excluded** (existing unrelated workspace modifications, not in FINAL-CLOSURE scope):
+- All other `M` / `??` files in `git status` (e.g., `.gitignore`, `AGENTS.md`, `docs/ai/`, `.trae/rules/`, `docs/lumen-v2/specs/`, `docs/lumen-v2/plans/`, etc.)
+
+No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
