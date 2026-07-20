@@ -4,8 +4,9 @@
 
 - 日期：2026-07-20
 - 当前任务：`PERSIST-001`
-- 状态：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`
+- 状态：`gpt_evidence_review_pass / nextActor=gpt`（已合并到 main，等 GPT 确认合并 + 决定下一步推进）
 - GPT 证据验收结论：`EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`（2026-07-20）
+- 合并完成：fast-forward push `76d18f7..f0e28dd` 到 `main`（2026-07-20；非 force-push；main 是 lumen/persist-001-trae 的祖先）
 - 当前轮次：`PERSIST-001-FINAL-CLOSURE-FIX-01`（最终修复轮，AC-FIX-01 ~ AC-FIX-10）
 - 上一轮：`PERSIST-001-FINAL-CLOSURE`（HEAD `13ea500`，GPT 最终验收给出 FIX-01 修复包）
 - 本轮（FIX-01）基线：`13ea500`
@@ -57,6 +58,52 @@ GPT 基于本轮提交的完成摘要和验证证据，给出以下裁决（完�
 - `/api/worker/recover` 的运行时间和 HTTP 结果 + Function Logs
 - 无鉴权、环境变量或超时错误的证明
 - 状态字段由 `PENDING_POST_MERGE` 更新为最终状态的 diff
+
+## 合并完成（2026-07-20）
+
+PERSIST-001 已合并到 `main`：
+
+- **合并方式**：fast-forward push（`76d18f7..f0e28dd`，非 force-push）
+- **远端 main HEAD**：`f0e28dd`
+- **本地 main HEAD**：`f0e28dd`（已同步）
+- **合并 commit**：`f0e28dd docs(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01 GPT EVIDENCE_REVIEW_PASS verdict archive`
+- **Vercel Production Deployment**：应已触发（需用户在 Vercel Dashboard 确认 Ready）
+- **Production Cron 注册**：应在 Production Deployment Ready 后自动注册（需用户验证）
+- **PROD-CRON-VERIFY 任务**：已创建 `docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`（待 GPT 激活）
+- **状态字段**：`production_cron_registration` / `production_cron_execution` 保持 `PENDING_POST_MERGE` / `NOT_TESTED`，不得提前改 VERIFIED
+
+### 合并后的状态字段
+
+- `status: gpt_evidence_review_pass`（保持，等 PROD-CRON-VERIFY 通过后才 complete）
+- `nextActor: gpt`（让 GPT 确认合并 + 决定下一步）
+- `mergeCompletedDate: 2026-07-20`
+- `mergeCompletedHead: f0e28dd`
+- `prodCronVerifyTask: docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`
+
+## GPT 下一步（合并确认 + 项目推进）
+
+GPT 在新窗口启动后，需要：
+
+1. **确认合并结果**：
+   - 读取 `STATE.json` 确认 `mergeCompletedHead: f0e28dd`
+   - 确认远端 `main` 已更新（可通过 `git ls-remote origin main` 或 GitHub 页面）
+   - 确认 Vercel Production Deployment 已触发（由用户在 Vercel Dashboard 确认）
+
+2. **决定 PROD-CRON-VERIFY 激活方式**：
+   - PROD-CRON-VERIFY 需要用户在 Vercel Dashboard 操作（Trae 无凭据）
+   - 建议状态：`awaiting_user_decision / nextActor=user`（用户执行 Production 验证）
+   - 或并行推进 HARDEN-001（不依赖 Production Cron 验证）
+
+3. **快速推进项目**（用户明确要求）：
+   - 选项 A：激活 PROD-CRON-VERIFY（awaiting_user_decision），等用户验证后再归档 PERSIST-001
+   - 选项 B：并行激活 HARDEN-001（安全/可靠/发布），PROD-CRON-VERIFY 作为独立门禁异步等待
+   - 选项 C：先激活 ROUTING-001（智能模型路由，前置 PERSIST-001 已满足）
+   - GPT 根据风险评估决定优先级
+
+4. **PERSIST-001 归档条件**：
+   - PROD-CRON-VERIFY 通过（`production_cron_*` 改为 `VERIFIED`）
+   - 才能 PERSIST-001 归档到 `tasks/completed/`
+   - 才能正式解除 HARDEN-001 / ROUTING-001 的阻塞
 
 ## 本轮修复摘要（FINAL-CLOSURE-FIX-01）
 

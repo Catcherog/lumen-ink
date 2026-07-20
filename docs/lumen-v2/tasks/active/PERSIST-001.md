@@ -1,7 +1,7 @@
 # Trae Prompt｜PERSIST-001 项目版本与可恢复生成闭环
 
 > 前置条件：FLOW-001 已通过；STORAGE-001 已由 GPT 于 2026-07-18 冻结为候选 A。
-> 当前状态：`ready_for_trae / nextActor=trae`。按 D-040 先完成契约收敛门，再连续实施完整扩大包。
+> 当前状态：`changes_requested / nextActor=trae`。按首轮 GPT FIX_PACKET 只修 4 个 P0 及直接回归。
 
 ## 目标
 
@@ -39,3 +39,34 @@
 以设计第 9 节、实施计划 Task 11—12 和 `07-ACCEPTANCE-PLAN.md` 的 Gate PERSIST-001 验收。任何失败/取消创建成功 Version、刷新不可恢复、删除残留资产或伪进度均为 P0。
 
 内部稳定版还必须通过 `INTERNAL-FAST-TRACK-IMPLEMENTATION-PLAN.md` Task 5—8 的安全矩阵。默认密码/JWT fallback、凭据/图片泄漏、未授权访问或上传校验绕过均为 P0，不得登记为延期。
+
+## Review History
+
+### 2026-07-18｜GPT 首轮验收
+
+- 结论：`MVP_FAIL`
+- 审查目标：`6eaec946..4e3a125`
+- P0：缺少 CloudBase 生产 adapter/真实 executor；最终 lease 失败污染 Version；执行中取消可被覆盖为 succeeded；执行忽略冻结的 `inputVersionId`。
+- FIX_PACKET：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`
+- 状态：`changes_requested / nextActor=trae`；不得激活后续任务。
+
+### 2026-07-20｜P0 修复轮 / P0 修复轮 2 / FINAL-CLOSURE / FINAL-CLOSURE-FIX-01
+
+- **P0 修复轮**（HEAD `cf0a080`）：修复 P0-01~04；GPT 二轮仍 `MVP_FAIL`。
+- **P0 修复轮 2**（HEAD `af960e3`）：修复 P0-01A~C / P0-02A / STATE-01；GPT 给出 FINAL-CLOSURE 修复包。
+- **FINAL-CLOSURE**（HEAD `13ea500`）：一次性修复 AC-01~12（JobPatch 三态语义、lease 生命周期契约、事务回滚回归、worker GET+POST 路由、Hobby 配置注释修正、状态/证据同步）；GPT 给出 FIX-01 修复包。
+- **FINAL-CLOSURE-FIX-01**（HEAD `1aeec8e` + `08818c6` backfill + `f0bdbed` Vercel 验证归档）：修复 AC-FIX-01~10（vercel.json cron daily、maxDuration Fluid Compute 注释、状态文件不一致修正、事务测试证据描述修正、统一 8 门禁真实输出、Vercel 部署验证）。
+- 8 门禁：全绿（client 194 + server 224 = root 418 tests；dist/ 已清理）。
+- 审查文件：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（追加 EVIDENCE_REVIEW_PASS 节）。
+- 状态：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge` → 合并完成后 `nextActor=gpt`。
+- 详见 `docs/lumen-v2/state/SESSION-HANDOFF.md` 和 `docs/lumen-v2/state/CHANGELOG.md`。
+
+### 2026-07-20｜合并到 main（fast-forward push）
+
+- 合并方式：fast-forward push `76d18f7..f0e28dd`（非 force-push；main 是 lumen/persist-001-trae 的祖先）。
+- 远端 main HEAD：`f0e28dd`；本地 main HEAD：`f0e28dd`（已同步）。
+- 包含 commit：`6eaec94..f0e28dd`（20 个 commit，覆盖 PERSIST-001 全部实施 + 修复轮 + Verdict 归档）。
+- PROD-CRON-VERIFY 任务创建：`docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`（pending，待 GPT 激活；Trae 不得自行激活）。
+- 状态字段：`production_cron_registration` / `production_cron_execution` 保持 `PENDING_POST_MERGE` / `NOT_TESTED`，不得提前改 VERIFIED。
+- 状态：`gpt_evidence_review_pass / nextActor=gpt`，等 GPT 确认合并 + 决定下一步推进（用户明确要求"快速推进项目"）。
+- PERSIST-001 在 PROD-CRON-VERIFY 通过前**不归档**到 `tasks/completed/`。

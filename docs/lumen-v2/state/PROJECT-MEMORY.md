@@ -107,25 +107,42 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
-- [ ] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；Production Cron 注册与运行仍为合并后强制门禁）。
+- [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，等 GPT 确认合并 + 决定下一步推进；Production Cron 注册与运行仍为合并后强制门禁，由独立任务 `PROD-CRON-VERIFY` 验证；PERSIST-001 在该任务通过前不归档）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：PERSIST-001（awaiting_gpt_acceptance / 等待 GPT 验收）
+### 6.1 当前任务：PERSIST-001（gpt_evidence_review_pass / 已合并到 main / 等 GPT 推进）
 
 任务 ID：`PERSIST-001`
-状态：`awaiting_gpt_acceptance`，`nextActor=gpt`（Trae 实施完成，2026-07-18）。
+状态：`gpt_evidence_review_pass`，`nextActor=gpt`（GPT 证据验收通过 + 已合并到 main，2026-07-20）。
+合并：fast-forward push `76d18f7..f0e28dd` 到 `main`（非 force-push；main 是 lumen/persist-001-trae 的祖先）。
+reviewVerdict：`MVP_PASS_WITH_POST_MERGE_GATE`（合并后强制门禁：Production Cron 注册 + 运行验证）。
 前置依赖：FLOW-001 与 STORAGE-001 均已通过 GPT 验收。
 任务目标：在一个任务/分支/最终验收周期内完成 D-040 契约收敛、CloudBase 生产适配、Project/Asset/V0、不可变 Version、可恢复 GenerationJob、刷新恢复、取消/重试、删除、旧 history 显式导入和内部安全底线。
-任务文件：`docs/lumen-v2/tasks/active/PERSIST-001.md`。
+任务文件：`docs/lumen-v2/tasks/active/PERSIST-001.md`（在 PROD-CRON-VERIFY 通过前不归档到 `tasks/completed/`）。
 实施计划：`docs/lumen-v2/plans/PERSIST-001-IMPLEMENTATION-PLAN.md`。
 Trae 报告：`docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md`。
-证据目录：`docs/lumen-v2/evidence/PERSIST-001/`（gate-results.md + base-commit.txt）。
-分支：`lumen/persist-001-trae`（基于 `6eaec946` STORAGE-001 验收后；12 commits `51ac5f9` → `ceaa9db` + 本提交）。
-累计变更：54 文件，+10945/-550。
-8 门禁：全绿（client 194 tests / server 198 tests / root 392 combined / lint 0 errors / build / check-lumen-collab）。
+GPT 验收：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（含首轮 MVP_FAIL → P0 修复轮 → P0 修复轮 2 → FINAL-CLOSURE → FINAL-CLOSURE-FIX-01 EVIDENCE_REVIEW_PASS 节）。
+证据目录：`docs/lumen-v2/evidence/PERSIST-001/`（gate-results.md + base-commit.txt + Vercel 验证归档）。
+分支：`lumen/persist-001-trae`（已合并到 main，HEAD `f0e28dd`）。
+累计变更：54 文件，+10945/-550（首轮实施）+ 多轮修复。
+8 门禁：全绿（client 194 tests / server 224 tests / root 418 combined / lint 0 errors / build / check-lumen-collab；dist/ 已清理）。
 范围遵守：单任务/单分支/单验收周期；D-040 契约收敛完成；未启动 ROUTING / STORAGE-002 / PERSIST-002；未改变冻结的 Provider/API/存储决策；保留工作区既有无关修改；未提交密钥或未脱敏证据。
+
+#### 合并后强制门禁（PROD-CRON-VERIFY）
+
+PROD-CRON-VERIFY 任务文件：`docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`（pending，待 GPT 激活）。
+- `production_cron_registration`：`PENDING_POST_MERGE`（Vercel Cron 只在 Production Deployment 上注册，Preview 分支不注册；合并后由 Vercel 自动注册）
+- `production_cron_execution`：`NOT_TESTED`（合并前不可测）
+- 通过条件：Production Deployment Ready + Cron Jobs 页面有 `/api/worker/recover` `0 0 * * *` 记录 + 首次调度或手动调用 HTTP 200 + Function Logs 无错误
+- 通过后才能将 `production_cron_*` 字段改为 `VERIFIED`，才能将 PERSIST-001 归档到 `tasks/completed/`，才能正式解除 HARDEN-001 / ROUTING-001 阻塞
+
+#### GPT 下一步（用户明确要求"快速推进项目"）
+
+1. 确认合并结果（`mergeCompletedHead: f0e28dd`，远端 `main` 已更新）
+2. 决定 PROD-CRON-VERIFY 激活方式（用户在 Vercel Dashboard 操作 / 并行推进 HARDEN-001）
+3. 选择推进路径：选项 A 激活 PROD-CRON-VERIFY；选项 B 并行激活 HARDEN-001；选项 C 激活 ROUTING-001（前置 PERSIST-001 已满足）
 
 #### PERSIST-001 实施摘要（2026-07-18）
 

@@ -1,5 +1,19 @@
 # 10｜变更日志
 
+## 2026-07-20 - PERSIST-001 合并到 main（fast-forward push）
+
+- 合并方式：fast-forward push `76d18f7..f0e28dd`（非 force-push，main 是 lumen/persist-001-trae 的祖先）
+- 远端 main HEAD：`f0e28dd`
+- 本地 main HEAD：`f0e28dd`（已同步）
+- 包含 commit：`6eaec94..f0e28dd`（20 个 commit，覆盖 PERSIST-001 全部实施 + 修复轮 + Verdict 归档）
+- PROD-CRON-VERIFY 任务创建：`docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`（待 GPT 激活）
+- 状态字段更新：
+  - `nextActor: user_or_trae_for_merge` -> `gpt`
+  - 新增 `mergeCompletedDate: 2026-07-20` / `mergeCompletedHead: f0e28dd` / `mergeCompletedBranch: lumen/persist-001-trae` / `prodCronVerifyTask`
+  - `production_cron_registration` / `production_cron_execution` 保持 `PENDING_POST_MERGE` / `NOT_TESTED`
+- Vercel Production Deployment 应已触发；Production Cron 注册应在 Production Deployment Ready 后自动注册（需用户验证）
+- PERSIST-001 暂不归档，等 PROD-CRON-VERIFY 通过后才归档到 `tasks/completed/`
+
 ## 2026-07-20 - PERSIST-001 FINAL-CLOSURE-FIX-01 GPT 证据验收通过（EVIDENCE_REVIEW_PASS）
 
 - 审查目标：`13ea500..f0bdbed`（含 `1aeec8e` 主修复 + `08818c6` HEAD backfill + `f0bdbed` Vercel 验证归档）
