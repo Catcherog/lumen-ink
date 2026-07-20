@@ -14,7 +14,7 @@
   "crons": [
     {
       "path": "/api/worker/recover",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }

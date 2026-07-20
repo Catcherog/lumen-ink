@@ -58,7 +58,10 @@ export interface WorkerRecoveryOptions {
    * Max Jobs to process in a single recovery invocation. Default 10.
    * Caps runtime so a single cron tick stays well under the Vercel
    * Hobby maxDuration of 90s (frozen in vercel.json — PERSIST-001
-   * FINAL-CLOSURE AC-09 forbids silently upgrading to Pro).
+   * FINAL-CLOSURE-FIX-01 AC-FIX-01: cron schedule adjusted to once
+   * daily at 00:00 UTC per Hobby "max 1 cron invocation per day"
+   * limit; Fluid Compute is enabled so 90s is within the 300s Hobby
+   * ceiling. FINAL-CLOSURE AC-09 forbids silently upgrading to Pro).
    */
   maxRecover?: number;
 }

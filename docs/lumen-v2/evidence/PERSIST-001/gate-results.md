@@ -686,3 +686,208 @@ No secrets detected. No unsanitized evidence detected.
 - All other `M` / `??` files in `git status` (e.g., `.gitignore`, `AGENTS.md`, `docs/ai/`, `.trae/rules/`, `docs/lumen-v2/specs/`, `docs/lumen-v2/plans/`, etc.)
 
 No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
+
+---
+
+## FINAL-CLOSURE-FIX-01-Gate（2026-07-20）
+
+> Captured: 2026-07-20
+> Branch: `lumen/persist-001-trae`
+> Baseline commit: `13ea500`（FINAL-CLOSURE HEAD）
+> HEAD commit: `ac39daf`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
+> Scope: AC-FIX-01 ~ AC-FIX-10 — vercel.json cron 频率修正 / maxDuration Fluid Compute 注释 / FINAL-CLOSURE 状态文件修正 / 事务测试证据描述修正 / 统一 8 门禁真实输出 / Vercel 部署验证
+
+### 测试环境清理说明
+
+本轮门禁运行前清理了 `src/server/dist/` 和 `src/client/dist/` 构建产物目录。之前的 FINAL-CLOSURE-Gate 报告中 "48 files / 436 tests" 数字包含了 `dist/` 下编译产物 `.test.js` 文件的重复计数（25 个 .ts 源文件 + 23 个 .js 编译副本 = 48 files；224 unique tests × 2 = 448 tests，但当时实际记录为 436/48）。清理 dist/ 后的真实 unique 计数为 **25 files / 224 tests**，这是 PERSIST-001 仓库中实际的 server 测试数量。本轮 FIX-01 所有门禁数字均基于清理后的真实计数。
+
+### FINAL-CLOSURE-FIX-01-Gate 1: Client Lint
+
+```
+npm run lint --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+> client@0.0.0 lint
+> eslint .
+```
+
+No errors, no warnings. (Client code was not touched in FIX-01 round.)
+
+### FINAL-CLOSURE-FIX-01-Gate 2: Client TypeScript
+
+```
+npx tsc --noEmit --project src/client/tsconfig.app.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+### FINAL-CLOSURE-FIX-01-Gate 3: Client Tests
+
+```
+npm run test --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  10 passed (10)
+     Tests  194 passed (194)
+  Duration  2.37s
+```
+
+Test files (unchanged from previous rounds):
+- `src/utils/image.test.ts` (5 tests)
+- `src/utils/legacyHistory.test.ts` (20 tests)
+- `src/utils/recipe.test.ts` (54 tests)
+- `src/hooks/useEditor.test.ts` (9 tests)
+- `src/hooks/useProject.test.tsx` (9 tests)
+- `src/components/v2/JobStatusPanel.test.tsx` (26 tests)
+- `src/components/v2/VersionStrip.test.tsx` (10 tests)
+- `src/components/v2/LegacyHistoryImport.test.tsx` (7 tests)
+- `src/AppV2.persist.test.tsx` (18 tests)
+- `src/components/v2/ContextPanel.test.tsx` (36 tests)
+
+### FINAL-CLOSURE-FIX-01-Gate 4: Server TypeScript
+
+```
+npx tsc --noEmit --project src/server/tsconfig.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+### FINAL-CLOSURE-FIX-01-Gate 5: Server Tests
+
+```
+npm run test --prefix src/server
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  25 passed (25)
+     Tests  224 passed (224)
+  Duration  7.55s
+```
+
+Server 测试文件清单（25 个 .ts 源文件，dist/ 已清理）：
+- `src/server/config/runtime.test.ts` (14 tests)
+- `src/server/domain/cloudbase-mock.contract.test.ts` (7 tests)
+- `src/server/domain/jobState.test.ts` (14 tests)
+- `src/server/domain/persistence.contract.test.ts` (3 tests)
+- `src/server/infrastructure/executor/worker.test.ts` (4 tests)
+- `src/server/infrastructure/executor/worker-recovery.test.ts` (5 tests)
+- `src/server/infrastructure/persistence/cloudbase.ensureReady.test.ts` (3 tests)
+- `src/server/infrastructure/persistence/cloudbase.http.contract.test.ts` (16 tests)
+- `src/server/infrastructure/persistence/cloudbase.lease.contract.test.ts` (5 tests)
+- `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` (5 tests)
+- `src/server/infrastructure/persistence/select.test.ts` (6 tests)
+- `src/server/persist.e2e.test.ts` (13 tests)
+- `src/server/routes/edit.compat.test.ts` (9 tests)
+- `src/server/routes/jobs.test.ts` (11 tests)
+- `src/server/routes/projects.test.ts` (9 tests)
+- `src/server/routes/worker.test.ts` (6 tests)
+- `src/server/security/authThrottle.test.ts` (6 tests)
+- `src/server/security/imageValidation.test.ts` (10 tests)
+- `src/server/security/redaction.test.ts` (19 tests)
+- `src/server/security/security.integration.test.ts` (9 tests)
+- `src/server/services/GenerationService.test.ts` (16 tests)
+- `src/server/services/GenerationService.p0.test.ts` (7 tests)
+- `src/server/services/ProjectService.test.ts` (10 tests)
+- `src/server/services/providers/ProviderStore.test.ts` (8 tests)
+- `src/server/services/providers/operationType.test.ts` (8 tests)
+
+### FINAL-CLOSURE-FIX-01-Gate 6: Root Tests
+
+```
+npm test
+```
+
+Result: **PASS** (exit 0)
+
+Runs `npm run test --prefix src/client && npm run test --prefix src/server`.
+
+```
+Test Files  10 passed (10)         ← client
+     Tests  194 passed (194)
+
+Test Files  25 passed (25)         ← server
+     Tests  224 passed (224)
+```
+
+Combined root: **418 tests / 35 test files** (194 client + 224 server), all PASS.
+
+### FINAL-CLOSURE-FIX-01-Gate 7: Build
+
+```
+npm run build
+```
+
+Result: **PASS** (exit 0)
+
+```
+> lumen-ink@0.1.0 build
+> npm run build --prefix src/client && npm run build --prefix src/server
+
+> client@0.0.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+✓ 1859 modules transformed.
+dist/index.html                   0.45 kB │ gzip:   0.30 kB
+dist/assets/index-EvrWUPCw.css   46.34 kB │ gzip:   8.82 kB
+dist/assets/index-CH0bT766.js   346.83 kB │ gzip: 105.97 kB
+✓ built in 212ms
+
+> lumen-ink-server@0.1.0 build
+> tsc
+```
+
+### FINAL-CLOSURE-FIX-01-Gate 8: check-lumen-collab
+
+```
+node scripts/check-lumen-collab.mjs
+```
+
+Result: **PASS** (exit 0, no secrets detected)
+
+```
+Lumen collaboration state and basic public-repo safety checks passed.
+```
+
+### FINAL-CLOSURE-FIX-01 Summary
+
+| # | Gate | Result | Count |
+|---|------|--------|-------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 224 tests / 25 files |
+| 6 | Root tests | PASS | 418 combined (194 client + 224 server) |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+**All 8 gates exit 0.** Unified single-run pass per AC-FIX-08.
+
+### FINAL-CLOSURE-FIX-01 Vercel Deployment Verification
+
+AC-FIX-09 要求补充 Vercel 部署验证结果。由于 Vercel CLI 未在本地认证，部署验证由用户通过 Vercel Dashboard 手动完成。验证步骤见 SESSION-HANDOFF.md 的 "Vercel 部署验证步骤" section。验证结果将在用户提供后补充到本 section。
+
+### FINAL-CLOSURE-FIX-01 Scope Compliance
+
+**Committed files** (precise `git add <path>`, per AC-FIX-10):
+
+- `vercel.json` — AC-FIX-01 cron schedule `* * * * *` → `0 0 * * *`（Hobby 每日一次）
+- `src/server/infrastructure/executor/worker-recovery.ts` — AC-FIX-01 maxRecover 注释更新（Fluid Compute 启用，90s 在 300s 上限内）
+- `docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md` — AC-FIX-04/06 报告修正 + FCF1 section 追加
+- `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` — 本文件，AC-FIX-05 门禁结果记录
+- `docs/lumen-v2/state/STATE.json` — AC-FIX-03 状态文件更新
+- `docs/lumen-v2/state/SESSION-HANDOFF.md` — AC-FIX-03 交接文件更新
+
+**Excluded** (existing unrelated workspace modifications, not in FIX-01 scope):
+- All other `M` / `??` files in `git status` (e.g., `.gitignore`, `AGENTS.md`, `docs/ai/`, `.trae/rules/`, `docs/lumen-v2/specs/`, `docs/lumen-v2/plans/`, etc.)
+
+No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
