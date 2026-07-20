@@ -60,6 +60,9 @@
 
 | D-045 | 2026-07-18 | 冻结 | PERSIST-001 legacy history 显式导入而非静默迁移（D-009 落地） | 旧 `edit_history` 元数据无法保证图片可恢复；静默迁移会造成数据丢失假象 | `inspectLegacyHistory` 只读 → `exportLegacyBackup` JSON 下载 → `importRecoverableEntries` 逐条确认 + 失败恢复 + 备份保留 |
 
+| D-046 | 2026-07-18 | 冻结 | PERSIST-001 首轮 GPT 验收 `MVP_FAIL`，仅返工 CloudBase/执行器生产接线、原子条件成功、取消/lease 竞态、冻结输入版本四个 P0 | 8 门禁全绿但风险反例证明 failed/cancelled Job 可留下或创建成功 Version；部署入口仍为 local + no-op executor，候选 A 未形成可运行闭环 | PERSIST-001 进入 `changes_requested / nextActor=trae`；ROUTING/HARDEN 继续阻塞；返工不得扩大到其他任务 |
+| D-047 | 2026-07-21 | 冻结 | HARDEN-001A GPT 证据审查裁决 `EVIDENCE_REVIEW_PASS_WITH_DEBT`，不扩大修复范围，立即进入 HARDEN-001B | TDD 全绿（33 测试覆盖 AC-A02~A13），D-034 内部安全底线已满足全部 AC，8 门禁全绿（client 194 + server 514 = 708 root tests）；4 项非阻塞 P2 debt 已登记（AC-A04 NOT_APPLICABLE / 真实生产路由 wiring 回归测试 / Vercel trust proxy 假设 / dist 测试重复计数） | HARDEN-001A `gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；合并 PR #2 后立即创建 `lumen/harden-001b-trae` 分支；PROD-CRON-VERIFY 保持并行不阻塞；ROUTING-001 继续保持阻塞；HARDEN-001 整体不归档，需 B/C 也通过 |
+
 ## 新增决策格式
 
 ```text
