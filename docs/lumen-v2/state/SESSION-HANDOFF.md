@@ -1,24 +1,87 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，HARDEN-001B 实施完成，等待 GPT 证据审查）
+## 当前状态（2026-07-21，HARDEN-001B GPT 证据审查通过，等待合并后进入 HARDEN-001C）
 
 - 日期：2026-07-21
-- **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001B`
-- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001B`（GPT 审查通过，待合并）
+- **状态**：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`
+- **GPT 裁决**：`EVIDENCE_REVIEW_PASS`（无 S0/S1 风险，无阻塞修复，无 Codex 必要）
 - **HARDEN-001A 已合并到 main**：fast-forward `e08eb3e..4e720b6`（mergeCommit `4e720b6`）
+- **HARDEN-001B 实施提交**：`4483a7c`（分支 `lumen/harden-001b-trae`，已 push 到 origin）
 - 主任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`
-- **当前批次分支**：`lumen/harden-001b-trae`（基于 main `4e720b6`，HEAD 待 commit）
+- **当前批次 GPT 验收**：`docs/lumen-v2/reviews/HARDEN-001B-GPT-REVIEW.md`
 - **当前批次 Trae 报告**：`docs/lumen-v2/reports/HARDEN-001B-TRAE-REPORT.md`
 - **当前批次证据**：`docs/lumen-v2/evidence/HARDEN-001B/gate-results.md`
-- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`（未变化，不阻塞 HARDEN-001B/C）
+- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`（未变化，不阻塞 HARDEN-001C）
 - **并行任务 2（PERSIST-001，未归档）**：`gpt_evidence_review_pass / nextActor=gpt`（未变化）
-- blockedTasks：`["ROUTING-001"]`（HARDEN-001B 通过后仍禁止启动 ROUTING-001；需 HARDEN-001C 也通过 + PROD-CRON-VERIFY 通过）
+- blockedTasks：`["ROUTING-001"]`（HARDEN-001B 合并后仍禁止启动 ROUTING-001；需 HARDEN-001C 也通过 + PROD-CRON-VERIFY 通过）
 - `production_cron_registration`：`PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
 - `production_cron_execution`：`NOT_TESTED`（保持，不得提前改 PASS）
-- `mergeCompletedHead`：`f0e28dd`（保持，PERSIST-001 已合并到 main）
+- `mergeCompletedHead`：`4e720b6`（HARDEN-001A 已合并到 main；HARDEN-001B 合并后将更新为新 HEAD）
 - 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
 
-## HARDEN-001B 完成交接（2026-07-21，Trae → GPT）
+## HARDEN-001B GPT 证据审查通过交接（2026-07-21，GPT → Trae 合并）
+
+### 审查结论摘要
+
+- **Verdict**：`EVIDENCE_REVIEW_PASS`
+- **Codex 必要性**：`NOT_REQUIRED`
+- **Next Owner**：Trae（合并并立即进入 HARDEN-001C）
+- **Required Fixes**：无合并前代码修复要求
+- **Stop Conditions**：未触发
+
+### AC 覆盖矩阵（GPT 确认）
+
+| AC | 描述 | GPT 结论 |
+|----|------|---------|
+| AC-B01 | DEFAULT_DATA_DIR 不引用 /tmp | PASS |
+| AC-B02 | deployed 生命周期不读写 Provider 文件 | PASS（附表述修正） |
+| AC-B03 | deployed 模式不创建目录 | PASS |
+| AC-B04 | Provider Key 不返回前端 | PASS |
+| AC-B05 | Provider 错误日志脱敏 | PASS |
+| AC-B06 | env-managed 模式 CRUD 不创建 providers.json | PASS |
+| AC-B07 | local delete 清理行为 | PASS |
+| AC-B08 | VERCEL=1 误配置不再写入 /tmp | PASS |
+| DEBT-HARDEN-001A-04 | dist/ 测试重复计数 | RESOLVED |
+
+### GPT 非阻塞说明（已记录到 STATE.json `harden001bGptReviewNonblockNotes`）
+
+1. **AC-B02 表述修正**：测试证明的是 Provider 生命周期方法不操作 fs，不是整个 Node 进程冷启动完全没有 fs 调用（findProjectRoot 模块初始化仍读 package.json，但不涉及 Provider Key/Provider 文件/tmp）
+2. **AC-B05 表述修正**：`[object Object]` 是 `mock.calls[0].join(' ')` 测试转换方式观察到的结果，不应表述为已证明所有运行环境原先都无法显示结构化对象；JSON.stringify 修改仍然安全
+3. **vitest.config.ts 后续改进**：可改为 `configDefaults.exclude` 展开默认值以减少版本升级维护风险
+4. **HARDEN-001C 应补充**：生产 Provider 路由级测试直接断言全部 HTTP 响应均不含真实 apiKey
+
+### Trae 下一步执行清单（按 GPT 指令）
+
+1. ✅ 写入 `docs/lumen-v2/reviews/HARDEN-001B-GPT-REVIEW.md`
+2. ✅ 更新 `STATE.json` 推进状态
+3. ⏳ 将审查状态更新提交到 `lumen/harden-001b-trae`，不得修改生产代码
+4. ⏳ 创建正式 PR（base=main, head=lumen/harden-001b-trae），确认实施提交仍为 `4483a7c`，其后仅允许 GPT review/state 文档提交
+5. ⏳ 合并到 `main`（禁止 force-push）
+6. ⏳ 从合并后的最新 `main` 创建 `lumen/harden-001c-trae` 分支
+7. ⏳ 立即实施 HARDEN-001C，不等待 PROD-CRON-VERIFY
+
+### HARDEN-001C 必须关闭的范围
+
+- DEBT-HARDEN-001A-02：真实生产路由 wiring 回归测试
+- DEBT-HARDEN-001A-03：Vercel trust proxy / `req.ip` 假设
+- Gate D 剩余公开发布安全项（D-034 public-release hardening 剩余项）
+- Production flag 切换和回滚文档
+
+### Stop Conditions（合并与 HARDEN-001C 启动期间）
+
+只有出现以下情况才停止并回报 GPT：
+
+- 合并前 branch head 与已审查提交范围不一致
+- 新增生产代码变化
+- 门禁重新运行出现失败
+- 发现真实 Secret、Provider Key 或用户数据进入日志/响应
+- HARDEN-001C 必须修改 PERSIST/Cron 状态机
+- 认证 wiring 或 trust proxy 无法通过仓库上下文确定
+
+---
+
+## 历史状态（2026-07-21，HARDEN-001B 实施完成，等待 GPT 证据审查）
 
 ### 实施摘要
 

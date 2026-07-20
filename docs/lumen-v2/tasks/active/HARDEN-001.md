@@ -1,6 +1,6 @@
 # HARDEN-001｜安全、可靠性与发布加固
 
-> **状态**：`awaiting_gpt_acceptance / nextActor=gpt`（2026-07-21 HARDEN-001B 实施完成，等待 GPT 证据审查）
+> **状态**：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`（2026-07-21 HARDEN-001B GPT 证据审查通过 `EVIDENCE_REVIEW_PASS`，等待合并 PR 后进入 HARDEN-001C）
 > **当前位置**：`docs/lumen-v2/tasks/active/HARDEN-001.md`（从 `tasks/backlog/` 激活）
 > **前置依赖**：PERSIST-001 证据验收通过并合并到 main（已满足）；PERSIST-001 在 PROD-CRON-VERIFY 通过前不归档，但不阻塞 HARDEN-001 启动
 > **并行任务**：PROD-CRON-VERIFY（awaiting_user_evidence / nextActor=user）
@@ -45,7 +45,7 @@
 - 验收门禁：`07-ACCEPTANCE-PLAN.md` Gate D Provider Key 子项 + D-011 落地
 - 分支：`lumen/harden-001b-trae`
 - 提交格式：`feat(lumen-v2): HARDEN-001B provider key migration`
-- **当前状态**：实施完成，等待 GPT 证据审查（`awaiting_gpt_acceptance / nextActor=gpt`）；8 门禁全绿（client 194 + server 269 = 463 root tests，dist/ 已通过 vitest.config.ts 排除）；DEBT-HARDEN-001A-04 RESOLVED
+- **当前状态**：GPT 证据审查通过 `EVIDENCE_REVIEW_PASS`（2026-07-21），实施提交 `4483a7c`，等待合并 PR；8 门禁全绿（client 194 + server 269 = 463 root tests，dist/ 已通过 vitest.config.ts 排除）；DEBT-HARDEN-001A-04 RESOLVED；4 项非阻塞说明已登记到 STATE.json `harden001bGptReviewNonblockNotes`
 
 ### HARDEN-001C｜公开发布加固
 
@@ -53,6 +53,10 @@
 - 覆盖测试：安全配置、依赖、错误暴露、公开仓库检查
 - 验收门禁：`07-ACCEPTANCE-PLAN.md` Gate D 剩余子项 + Production flag 切换和回滚文档
 - 分支：`lumen/harden-001c-trae`
+- **必须关闭的 debt**：
+  - DEBT-HARDEN-001A-02：真实生产路由 wiring 回归测试
+  - DEBT-HARDEN-001A-03：Vercel trust proxy / `req.ip` 假设
+- **必须输出**：Production flag 切换和回滚文档
 
 ## 权威输入
 
@@ -82,6 +86,29 @@
 - HARDEN-001 实施过程中不得触及 PERSIST-001 或 Cron 相关代码路径
 
 ## Review History
+
+### 2026-07-21｜HARDEN-001B GPT 证据审查通过（EVIDENCE_REVIEW_PASS）
+
+- 触发：HARDEN-001B 提交到 `lumen/harden-001b-trae` 分支后，GPT 进行远端仓库 Diff + 提交证据审查
+- 审查 Baseline：`4e720b6`
+- 审查 Head：`4483a7c`
+- Verdict：`EVIDENCE_REVIEW_PASS`
+- Codex 必要性：`NOT_REQUIRED`
+- Next Owner：Trae（合并并立即进入 HARDEN-001C）
+- AC 覆盖矩阵：AC-B01~B08 全部 PASS；DEBT-HARDEN-001A-04 RESOLVED
+- 状态推进：`awaiting_gpt_acceptance / nextActor=gpt` → `gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`
+- GPT 验收文件：`docs/lumen-v2/reviews/HARDEN-001B-GPT-REVIEW.md`
+- 4 项非阻塞说明已登记到 STATE.json `harden001bGptReviewNonblockNotes`：
+  - AC-B02 表述修正：测试证明的是 Provider 生命周期方法不操作 fs，不是整个 Node 进程冷启动完全没有 fs 调用
+  - AC-B05 表述修正：`[object Object]` 是 `mock.calls[0].join(' ')` 测试转换方式观察到的结果
+  - vitest.config.ts 后续可改为 `configDefaults.exclude` 展开默认值
+  - HARDEN-001C 应补充生产 Provider 路由级测试直接断言全部 HTTP 响应均不含真实 apiKey
+- 无 S0/S1 风险；无合并前代码修复要求；无 Codex 必要
+- 下一步：Trae 合并 PR（base=main, head=lumen/harden-001b-trae），从合并后 main 创建 `lumen/harden-001c-trae` 分支立即实施 HARDEN-001C
+- HARDEN-001C 必须关闭：DEBT-HARDEN-001A-02（真实生产路由 wiring 回归测试）+ DEBT-HARDEN-001A-03（Vercel trust proxy / req.ip 假设）+ Gate D 剩余公开发布安全项 + Production flag 切换和回滚文档
+- PROD-CRON-VERIFY 保持并行，不阻塞 HARDEN-001C
+- ROUTING-001 继续保持阻塞，直到 HARDEN-001 与 PROD-CRON-VERIFY 汇合通过
+- HARDEN-001 任务整体不归档，需 C 也通过后才归档
 
 ### 2026-07-21｜激活（POST-MERGE-PARALLEL-ACTIVATION-01）
 

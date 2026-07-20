@@ -108,16 +108,16 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
 - [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，**未归档**，等 PROD-CRON-VERIFY 通过后才归档）。
-- [~] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为项目主任务；HARDEN-001A 已通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT` 并合并到 main（mergeCommit `4e720b6`）；HARDEN-001B 已实施完成，等待 GPT 证据审查；`awaiting_gpt_acceptance / nextActor=gpt`；HARDEN-001 任务整体不归档，需 C 也通过）。
+- [~] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为项目主任务；HARDEN-001A 已通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT` 并合并到 main（mergeCommit `4e720b6`）；HARDEN-001B 已通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS`，实施提交 `4483a7c`，等待合并 PR 后进入 HARDEN-001C；`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；HARDEN-001 任务整体不归档，需 C 也通过）。
 - [ ] `PROD-CRON-VERIFY` Production Cron 注册与运行验证（2026-07-21 激活为并行用户证据门禁；`active / awaiting_user_evidence / nextActor=user`；与 HARDEN-001 并行，不阻塞 HARDEN-001B/C）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.0 当前主任务：HARDEN-001（HARDEN-001B 实施完成，等待 GPT 证据审查）
+### 6.0 当前主任务：HARDEN-001（HARDEN-001B GPT 证据审查通过，等待合并后进入 HARDEN-001C）
 
 任务 ID：`HARDEN-001`
-状态：`awaiting_gpt_acceptance / nextActor=gpt`（HARDEN-001B 实施完成，等待 GPT 证据审查，2026-07-21）。
+状态：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`（HARDEN-001B GPT 证据审查通过 `EVIDENCE_REVIEW_PASS`，2026-07-21）。
 激活来源：GPT 任务卡 POST-MERGE-PARALLEL-ACTIVATION-01，用户授权 R2 路径。
 前置依赖：PERSIST-001 已合并到 main 并通过 GPT 证据验收（已满足）。
 并行门禁：PERSIST-001 归档由 PROD-CRON-VERIFY 单独负责，不阻塞 HARDEN-001 推进。
@@ -125,8 +125,8 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 任务目标：完成 P0 上线前安全门禁（Gate D），在 D-034 内部安全底线之上完成公开发布剩余门禁。
 批次拆分：
 - HARDEN-001A｜认证边界（D-012 P0 authentication；未认证/无效凭据/过期凭据/权限不足测试；分支 `lumen/harden-001a-trae`）— **已合并到 main**（mergeCommit `4e720b6`），GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT`，4 项 P2 debt 已登记
-- HARDEN-001B｜Provider Key 安全迁移（D-011 Provider Key 迁离 `/tmp`；生命周期/日志脱敏/错误路径/清理行为测试；分支 `lumen/harden-001b-trae`）— **实施完成，等待 GPT 证据审查**；HEAD 待 commit；8 门禁全绿（client 194 + server 269 = 463 root tests）；DEBT-HARDEN-001A-04 RESOLVED（vitest.config.ts 排除 dist/）
-- HARDEN-001C｜公开发布加固（D-034 public-release hardening 剩余项；安全配置/依赖/错误暴露/公开仓库检查；分支 `lumen/harden-001c-trae`）
+- HARDEN-001B｜Provider Key 安全迁移（D-011 Provider Key 迁离 `/tmp`；生命周期/日志脱敏/错误路径/清理行为测试；分支 `lumen/harden-001b-trae`）— **GPT 证据审查通过 `EVIDENCE_REVIEW_PASS`**，实施提交 `4483a7c`，8 门禁全绿（client 194 + server 269 = 463 root tests）；DEBT-HARDEN-001A-04 RESOLVED；等待合并 PR
+- HARDEN-001C｜公开发布加固（D-034 public-release hardening 剩余项；DEBT-HARDEN-001A-02 真实生产路由 wiring 回归测试；DEBT-HARDEN-001A-03 Vercel trust proxy / req.ip 假设；Production flag 切换和回滚文档；分支 `lumen/harden-001c-trae`）— 合并后立即启动
 
 执行规则：
 - 每个批次独立 PR + 独立 GPT 验收，不得合并为一个大型 Diff
@@ -135,7 +135,7 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - 不修改 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置
 - Codex 升级条件：参见 `docs/lumen-v2/tasks/active/HARDEN-001.md`，限制为一次有边界的安全审计
 
-下一步：GPT 证据审查 HARDEN-001B。通过后合并 PR，然后立即创建 `lumen/harden-001c-trae` 分支开始 HARDEN-001C 实施。PROD-CRON-VERIFY 保持并行，不阻塞 HARDEN-001C。ROUTING-001 继续保持阻塞。
+下一步：Trae 合并 PR #3（`lumen/harden-001b-trae` → `main`），然后立即创建 `lumen/harden-001c-trae` 分支开始 HARDEN-001C 实施。PROD-CRON-VERIFY 保持并行，不阻塞 HARDEN-001C。ROUTING-001 继续保持阻塞。
 
 ### 6.1 并行任务：PROD-CRON-VERIFY（awaiting_user_evidence / nextActor=user，2026-07-21 激活）
 
@@ -287,7 +287,7 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 
 - PERSIST-001 已于 2026-07-20 合并到 main 并通过 GPT 证据验收，但未归档（等 PROD-CRON-VERIFY 通过）。
 - HARDEN-001A 已于 2026-07-21 通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT` 并合并到 main（mergeCommit `4e720b6`）。
-- HARDEN-001B 已于 2026-07-21 实施完成，等待 GPT 证据审查；8 门禁全绿（463 root tests），DEBT-HARDEN-001A-04 RESOLVED。
+- HARDEN-001B 已于 2026-07-21 通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS`，实施提交 `4483a7c`，等待合并 PR；DEBT-HARDEN-001A-04 已 RESOLVED。
 - PROD-CRON-VERIFY 已于 2026-07-21 激活为并行用户证据门禁，`active / awaiting_user_evidence / nextActor=user`，不阻塞 HARDEN-001C。
 - `STATE.json.blockedTasks` 仅保留 `ROUTING-001`，待 PROD-CRON-VERIFY + HARDEN-001（A/B/C 全部）共同通过后解除阻塞。
 - 同一时间允许项目主任务（currentTask）+ 并行任务（parallelTasks）共存，但 `STATE.json.currentTask` 只记录主线任务。
