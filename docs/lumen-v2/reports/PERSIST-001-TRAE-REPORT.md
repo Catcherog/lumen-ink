@@ -703,9 +703,9 @@ Vercel Cron 默认 GET 请求，人工触发保留 POST 入口；同一 handler 
 |--------|------|------|------|
 | AC-FIX-01 | vercel.json cron 频率符合 Hobby + 一次成功部署 | ✅ | cron 从 `* * * * *` 改为 `0 0 * * *`（每天 00:00 UTC = 北京时间 08:00）；Vercel 部署验证由用户提供 |
 | AC-FIX-02 | maxDuration: 90 需 Fluid Compute 启用证据 | ✅ | 用户确认 Fluid Compute 已启用；保留 maxDuration: 90；证据为用户 Dashboard 确认 |
-| AC-FIX-03 | SESSION-HANDOFF 写入实际 baseline/HEAD/分支/状态 | ✅ | SESSION-HANDOFF.md 重写：baseline=`13ea500`，HEAD=`ac39daf`，分支=`lumen/persist-001-trae`，status=`awaiting_gpt_acceptance / nextActor=gpt` |
+| AC-FIX-03 | SESSION-HANDOFF 写入实际 baseline/HEAD/分支/状态 | ✅ | SESSION-HANDOFF.md 重写：baseline=`13ea500`，HEAD=`1aeec8e`，分支=`lumen/persist-001-trae`，status=`awaiting_gpt_acceptance / nextActor=gpt` |
 | AC-FIX-04 | Trae report 修正 HEAD/13 files/2 added/11 modified/AC-12 "10 个文件"/FC.3 "8 个修改" | ✅ | FC.2 AC-12 改为"13 个文件（2 新增 + 11 修改）"；FC.3 改为"修改文件 11 个"并补全缺失的 2 个文件；FINAL-CLOSURE HEAD 改为 `13ea500` |
-| AC-FIX-05 | gate-results.md/STATE.json/SESSION-HANDOFF/Trae report 的 HEAD/计数/部署结果一致 | ✅ | 四个文件均更新到 FINAL-CLOSURE-FIX-01 HEAD=`ac39daf` + 418 tests（dist/ 已清理）+ 8 门禁 PASS + Vercel 部署状态 |
+| AC-FIX-05 | gate-results.md/STATE.json/SESSION-HANDOFF/Trae report 的 HEAD/计数/部署结果一致 | ✅ | 四个文件均更新到 FINAL-CLOSURE-FIX-01 HEAD=`1aeec8e` + 418 tests（dist/ 已清理）+ 8 门禁 PASS + Vercel 部署状态 |
 | AC-FIX-06 | 不得声称 cloudbase.transaction.contract.test.ts 自身断言 Project pointer 不变 | ✅ | FC.5 修正：本测试只证明 ROLLBACK + 同 client；Project pointer 不变 + result object 补偿删除由 `src/server/services/GenerationService.p0.test.ts:450-568` 覆盖，已在 FC.5 引用完整路径、测试名、5 个关键断言行号 |
 | AC-FIX-07 | GET/POST worker route 测试继续通过；不复制 recovery handler | ✅ | `routes/worker.ts` 未修改；`worker.test.ts` 未修改；8 门禁验证 6 个测试全部通过 |
 | AC-FIX-08 | 修复后统一运行一次 8 门禁，记录真实输出 | ✅ | 见 FCF1.5 节 + `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` 的 FINAL-CLOSURE-FIX-01-Gate 节 |

@@ -694,7 +694,7 @@ No unrelated workspace modifications included. No secrets, real customer data, o
 > Captured: 2026-07-20
 > Branch: `lumen/persist-001-trae`
 > Baseline commit: `13ea500`（FINAL-CLOSURE HEAD）
-> HEAD commit: `ac39daf`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
+> HEAD commit: `1aeec8e`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
 > Scope: AC-FIX-01 ~ AC-FIX-10 — vercel.json cron 频率修正 / maxDuration Fluid Compute 注释 / FINAL-CLOSURE 状态文件修正 / 事务测试证据描述修正 / 统一 8 门禁真实输出 / Vercel 部署验证
 
 ### 测试环境清理说明

@@ -8,7 +8,7 @@
 - 当前轮次：`PERSIST-001-FINAL-CLOSURE-FIX-01`（最终修复轮，AC-FIX-01 ~ AC-FIX-10）
 - 上一轮：`PERSIST-001-FINAL-CLOSURE`（HEAD `13ea500`，GPT 最终验收给出 FIX-01 修复包）
 - 本轮（FIX-01）基线：`13ea500`
-- 本轮（FIX-01）HEAD：`ac39daf`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
+- 本轮（FIX-01）HEAD：`1aeec8e`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
 - 分支：`lumen/persist-001-trae`
 - 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
 - GPT 审查：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（含 FINAL-CLOSURE FIX-01 修复包）
