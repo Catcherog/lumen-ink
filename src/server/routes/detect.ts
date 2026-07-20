@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import type { Region } from 'shared/types.js';
 import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
-import { redactError } from '../security/redaction.js';
+import { redactError, redactString } from '../security/redaction.js';
 
 const router = Router();
 
@@ -94,7 +94,9 @@ router.post('/people', async (req: Request, res: Response) => {
 
     const regions = generateMockRegions(width, height);
 
-    console.log(`[detect/people] mimeType=${mimeType || 'unknown'} dims=${width}x${height} regions=${regions.length}`);
+    // HARDEN-001C (AC-C12): scrub mimeType before logging — it's
+    // user-controlled and could carry payload fragments.
+    console.log(`[detect/people] mimeType=${redactString(mimeType || 'unknown')} dims=${width}x${height} regions=${regions.length}`);
 
     res.json({
       success: true,
