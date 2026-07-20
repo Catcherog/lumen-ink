@@ -107,12 +107,48 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
-- [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，等 GPT 确认合并 + 决定下一步推进；Production Cron 注册与运行仍为合并后强制门禁，由独立任务 `PROD-CRON-VERIFY` 验证；PERSIST-001 在该任务通过前不归档）。
+- [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，**未归档**，等 PROD-CRON-VERIFY 通过后才归档）。
+- [ ] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为项目主任务；`ready_for_trae / nextActor=trae`；拆为 HARDEN-001A/B/C 三个独立批次）。
+- [ ] `PROD-CRON-VERIFY` Production Cron 注册与运行验证（2026-07-21 激活为并行用户证据门禁；`active / awaiting_user_evidence / nextActor=user`；与 HARDEN-001 并行，不阻塞 HARDEN-001 启动）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.1 当前任务：PERSIST-001（gpt_evidence_review_pass / 已合并到 main / 等 GPT 推进）
+### 6.0 当前主任务：HARDEN-001（ready_for_trae / nextActor=trae，2026-07-21 激活）
+
+任务 ID：`HARDEN-001`
+状态：`ready_for_trae`，`nextActor=trae`（POST-MERGE-PARALLEL-ACTIVATION-01 激活，2026-07-21）。
+激活来源：GPT 任务卡 POST-MERGE-PARALLEL-ACTIVATION-01，用户授权 R2 路径。
+前置依赖：PERSIST-001 已合并到 main 并通过 GPT 证据验收（已满足）。
+并行门禁：PERSIST-001 归档由 PROD-CRON-VERIFY 单独负责，不阻塞 HARDEN-001 启动。
+任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`（从 backlog/ 激活，含批次拆分计划）。
+任务目标：完成 P0 上线前安全门禁（Gate D），在 D-034 内部安全底线之上完成公开发布剩余门禁。
+批次拆分：
+- HARDEN-001A｜认证边界（D-012 P0 authentication；未认证/无效凭据/过期凭据/权限不足测试；分支 `lumen/harden-001a-trae`）
+- HARDEN-001B｜Provider Key 安全迁移（D-011 Provider Key 迁离 `/tmp`；生命周期/日志脱敏/错误路径/清理行为测试；分支 `lumen/harden-001b-trae`）
+- HARDEN-001C｜公开发布加固（D-034 public-release hardening 剩余项；安全配置/依赖/错误暴露/公开仓库检查；分支 `lumen/harden-001c-trae`）
+
+执行规则：
+- 每个批次独立 PR + 独立 GPT 验收，不得合并为一个大型 Diff
+- TDD：先失败测试，再最小实现，再通过测试
+- 任何 S0/S1 不得作为已知限制放行
+- 不修改 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置
+- Codex 升级条件：参见 `docs/lumen-v2/tasks/active/HARDEN-001.md`，限制为一次有边界的安全审计
+
+下一步：Trae 立即进入 HARDEN-001A 仓库上下文核对与实施，不等待 Cron 门禁。
+
+### 6.1 并行任务：PROD-CRON-VERIFY（awaiting_user_evidence / nextActor=user，2026-07-21 激活）
+
+任务 ID：`PROD-CRON-VERIFY`
+状态：`active / awaiting_user_evidence / nextActor=user`。
+任务文件：`docs/lumen-v2/tasks/active/PROD-CRON-VERIFY.md`。
+执行者：用户在 Vercel Dashboard 验证；Trae 负责归档证据和更新状态字段。
+通过条件：Production Deployment Ready + Cron Jobs 页面有 `/api/worker/recover` `0 0 * * *` 记录 + 首次调度或手动调用 HTTP 200 + Function Logs 无错误。
+通过后：`production_cron_*` 字段改为 `VERIFIED`；PERSIST-001 可正式归档；与 HARDEN-001 通过后共同解除 ROUTING-001 阻塞。
+Trae 禁止行为：在用户证据完整前将 `production_cron_*` 改为 `VERIFIED`。
+用户注意：Trae 落盘本激活决策后会产生新的 main commit，应验证激活 commit 之后最新 main HEAD 对应的 Production Deployment，不要只固定检查 `f0e28dd` 或 `f8e5f48`。
+
+### 6.2 未归档任务：PERSIST-001（gpt_evidence_review_pass / 未归档）
 
 任务 ID：`PERSIST-001`
 状态：`gpt_evidence_review_pass`，`nextActor=gpt`（GPT 证据验收通过 + 已合并到 main，2026-07-20）。
@@ -129,20 +165,21 @@ GPT 验收：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（含首轮 MVP_F
 累计变更：54 文件，+10945/-550（首轮实施）+ 多轮修复。
 8 门禁：全绿（client 194 tests / server 224 tests / root 418 combined / lint 0 errors / build / check-lumen-collab；dist/ 已清理）。
 范围遵守：单任务/单分支/单验收周期；D-040 契约收敛完成；未启动 ROUTING / STORAGE-002 / PERSIST-002；未改变冻结的 Provider/API/存储决策；保留工作区既有无关修改；未提交密钥或未脱敏证据。
+归档门禁：PROD-CRON-VERIFY 通过 + HARDEN-001 通过 → 归档 → 解除 ROUTING-001 阻塞。
 
-#### 合并后强制门禁（PROD-CRON-VERIFY）
+#### 合并后强制门禁（PROD-CRON-VERIFY，已于 2026-07-21 激活）
 
-PROD-CRON-VERIFY 任务文件：`docs/lumen-v2/tasks/backlog/PROD-CRON-VERIFY.md`（pending，待 GPT 激活）。
-- `production_cron_registration`：`PENDING_POST_MERGE`（Vercel Cron 只在 Production Deployment 上注册，Preview 分支不注册；合并后由 Vercel 自动注册）
-- `production_cron_execution`：`NOT_TESTED`（合并前不可测）
+PROD-CRON-VERIFY 任务文件：`docs/lumen-v2/tasks/active/PROD-CRON-VERIFY.md`（active / awaiting_user_evidence / nextActor=user）。
+- `production_cron_registration`：`PENDING_POST_MERGE`（保持；Vercel Cron 只在 Production Deployment 上注册，Preview 分支不注册；合并后由 Vercel 自动注册）
+- `production_cron_execution`：`NOT_TESTED`（保持；合并后由用户在 Vercel Dashboard 验证）
 - 通过条件：Production Deployment Ready + Cron Jobs 页面有 `/api/worker/recover` `0 0 * * *` 记录 + 首次调度或手动调用 HTTP 200 + Function Logs 无错误
-- 通过后才能将 `production_cron_*` 字段改为 `VERIFIED`，才能将 PERSIST-001 归档到 `tasks/completed/`，才能正式解除 HARDEN-001 / ROUTING-001 阻塞
+- 通过后才能将 `production_cron_*` 字段改为 `VERIFIED`，才能将 PERSIST-001 归档到 `tasks/completed/`；HARDEN-001 已于 2026-07-21 单独激活，不再依赖本任务通过；ROUTING-001 仍由本任务 + HARDEN-001 共同通过后解除阻塞
 
-#### GPT 下一步（用户明确要求"快速推进项目"）
+#### GPT 下一步（已由 POST-MERGE-PARALLEL-ACTIVATION-01 任务卡裁决）
 
-1. 确认合并结果（`mergeCompletedHead: f0e28dd`，远端 `main` 已更新）
-2. 决定 PROD-CRON-VERIFY 激活方式（用户在 Vercel Dashboard 操作 / 并行推进 HARDEN-001）
-3. 选择推进路径：选项 A 激活 PROD-CRON-VERIFY；选项 B 并行激活 HARDEN-001；选项 C 激活 ROUTING-001（前置 PERSIST-001 已满足）
+1. 确认合并结果（`mergeCompletedHead: f0e28dd`，远端 `main` 已更新）— 已完成
+2. 决定 PROD-CRON-VERIFY 激活方式 — 已激活为并行用户证据门禁
+3. 选择推进路径：选项 A+B 并行激活（PROD-CRON-VERIFY + HARDEN-001），暂不启动 ROUTING-001
 
 #### PERSIST-001 实施摘要（2026-07-18）
 
@@ -248,10 +285,12 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 
 ### 6.4 当前阻塞
 
-- FLOW-001 已于 2026-07-18 第三轮验收 `MVP_PASS` 并归档；STORAGE-001 修订已完成，状态为 `awaiting_gpt_acceptance / nextActor=gpt`。
-- `STATE.json.blockedTasks` 仅保留 PERSIST-001；STORAGE-001 方案未经 GPT 冻结前不得解除其阻塞。
-- 每次只执行一个任务 ID；一个 PR 只对应一个任务 ID。
-- 未经 GPT/用户冻结的方案不得进入下一阶段（典型：STORAGE-001 未冻结不得进入 PERSIST-001）。
+- PERSIST-001 已于 2026-07-20 合并到 main 并通过 GPT 证据验收，但未归档（等 PROD-CRON-VERIFY 通过）。
+- HARDEN-001 已于 2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为主线任务，`ready_for_trae / nextActor=trae`，无阻塞。
+- PROD-CRON-VERIFY 已于 2026-07-21 激活为并行用户证据门禁，`active / awaiting_user_evidence / nextActor=user`。
+- `STATE.json.blockedTasks` 仅保留 `ROUTING-001`，待 PROD-CRON-VERIFY + HARDEN-001 共同通过后解除阻塞。
+- 同一时间允许项目主任务（currentTask）+ 并行任务（parallelTasks）共存，但 `STATE.json.currentTask` 只记录主线任务。
+- 每个任务 ID 仍对应独立分支与独立 PR；一个 PR 只对应一个任务 ID。
 
 ### 6.5 FLOW-001 P0 返工要点（2026-07-18，R1 + R2 累计）
 

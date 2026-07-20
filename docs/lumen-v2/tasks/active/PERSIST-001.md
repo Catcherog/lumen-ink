@@ -70,3 +70,15 @@
 - 状态字段：`production_cron_registration` / `production_cron_execution` 保持 `PENDING_POST_MERGE` / `NOT_TESTED`，不得提前改 VERIFIED。
 - 状态：`gpt_evidence_review_pass / nextActor=gpt`，等 GPT 确认合并 + 决定下一步推进（用户明确要求"快速推进项目"）。
 - PERSIST-001 在 PROD-CRON-VERIFY 通过前**不归档**到 `tasks/completed/`。
+
+### 2026-07-21｜POST-MERGE-PARALLEL-ACTIVATION-01（保持未归档，主线切换到 HARDEN-001）
+
+- 触发：GPT 任务卡 `POST-MERGE-PARALLEL-ACTIVATION-01`，用户授权 R2 路径，并行激活 HARDEN-001 + PROD-CRON-VERIFY。
+- 本任务（PERSIST-001）状态：保持 `gpt_evidence_review_pass / nextActor=gpt`，**未归档**，仍在 `tasks/active/`。
+- 项目主任务（currentTask）切换：`PERSIST-001` → `HARDEN-001`（HARDEN-001 从 `tasks/backlog/` 移至 `tasks/active/`）。
+- 并行任务（PROD-CRON-VERIFY）：从 `tasks/backlog/` 移至 `tasks/active/`；状态推进为 `active / awaiting_user_evidence / nextActor=user`。
+- 归档门禁（仍开启）：PERSIST-001 在 PROD-CRON-VERIFY 通过前**不得**归档；`production_cron_*` 字段保持 `PENDING_POST_MERGE` / `NOT_TESTED`。
+- 与 HARDEN-001 的关系：HARDEN-001 启动**不依赖** PERSIST-001 归档；HARDEN-001 实施过程中**禁止**触及 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置。
+- 与 ROUTING-001 的关系：ROUTING-001 仍处于 `blockedTasks`，待 PROD-CRON-VERIFY + HARDEN-001 共同通过后解除阻塞。
+- 范围声明：本轮激活 commit 仅包含任务及状态文件（docs/state-only），不含业务代码。
+- 详见：`docs/lumen-v2/state/SESSION-HANDOFF.md` 的"A+B 并行激活门禁区分"节。

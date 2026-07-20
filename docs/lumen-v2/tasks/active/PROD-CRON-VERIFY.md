@@ -1,8 +1,11 @@
 # PROD-CRON-VERIFY｜Production Cron 注册与运行验证（合并后强制门禁）
 
 > **前置条件**：PERSIST-001 已合并到 `main`（`f0e28dd`，2026-07-20）。
-> **状态**：`pending`（待 GPT 激活；Trae 不得自行激活）。
+> **状态**：`active / awaiting_user_evidence / nextActor=user`（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活）。
+> **当前位置**：`docs/lumen-v2/tasks/active/PROD-CRON-VERIFY.md`（从 `tasks/backlog/` 激活）。
+> **并行任务**：HARDEN-001（ready_for_trae / nextActor=trae，为主线任务）；PROD-CRON-VERIFY 为独立用户证据门禁，不阻塞 HARDEN-001 启动。
 > **来源**：GPT PERSIST-001 FINAL-CLOSURE-FIX-01 证据验收 Verdict 明确要求"合并到 main 后必须创建独立的 Production Cron 验证任务，不应直接把当前任务中的待验证状态静默改为完成"。
+> **执行者**：用户在 Vercel Dashboard 验证并提供证据；Trae 负责归档证据和更新状态字段。
 
 ## 背景
 
@@ -77,4 +80,21 @@ PERSIST-001 的 GPT 证据验收结论为 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WIT
 
 - PERSIST-001 在本任务完成前**不得**归档到 `tasks/completed/`
 - PERSIST-001 的 `production_cron_*` 字段保持 `PENDING_POST_MERGE` / `NOT_TESTED`，直到本任务验证通过
-- 本任务通过后，PERSIST-001 可正式归档，并激活 HARDEN-001 或 ROUTING-001
+- 本任务通过后，PERSIST-001 可正式归档，并激活 ROUTING-001（HARDEN-001 已于 2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 单独激活，不再依赖本任务）
+
+## 与 HARDEN-001 的并行关系
+
+- 本任务与 HARDEN-001 并行推进，互不阻塞
+- HARDEN-001 启动**不依赖**本任务通过；本任务的用户证据收集**不依赖** HARDEN-001 完成
+- 两条线仅在 PERSIST-001 正式归档门禁处汇合：本任务通过 + HARDEN-001 通过 → PERSIST-001 归档 → 解除 ROUTING-001 阻塞
+- HARDEN-001 实施过程中不得触及 `/api/worker/recover` 或 Cron 配置
+
+## Review History
+
+### 2026-07-21｜激活（POST-MERGE-PARALLEL-ACTIVATION-01）
+
+- 触发：POST-MERGE-PARALLEL-ACTIVATION-01 任务卡激活
+- 操作：从 `tasks/backlog/PROD-CRON-VERIFY.md` 移至 `tasks/active/PROD-CRON-VERIFY.md`；状态从 `pending` 推进为 `active / awaiting_user_evidence / nextActor=user`
+- 并行声明：HARDEN-001 同时激活为主线任务；PERSIST-001 保持 `gpt_evidence_review_pass` 不归档
+- 用户下一步：在 Vercel Dashboard 验证最新 main Production Deployment（注意：Trae 落盘本激活决策后会产生新的 main commit，应验证激活 commit 之后最新 main HEAD 对应的 Production Deployment，不要只固定检查 `f0e28dd` 或 `f8e5f48`）
+- Trae 不得在用户证据完整前将 `production_cron_*` 改为 `VERIFIED`

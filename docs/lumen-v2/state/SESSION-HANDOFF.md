@@ -1,8 +1,98 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态
+## 当前状态（2026-07-21，POST-MERGE-PARALLEL-ACTIVATION-01 激活后）
 
-- 日期：2026-07-20
+- 日期：2026-07-21
+- **项目主任务（currentTask）**：`HARDEN-001`（`ready_for_trae / nextActor=trae`）
+- 主任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`（从 backlog/ 激活）
+- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`
+- 并行任务文件：`docs/lumen-v2/tasks/active/PROD-CRON-VERIFY.md`（从 backlog/ 激活）
+- **并行任务 2（PERSIST-001，未归档）**：`gpt_evidence_review_pass / nextActor=gpt`
+- 未归档原因：等 PROD-CRON-VERIFY 通过后才归档到 `tasks/completed/`
+- 激活来源：`POST-MERGE-PARALLEL-ACTIVATION-01` 任务卡（GPT 给出，用户授权 R2 路径）
+- 激活 commit 范围：仅任务及状态文件（docs/state-only），不含业务代码
+- blockedTasks：`["ROUTING-001"]`（HARDEN-001 已移出；ROUTING-001 仍禁止启动）
+- `production_cron_registration`：`PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
+- `production_cron_execution`：`NOT_TESTED`（保持，不得提前改 PASS）
+- `mergeCompletedHead`：`f0e28dd`（保持，PERSIST-001 已合并到 main）
+- 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
+
+## A+B 并行激活门禁区分（AC-06）
+
+> 本节明确区分"允许 HARDEN-001 开始"和"禁止 PERSIST-001 正式关闭"两条独立门禁。
+
+### 允许 HARDEN-001 开始（独立门禁，已通过）
+
+- PERSIST-001 已合并到 main（`f0e28dd`），GPT 证据验收 `EVIDENCE_REVIEW_PASS`
+- 内部安全底线（D-034）已在 PERSIST-001 落地，HARDEN-001 在此基础上完成公开发布剩余门禁
+- HARDEN-001 启动**不依赖** PROD-CRON-VERIFY 通过，也**不依赖** PERSIST-001 归档
+- HARDEN-001 实施过程中**禁止**触及 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置
+- HARDEN-001 拆为三个独立批次（HARDEN-001A/B/C），每批次独立 PR + 独立 GPT 验收
+
+### 禁止 PERSIST-001 正式关闭（独立门禁，仍开启）
+
+- PERSIST-001 已合并到 main，但**未归档**到 `tasks/completed/`
+- 归档前置条件：`PROD-CRON-VERIFY` 通过（`production_cron_*` 字段改为 `VERIFIED`）
+- 在 PROD-CRON-VERIFY 通过前：
+  - `production_cron_registration` 保持 `PENDING_POST_MERGE`
+  - `production_cron_execution` 保持 `NOT_TESTED`
+  - `finalClosureFix01DeploymentStatus` 保持 `preview-verified-production-pending-merge`
+  - PERSIST-001 任务文件保持 `gpt_evidence_review_pass / nextActor=gpt`
+- Trae **不得**在用户证据完整前将 `production_cron_*` 改为 `VERIFIED`
+
+### 并行汇合点
+
+- PROD-CRON-VERIFY 通过 + HARDEN-001 通过 → PERSIST-001 归档 → 解除 ROUTING-001 阻塞
+- 任一未通过，ROUTING-001 保持阻塞
+
+## 用户并行动作（PROD-CRON-VERIFY）
+
+用户在 Vercel 中检查最新 main Production Deployment。**注意**：Trae 落盘本激活决策后会产生新的 main commit，因此应验证当时最新 main HEAD 对应的 Production Deployment，不要只固定检查 `f0e28dd` 或 `f8e5f48`。
+
+需提供：
+
+- Production Deployment 为 Ready
+- Deployment ID、URL、时间和对应 commit
+- Cron Jobs 中存在：
+  - Path：`/api/worker/recover`
+  - Schedule：`0 0 * * *`
+- 一次受控执行结果：
+  - HTTP 状态码
+  - 脱敏响应 body
+  - Function Logs
+  - 无鉴权、环境变量及超时错误
+
+自动调度时间为 00:00 UTC，即中国时间 08:00、日本时间 09:00；有 Dashboard Run 或受控手动调用时，不必等待下一次自动调度。
+
+## Trae 下一步（HARDEN-001A 仓库上下文核对与实施）
+
+激活 commit 完成后，立即进入 HARDEN-001A 仓库上下文核对与实施，**不等待** Cron 门禁：
+
+1. 创建分支 `lumen/harden-001a-trae`（基于激活 commit 之后的 main HEAD）
+2. 读取 `docs/lumen-v2/specs/07-ACCEPTANCE-PLAN.md` Gate D 认证子项
+3. 读取 PERSIST-001 已落地的内部安全底线（D-034）实施位置，避免重复实现
+4. 按 TDD 实现 D-012 P0 authentication（未认证、无效凭据、过期凭据、权限不足）
+5. 运行 8 门禁 + 安全回归测试
+6. 创建 PR，状态推进为 `awaiting_gpt_acceptance / nextActor=gpt`
+7. 评估是否需要 Codex 一次有边界的安全审计（参见 HARDEN-001.md Codex 升级条件）
+
+## Stop Conditions（来自任务卡）
+
+出现以下情况立即停止对应分支，不得伪造通过：
+
+- Production Deployment 不是 Ready
+- Cron Jobs 中没有目标路径或 schedule 不一致
+- 调用出现 401、403、5xx 或超时
+- Function Logs 显示缺少环境变量或 Secret
+- 需要把真实密钥写入完成包
+- HARDEN 修改意外触及 PERSIST/Cron 逻辑
+- ROUTING-001 被顺带激活
+- 状态文件与任务文件产生互相冲突的事实
+
+---
+
+## 历史状态（2026-07-20，PERSIST-001 合并到 main 后保留参考）
+
 - 当前任务：`PERSIST-001`
 - 状态：`gpt_evidence_review_pass / nextActor=gpt`（已合并到 main，等 GPT 确认合并 + 决定下一步推进）
 - GPT 证据验收结论：`EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`（2026-07-20）

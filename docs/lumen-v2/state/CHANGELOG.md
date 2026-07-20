@@ -1,5 +1,32 @@
 # 10｜变更日志
 
+## 2026-07-21 - POST-MERGE-PARALLEL-ACTIVATION-01 并行激活 HARDEN-001 + PROD-CRON-VERIFY
+
+- 触发：GPT 任务卡 `POST-MERGE-PARALLEL-ACTIVATION-01`，用户授权 R2 路径，HARDEN 高风险部分升级为 R3。
+- 操作类型：docs(state-only) 激活 commit，不含业务代码。
+- 激活内容：
+  - **HARDEN-001**：从 `tasks/backlog/` 移至 `tasks/active/`；设置为项目主任务；`status=ready_for_trae / nextActor=trae`；含批次拆分计划（HARDEN-001A 认证边界 / HARDEN-001B Provider Key 安全迁移 / HARDEN-001C 公开发布加固，每批次独立 PR + 独立 GPT 验收）。
+  - **PROD-CRON-VERIFY**：从 `tasks/backlog/` 移至 `tasks/active/`；状态从 `pending` 推进为 `active / awaiting_user_evidence / nextActor=user`；与 HARDEN-001 并行推进，不阻塞 HARDEN-001 启动。
+- 状态字段更新：
+  - `currentTask`: `PERSIST-001` → `HARDEN-001`
+  - `activeTaskPath`: `tasks/active/PERSIST-001.md` → `tasks/active/HARDEN-001.md`
+  - `status`: `gpt_evidence_review_pass` → `ready_for_trae`
+  - `nextActor`: `gpt` → `trae`
+  - `phase`: `persistent-generation-closure` → `parallel-activation-harden-and-prod-cron-verify`
+  - `prodCronVerifyTask`: `tasks/backlog/PROD-CRON-VERIFY.md` → `tasks/active/PROD-CRON-VERIFY.md`
+  - `blockedTasks`: `["ROUTING-001", "HARDEN-001"]` → `["ROUTING-001"]`
+  - 新增 `parallelTasks` 数组：记录 PROD-CRON-VERIFY 和 PERSIST-001 的并行状态
+  - 新增 `activationCommitTask / activationCommitDate / activationCommitScope`
+  - `production_cron_registration`: 保持 `PENDING_POST_MERGE`（不得提前改 VERIFIED）
+  - `production_cron_execution`: 保持 `NOT_TESTED`（不得提前改 PASS）
+  - `mergeCompletedHead`: 保持 `f0e28dd`
+- PERSIST-001 状态：保持 `gpt_evidence_review_pass / nextActor=gpt`，**未归档**，等 PROD-CRON-VERIFY 通过后才归档到 `tasks/completed/`。
+- ROUTING-001：仍处于 `blockedTasks`，本轮不启动。
+- 文档同步：STATE.json / SESSION-HANDOFF.md（新增 A+B 并行激活门禁区分节）/ PROJECT-MEMORY.md（新增 6.0/6.1/6.2 节）/ CHANGELOG.md（本节）/ tasks/active/HARDEN-001.md（含批次拆分计划 + Review History）/ tasks/active/PROD-CRON-VERIFY.md（含并行关系节 + Review History）/ tasks/active/PERSIST-001.md（追加未归档声明）。
+- 范围遵守：激活 commit 仅包含任务及状态文件；不修改 PERSIST-001 业务逻辑；不修改 `/api/worker/recover`；不将 Cron 状态标记为已验证；不启动 ROUTING-001；不在激活 commit 中实施 HARDEN 代码；不提交任何 Secret、Token、Cookie、Authorization Header 或未脱敏截图。
+- 用户并行动作：在 Vercel 中检查最新 main Production Deployment（注意：激活 commit 后会产生新的 main HEAD，应验证激活 commit 之后最新 main HEAD 对应的 Production Deployment，不要只固定检查 `f0e28dd` 或 `f8e5f48`）。
+- Trae 下一步：激活 commit 完成后，立即进入 HARDEN-001A 仓库上下文核对与实施，**不等待** Cron 门禁。
+
 ## 2026-07-20 - PERSIST-001 合并到 main（fast-forward push）
 
 - 合并方式：fast-forward push `76d18f7..f0e28dd`（非 force-push，main 是 lumen/persist-001-trae 的祖先）
