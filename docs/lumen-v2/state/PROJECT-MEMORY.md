@@ -107,7 +107,7 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `UI-001` V2 外壳（GPT 第三轮验收 `MVP_PASS`，2026-07-17；R2 唯一 P0 已关闭）。
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
-- [x] `PERSIST-001` 持久化生成闭环（Trae 实施完成，2026-07-18；`awaiting_gpt_acceptance / nextActor=gpt`；12 子任务 + 8 门禁全绿 + 392 tests）。
+- [ ] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；Production Cron 注册与运行仍为合并后强制门禁）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步

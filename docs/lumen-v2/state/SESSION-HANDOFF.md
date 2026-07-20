@@ -4,18 +4,59 @@
 
 - 日期：2026-07-20
 - 当前任务：`PERSIST-001`
-- 状态：`awaiting_gpt_acceptance / nextActor=gpt`
+- 状态：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`
+- GPT 证据验收结论：`EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`（2026-07-20）
 - 当前轮次：`PERSIST-001-FINAL-CLOSURE-FIX-01`（最终修复轮，AC-FIX-01 ~ AC-FIX-10）
 - 上一轮：`PERSIST-001-FINAL-CLOSURE`（HEAD `13ea500`，GPT 最终验收给出 FIX-01 修复包）
 - 本轮（FIX-01）基线：`13ea500`
 - 本轮（FIX-01）HEAD：`1aeec8e`（`feat(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01`）
 - 本轮（FIX-01）HEAD backfill：`08818c6`（`docs(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01 HEAD backfill`）
-- 本轮（FIX-01）Vercel 部署验证补充 commit：本 commit（Vercel Dashboard 验证结果归档）
+- 本轮（FIX-01）Vercel 部署验证补充 commit：`f0bdbed`（Vercel Dashboard 验证结果归档）
 - 分支：`lumen/persist-001-trae`
 - 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
-- GPT 审查：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（含 FINAL-CLOSURE FIX-01 修复包）
+- GPT 审查：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（含 FINAL-CLOSURE FIX-01 修复包 + EVIDENCE_REVIEW_PASS 节）
 - Trae 报告：`docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md`（含 R2 + FINAL-CLOSURE + FCF1 节）
 - 门禁证据：`docs/lumen-v2/evidence/PERSIST-001/gate-results.md`（含 P0 修复轮 2 + FINAL-CLOSURE-Gate + FINAL-CLOSURE-FIX-01-Gate 节）
+
+## GPT 证据验收结论（2026-07-20，EVIDENCE_REVIEW_PASS）
+
+GPT 基于本轮提交的完成摘要和验证证据，给出以下裁决（完整原文已追加到 `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`）：
+
+- **总体结论**：`EVIDENCE_REVIEW_PASS`（仅表示本轮 Vercel 验证归档通过，不代表 GPT 已读取 `f0bdbed` 实际 diff 或独立访问 Vercel 控制台）
+- **AC-FIX-09**：`PASS`
+- **AC-FIX-01**：`PASS`（范围限定为 cron 配置正确 + Vercel 部署接受性；不得被解释为 Production Cron 已注册/触发/端到端验证）
+- **reviewVerdict**：`MVP_PASS_WITH_POST_MERGE_GATE`
+- **Production Cron 注册与运行**：仍为后续强制门禁，不属于本轮已验证内容
+- **Codex 必要性**：`NOT_REQUIRED`（当前为部署证据归档，无高风险条件）
+- **Next Owner**：`Trae / User，进入合并决策流程`
+
+### GPT 建议的状态更新（已落盘到 STATE.json）
+
+- `status: gpt_evidence_review_pass`
+- `reviewVerdict: MVP_PASS_WITH_POST_MERGE_GATE`
+- `nextActor: user_or_trae_for_merge`
+- `production_cron_registration: PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
+- `production_cron_execution: NOT_TESTED`（保持，不得提前改 PASS）
+
+### GPT 明确的禁止行为
+
+- 不得在合并前将 `production_cron_registration` / `production_cron_execution` 提前改为 `VERIFIED` 或 `PASS`
+- 不得因本次 GPT 验收，把报告中的条件性结论改写为 "Production Cron fully verified"
+- 合并到 main 后必须创建独立的 Production Cron 验证任务，不应直接把当前任务中的待验证状态静默改为完成
+
+### GPT 指出的 Diff Risks（非阻塞，需后续留意）
+
+- 本轮声称仅修改文档和状态文件，但变更量 5 files / +578 / -44 对纯归档任务偏大
+- 主要风险：STATE.json 可能存在重复字段/旧字段残留；报告可能残留旧 "Production verified" 表述；新完成包替代桌面协作文件后旧路径引用
+- 实际 diff 未提交给 GPT 核验，本轮无法独立确认五个文件的具体内容、JSON 可解析性、AC-FIX-01/09 一致性
+
+### GPT 列出的合并后必须补齐的证据（非本轮通过必要条件）
+
+- Production commit hash / Deployment ID / URL / Ready 截图或日志
+- Vercel Cron Jobs 中的路径与 schedule
+- `/api/worker/recover` 的运行时间和 HTTP 结果 + Function Logs
+- 无鉴权、环境变量或超时错误的证明
+- 状态字段由 `PENDING_POST_MERGE` 更新为最终状态的 diff
 
 ## 本轮修复摘要（FINAL-CLOSURE-FIX-01）
 

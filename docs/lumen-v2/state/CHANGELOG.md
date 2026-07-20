@@ -1,5 +1,21 @@
 # 10｜变更日志
 
+## 2026-07-20 - PERSIST-001 FINAL-CLOSURE-FIX-01 GPT 证据验收通过（EVIDENCE_REVIEW_PASS）
+
+- 审查目标：`13ea500..f0bdbed`（含 `1aeec8e` 主修复 + `08818c6` HEAD backfill + `f0bdbed` Vercel 验证归档）
+- 结论：`EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`
+- AC-FIX-09：`PASS`（Vercel 部署验证归档通过）
+- AC-FIX-01：`PASS`（范围限定为 cron 配置正确 + Vercel 部署接受性；不含 Production Cron 注册/触发/端到端验证）
+- GPT 明确声明：本轮仅基于 Trae 提交的完成摘要和验证证据；未读取 `f0bdbed` 实际 diff、未检查仓库文件、未独立访问 Vercel 控制台
+- Production Cron 注册：`PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
+- Production Cron 执行：`NOT_TESTED`（保持，不得提前改 PASS）
+- Codex 必要性：`NOT_REQUIRED`
+- Next Owner：`Trae / User，进入合并决策流程`
+- 状态推进：`STATE.json` 由 `awaiting_gpt_acceptance / nextActor=gpt` -> `gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；新增 `reviewVerdict: MVP_PASS_WITH_POST_MERGE_GATE` + `gptEvidenceReviewVerdict: EVIDENCE_REVIEW_PASS` + `gptEvidenceReviewDate: 2026-07-20`
+- GPT 指出的 Diff Risks（非阻塞）：5 files / +578 / -44 对纯归档任务偏大；实际 diff 未提交给 GPT 核验
+- 合并后强制门禁：Production Cron 注册 + 执行验证 + `/api/worker/recover` 生产响应 + Function Logs，必须创建独立任务，不得静默改状态字段
+- 审查文件：`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（追加 EVIDENCE_REVIEW_PASS 节）
+
 ## 2026-07-18 - PERSIST-001 Trae 实施完成（awaiting_gpt_acceptance）
 
 - 触发：STORAGE-001 GPT 验收通过并激活 PERSIST-001（`ready_for_trae / nextActor=trae`）；用户授权在一个任务/分支/最终验收周期内连续执行 D-040 契约收敛 → CloudBase/local/mock adapter → PERSIST 核心闭环 → 三个内部安全单元 → 失败/恢复矩阵与统一 8 门禁。

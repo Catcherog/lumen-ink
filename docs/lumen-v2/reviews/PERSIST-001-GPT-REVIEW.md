@@ -87,3 +87,96 @@ constraints:
 - 状态改为 `changes_requested / nextActor=trae`；
 - 不归档 PERSIST-001，不激活 ROUTING/HARDEN；
 - Trae 只执行上述四个 P0 与直接回归，完成后重新统一回传。
+
+---
+
+## 后续轮次验收摘要
+
+> 完整实施与验收轨迹见 `docs/lumen-v2/state/SESSION-HANDOFF.md` 和 `docs/lumen-v2/state/CHANGELOG.md`。
+
+| 轮次 | 日期 | HEAD | 结论 | 摘要 |
+|------|------|------|------|------|
+| P0 修复轮 | 2026-07-18 | `cf0a080` | `MVP_FAIL` | 修复 P0-01~04，GPT 二轮仍驳回 |
+| P0 修复轮 2 | 2026-07-20 | `af960e3` | `MVP_FAIL` | 修复 P0-01A~C / P0-02A / STATE-01，GPT 给出 FINAL-CLOSURE 修复包 |
+| FINAL-CLOSURE | 2026-07-20 | `13ea500` | `MVP_FAIL` | 一次性修复 AC-01~12，GPT 给出 FIX-01 修复包 |
+| FINAL-CLOSURE-FIX-01 | 2026-07-20 | `1aeec8e` + `08818c6` + `f0bdbed` | `EVIDENCE_REVIEW_PASS` | 修复 AC-FIX-01~10，GPT 证据验收通过 |
+
+---
+
+## FINAL-CLOSURE-FIX-01 证据验收（2026-07-20，EVIDENCE_REVIEW_PASS）
+
+- 验收日期：2026-07-20（Asia/Shanghai）
+- 审查目标：`13ea500..f0bdbed`（含 `1aeec8e` 主修复 + `08818c6` HEAD backfill + `f0bdbed` Vercel 验证归档）
+- 验收方式：基于 Trae 提交的完成摘要和验证证据进行证据审查（非仓库独立验证）
+- 结论：`EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`
+
+### 重要声明
+
+- 本结论仅表示：基于 Trae 提交的完成摘要和验证证据，本轮 Vercel 验证归档通过
+- **不代表** GPT 已读取 `f0bdbed` 的实际 diff、检查仓库文件或独立访问 Vercel 控制台
+- 由于没有提交 `f0bdbed` 的实际 diff，本轮无法独立确认：五个文件的具体内容、JSON 是否可解析、是否确实只修改了所列文件、AC-FIX-01/09 是否在所有位置完全一致、是否存在未披露的状态变更
+
+### Acceptance Criteria Review
+
+- **AC-FIX-09**：`PASS`
+  - Production Branch 保持 `main`；未临时切换生产分支
+  - Preview 分支 `lumen/persist-001-trae` 部署成功；Preview commit `08818c6` 状态为 `Ready`
+  - `vercel.json` 被 Vercel 成功解析
+  - Production Cron 状态明确记录为 `PENDING_POST_MERGE` / `NOT_TESTED`，未声称已验证或运行通过
+  - 已将合并后的生产验证动作写入交接文件
+
+- **AC-FIX-01**：`PASS`（基于当前定义）
+  - 范围：Cron 配置正确 + 配置能够被 Vercel 成功接受并完成部署
+  - Preview Deployment Ready 支持该范围通过
+  - **不得被解释为**：Production Cron 已注册/已触发/生产环境恢复任务已完成端到端验证
+
+- **AC 编号一致性**：`PASS`，基于提交陈述
+  - AC-FIX-01：配置与部署接受性
+  - AC-FIX-09：Vercel 部署验证结果归档
+  - 两者属于不同验收项，当前没有证据表明仍存在混用
+
+### Diff Risks（非阻塞）
+
+- 本轮声称仅修改文档和状态文件，但变更量 5 files / +578 / -44 对纯归档任务偏大
+- 主要风险：STATE.json 可能存在重复字段/旧字段未清除/JSON 状态冲突；报告和交接文件可能残留旧 "Production verified" 表述；578 行新增可能超出单纯 Vercel 验证归档范围；新完成包替代桌面协作文件后原协作流程是否仍引用旧路径
+- 这些风险目前没有构成阻塞，因为提交摘要已明确声称进行了语义统一，但实际 diff 尚未提供给 GPT 核验
+
+### Test Coverage Review
+
+- 本轮是文档和部署证据归档，不要求新增代码单元测试
+- 已提供的有效验证证据：Preview Deployment Ready、Vercel 配置解析成功、Cron 表达式被部署配置接受、Fluid Compute / maxDuration:90 被部署配置接受、分支与生产部署规则符合预期
+- 本轮未覆盖且不应伪装为已覆盖：Production Cron 注册/调度/鉴权、`/api/worker/recover` 生产响应、生产环境变量完整性、超时与运行日志、重试/幂等/恢复业务效果
+
+### Missing Evidence（合并到 main 后必须补齐）
+
+- Production commit hash / Deployment ID / URL / Ready 截图或日志
+- Vercel Cron Jobs 中的路径与 schedule
+- `/api/worker/recover` 的运行时间和 HTTP 结果 + Function Logs
+- 无鉴权、环境变量或超时错误的证明
+- 状态字段由 `PENDING_POST_MERGE` 更新为最终状态的 diff
+
+### Required Fixes
+
+- **本轮无必需修复**
+- 不得在合并前将 `production_cron_registration` / `production_cron_execution` 提前改为 `VERIFIED` 或 `PASS`
+- 不得因本次 GPT 验收，把报告中的条件性结论改写为 "Production Cron fully verified"
+
+### Codex Necessity
+
+- `NOT_REQUIRED`
+- 当前任务属于部署证据与状态归档，没有出现必须由 Codex 介入的高风险条件
+- 升级 Codex 的条件：合并 main 后 Cron 已注册但实际调用失败且涉及鉴权/Token/Secret；恢复接口存在并发/幂等/重试/状态机疑点；Trae 连续两轮无法定位生产运行失败原因；测试和部署均显示成功但恢复业务不变量仍有重大疑点；合并生产前需要完整仓库独立验证
+
+### 状态裁决
+
+- `AC-FIX-09`：`PASS`
+- `PERSIST-001` 当前修复批次：`MVP_PASS_WITH_POST_MERGE_GATE`
+- Production Cron 注册与运行：仍为后续强制门禁，不属于本轮已验证内容
+- 建议状态更新：
+  - `status: gpt_evidence_review_pass`
+  - `reviewVerdict: MVP_PASS_WITH_POST_MERGE_GATE`
+  - `nextActor: user_or_trae_for_merge`
+  - `production_cron_registration: PENDING_POST_MERGE`
+  - `production_cron_execution: NOT_TESTED`
+- 合并到 main 后必须创建独立的 Production Cron 验证任务，不应直接把当前任务中的待验证状态静默改为完成
+- **最终裁决**：PERSIST-001 AC-FIX-09 本轮证据验收通过；允许进入合并流程，Production Cron 注册与运行验证继续作为合并后的强制关闭门禁

@@ -28,8 +28,9 @@ if (state) {
     'awaiting_user_decision',
     'blocked',
     'complete',
+    'gpt_evidence_review_pass',
   ]);
-  const actors = new Set(['trae', 'gpt', 'user', 'none']);
+  const actors = new Set(['trae', 'gpt', 'user', 'none', 'user_or_trae_for_merge']);
   if (!statuses.has(state.status)) errors.push(`Invalid status: ${state.status}`);
   if (!actors.has(state.nextActor)) errors.push(`Invalid nextActor: ${state.nextActor}`);
   if (!state.currentTask) errors.push('STATE.currentTask is required');
