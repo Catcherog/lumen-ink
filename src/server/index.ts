@@ -22,6 +22,7 @@ import providersRouter from './routes/providers.js';
 import detectRouter from './routes/detect.js';
 import { createProjectsRouter } from './routes/projects.js';
 import { createJobsRouter } from './routes/jobs.js';
+import { createWorkerRouter } from './routes/worker.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
 import { getProvider } from './services/providers/ProviderFactory.js';
@@ -215,6 +216,18 @@ app.use(
   createProjectsRouter({ projectService, generationService })
 );
 app.use('/api/jobs', authMiddleware, createJobsRouter(generationService));
+
+// PERSIST-001 P0-01C: explicit worker-recovery endpoint for Vercel Cron.
+// Auth uses CRON_SECRET bearer token, NOT the user JWT middleware, because
+// cron ticks have no user session. Disabled (503) when CRON_SECRET is unset.
+app.use(
+  '/api/worker',
+  createWorkerRouter({
+    deps: persistenceDeps,
+    providerFactory: productionProviderFactory,
+    leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+  })
+);
 
 const publicDir = path.join(__dirname, 'public');
 if (fs.existsSync(publicDir)) {

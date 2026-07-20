@@ -331,3 +331,154 @@ GPT 应按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板启动新窗口验收
 - `nextActor`: `trae` → `gpt`
 - `latestTraeReport`: 本文件
 - 未归档任务，未激活下一任务
+
+---
+
+# PERSIST-001 P0 修复轮 2（2026-07-20）
+
+> 触发：GPT 第二轮验收 `MVP_FAIL`（`docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md` 第二轮 FIX_PACKET）
+> 审查基线：`4e3a1253145b74aa30278ec201208d1baae28f28`
+> 审查 HEAD：`cf0a08014f052ab31233dd15cd5662adf45a6639`
+> FIX_PACKET 范围：`PERSIST001-P0-01A` ~ `PERSIST001-P0-01C` + `PERSIST001-P0-02A` + `PERSIST001-STATE-01`
+> 状态推进：`changes_requested / nextActor=trae` → `awaiting_gpt_acceptance / nextActor=gpt`
+
+## R2.0 执行摘要
+
+按第二轮 FIX_PACKET 修复 5 项问题，其中 P0-03 / P0-04 在首轮已通过，本轮不再触碰。剩余 5 项修复均先写真实失败测试复现（红），再写最小实现使其通过（绿）。8 门禁独立重跑全部 exit 0，server 46 files / 424 tests、client 10 files / 194 tests 全绿。
+
+| 修复项 | 问题 | 修复 |
+|--------|------|------|
+| P0-01A | `pg` 未声明为运行时依赖；部署模式 `ensureReady()` 启动会失败 | `pg` + `@types/pg` 加入 `src/server/package.json` `dependencies`/`devDependencies`；删除冗余 `src/server/types/pg.d.ts` ambient shim；新增 `cloudbase.ensureReady.test.ts`（3 tests）断言 `await import('pg')` 可解析、`ensureReady()` 在 stubbed Pool 下不抛 `PG_MODULE_REQUIRED`、未注入 pg 时确实抛 `PG_MODULE_REQUIRED` |
+| P0-01B | CloudBase PG Storage HTTP 自建路径与官方 OpenAPI 不对齐；缺 `envId` 配置；无合同测试 | `cloudbase.ts` 重写对象上传/下载/删除/exists/签名 URL 路径与请求体，使用官方 `https://<envId>.api.tcloudbasegateway.com/v1/storages/object/<bucketId>/<objectName>` 形态；`select.ts` 用 `envId` + `bucketId` 替代原 `storageBucket`；新增 `cloudbase.http.contract.test.ts`（16 tests）覆盖 5 个操作的 URL、方法、`Authorization: Bearer <service-role>`、`Content-Type`、raw bytes body 与响应解析合同 |
+| P0-01C | 仅依赖模块级内存 Set + `setInterval`，不适用于 Vercel Function 生命周期 | 新增 `worker-recovery.ts`（纯函数 `recoverPendingJobs`，无模块状态）+ `routes/worker.ts`（`POST /api/worker/recover`，使用 `CRON_SECRET` 常量时间比较 Bearer 鉴权）+ `vercel.json` crons 每分钟调用；`src/server/index.ts` 挂载 `createWorkerRouter`；新增 `worker-recovery.test.ts`（6 tests）验证 queued Job 在新实例恢复、lease-expired Job 在新实例接管且旧 worker `updateIfClaimed` 不可发布、并发恢复只有一个胜出、`maxRecover` 上限 |
+| P0-02A | `UnitOfWork.run` 在同一 PoolClient 上 BEGIN/COMMIT/ROLLBACK，但各 Repository 重新 `pool.connect()`，Asset/Version/Project/Job 写入不在同一事务连接 | `cloudbase.ts` 引入 `AsyncLocalStorage<PoolClient>`，`UnitOfWork.run` 内 Repository 方法自动复用当前事务 client；外层调用仍各自 `connect()`；新增 `cloudbase.transaction.contract.test.ts`（4 tests）验证 4 写入 + BEGIN + COMMIT 共享同一 client、抛错时 ROLLBACK 在同一 client、事务外调用各自独立 client、嵌套 UoW 复用外层 client |
+| STATE-01 | STATE.json / SESSION-HANDOFF.md / Trae report / gate evidence 状态不一致 | 本节 + 下方 P0-2 gate results 节 + SESSION-HANDOFF.md 重写为第二轮修复后状态 + STATE.json 推进到 `awaiting_gpt_acceptance / nextActor=gpt` |
+
+## R2.1 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/server/infrastructure/executor/worker-recovery.ts` | P0-01C 显式 worker 恢复入口（纯函数 + maxRecover 上限） |
+| `src/server/infrastructure/executor/worker-recovery.test.ts` | P0-01C 回归测试（6 tests） |
+| `src/server/routes/worker.ts` | P0-01C HTTP 端点 + `CRON_SECRET` 常量时间比较 |
+| `src/server/infrastructure/persistence/cloudbase.ensureReady.test.ts` | P0-01A 部署模式启动验证（3 tests） |
+| `src/server/infrastructure/persistence/cloudbase.http.contract.test.ts` | P0-01B 官方 HTTP API 合同测试（16 tests） |
+| `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` | P0-02A 同事务 PoolClient 共享测试（4 tests） |
+
+## R2.2 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `src/server/package.json` | `pg ^8.13.1` 移到 `dependencies`、新增 `@types/pg ^8.11.10` 到 `devDependencies` |
+| `src/server/package-lock.json` | 同步 pg 运行时依赖 |
+| `src/server/infrastructure/persistence/cloudbase.ts` | AsyncLocalStorage 事务传播 + 官方 CloudBase PG Storage HTTP API + URL builders 导出 |
+| `src/server/infrastructure/persistence/select.ts` | `envId` + `bucketId` 替代原 `storageBucket` 选项 |
+| `src/server/infrastructure/persistence/select.test.ts` | 同步新选项结构 + 新增 missing envId 测试 |
+| `src/server/infrastructure/executor/index.ts` | 导出 `recoverPendingJobs` + `WorkerRecoveryOptions` + `WorkerRecoveryResult` |
+| `src/server/index.ts` | 挂载 `createWorkerRouter`（`/api/worker`） |
+| `vercel.json` | 新增 `crons` 每分钟调用 `/api/worker/recover` |
+| `docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md` | 本节（R2） |
+| `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` | P0 修复轮 2 8 门禁结果 |
+| `docs/lumen-v2/state/SESSION-HANDOFF.md` | 重写为 P0 修复轮 2 后状态 |
+| `docs/lumen-v2/state/STATE.json` | 推进到 `awaiting_gpt_acceptance / nextActor=gpt` |
+
+## R2.3 删除文件
+
+| 文件 | 原因 |
+|------|------|
+| `src/server/types/pg.d.ts` | P0-01A 后 `pg` 已成为正常运行时依赖，不再需要 ambient shim |
+
+## R2.4 关键验证矩阵
+
+### P0-01A：pg 运行时 + ensureReady 启动测试
+
+- ✅ `await import('pg')` 在 Node 运行时解析 `Pool` 构造器
+- ✅ `ensureReady()` 在 stubbed Pool 下不抛 `PG_MODULE_REQUIRED`
+- ✅ `ensureReady()` 在 `import('pg')` 失败时确实抛 `PG_MODULE_REQUIRED`
+- ✅ `package.json` `dependencies` 包含 `pg ^8.13.1`
+
+### P0-01B：官方 CloudBase PG Storage HTTP API 合同
+
+- ✅ 上传：`POST https://<envId>.api.tcloudbasegateway.com/v1/storages/object/<bucketId>/<objectName>`，`Authorization: Bearer <service-role>`，`Content-Type` 为 MIME，body 为 raw bytes
+- ✅ 下载：`GET` 同 URL，返回 raw bytes
+- ✅ 删除：`DELETE` 同 URL，404 视为成功
+- ✅ exists：`HEAD` 同 URL，200 = 存在，404 = 不存在
+- ✅ 签名 URL：`POST https://<envId>.api.tcloudbasegateway.com/v1/storages/object/<bucketId>/<objectName>/signed-url`，body `{expiresIn}`，解析 `{signedURL, fullSignedURL}`
+- ✅ 单 segment 内保留字符（如空格 → `%20`）正确编码
+
+### P0-01C：Vercel Cron worker 恢复
+
+- ✅ `recoverPendingJobs` 是纯函数，无模块状态
+- ✅ queued Job 在新 worker 实例中恢复
+- ✅ lease-expired Job 在新 worker 实例中接管
+- ✅ 旧 worker 在 lease 失效后 `updateIfClaimed` 返回 null，不可发布
+- ✅ 并发恢复只有一个胜出（`JOB_NOT_CLAIMED_BY_CALLER` 被分类为 skipped）
+- ✅ `maxRecover` 上限默认 10，避免超出 Vercel Hobby 300s maxDuration
+- ✅ `/api/worker/recover` 使用 `CRON_SECRET` 常量时间比较 Bearer 鉴权；未设置时返回 503
+- ✅ `vercel.json` crons 每分钟调用一次
+
+### P0-02A：同事务 PoolClient 共享
+
+- ✅ Asset/Version/Project pointer/Job 最终条件写 + BEGIN + COMMIT 全部在同一 PoolClient
+- ✅ 事务回调抛错时 ROLLBACK 在同一 PoolClient
+- ✅ 事务外各 Repository 调用使用各自独立 client
+- ✅ 嵌套 `unitOfWork.run` 复用外层 client
+- ✅ 最终 `updateIfClaimed(succeeded)` 失败时 UoW 回滚，Asset/Version/Project 无新增、activeVersion 不变、Job 非 succeeded、result object 被补偿删除
+
+### STATE-01：状态一致性
+
+- ✅ STATE.json → `awaiting_gpt_acceptance / nextActor=gpt`
+- ✅ SESSION-HANDOFF.md 反映第二轮修复后状态
+- ✅ Trae report 追加 R2 节
+- ✅ gate evidence 追加 P0 修复轮 2 节
+
+## R2.5 范围遵守
+
+- ✅ 只修 `PERSIST001-P0-01A` ~ `P0-01C` + `P0-02A` + `STATE-01`
+- ✅ 未启动 ROUTING-001 / HARDEN-001 / PERSIST-002
+- ✅ 未改变冻结候选 A、Provider 或公开 API 方向
+- ✅ 未使用真实客户数据
+- ✅ 未提交 CloudBase 凭据、service-role token 或未脱敏日志
+- ✅ 精确 `git add <path>`，未提交既有无关工作区修改
+- ✅ P0-03 / P0-04 在首轮已通过，本轮未触碰
+
+## R2.6 P0 修复轮 2 8 门禁结果
+
+详见 `docs/lumen-v2/evidence/PERSIST-001/gate-results.md`（P0 fix round 2 section）。
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 424 tests / 46 files |
+| 6 | Root tests | PASS | 618 combined (194 client + 424 server) |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+Whitespace（仅 P0 修复轮 2 触及的文件）：`git diff --check` — PASS（无错误）。
+
+## R2.7 状态推进
+
+- `status`: `changes_requested` → `awaiting_gpt_acceptance`
+- `nextActor`: `trae` → `gpt`
+- `latestTraeReport`: 本文件
+- 未归档任务，未激活下一任务
+- GPT 验收通过后由 Codex 执行只读事务 + 部署接线 AUDIT，再交 GPT 第三轮验收（按第二轮 FIX_PACKET 状态裁决要求）
+
+## R2.8 GPT 第三轮验收建议
+
+GPT 应按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板启动第三轮验收：
+
+1. 读取本报告 R2 节 + gate-results.md P0 修复轮 2 节 + 第二轮 FIX_PACKET diff
+2. 审查 `cf0a08` → HEAD diff
+3. 核查关键行为：
+   - P0-01A：部署模式 `ensureReady()` 加载 `pg` 不抛 `PG_MODULE_REQUIRED`
+   - P0-01B：CloudBase PG Storage URL/方法/认证/请求体/响应解析与官方 OpenAPI 对齐
+   - P0-01C：queued + lease-expired Job 在新 worker 实例恢复；旧 worker 不可发布
+   - P0-02A：4 类写入共享同一 PoolClient；最终条件失败时 UoW ROLLBACK + result object 补偿删除
+   - STATE-01：STATE.json / SESSION-HANDOFF / report / evidence 一致
+4. 运行 8 门禁独立验证（GitHub Actions 或 clean checkout）
+5. 写入 `docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md`（第三轮节）
+6. 通过则交 Codex 执行只读事务 + 部署接线 AUDIT；驳回则生成明确缺陷

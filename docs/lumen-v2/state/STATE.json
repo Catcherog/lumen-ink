@@ -12,7 +12,7 @@
   "latestTraeReport": "docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md",
   "latestGptReview": "docs/lumen-v2/reviews/PERSIST-001-GPT-REVIEW.md",
   "productionV2Flag": "off",
-  "lastUpdatedAt": "2026-07-18",
+  "lastUpdatedAt": "2026-07-20",
   "lastUpdatedBy": "trae",
   "requiredReads": [
     "AGENTS.md",

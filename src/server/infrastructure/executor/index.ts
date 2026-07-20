@@ -1,9 +1,10 @@
 /**
  * PERSIST-001 JobExecutor adapter registry.
  *
- * Re-exports the local executor (PoC / dev / tests) and the worker executor
- * (real Job execution via GenerationService.executeJob + sweeper recovery).
- * Production wiring selects the appropriate executor based on deployment mode.
+ * Re-exports the local executor (PoC / dev / tests), the worker executor
+ * (in-process queue draining + lease sweeper), and the worker-recovery
+ * function (PERSIST001-P0-01C explicit Vercel-cron entry point for
+ * recovering queued + lease-expired Jobs across Function instances).
  */
 
 export { createLocalJobExecutor } from './local.js';
@@ -12,3 +13,8 @@ export {
   type WorkerExecutorOptions,
   type WorkerExecutor,
 } from './worker.js';
+export {
+  recoverPendingJobs,
+  type WorkerRecoveryOptions,
+  type WorkerRecoveryResult,
+} from './worker-recovery.js';

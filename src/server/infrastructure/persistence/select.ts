@@ -60,7 +60,8 @@ export function selectPersistenceByEnv(
   if (isDeployed) {
     const cloudBaseOptions: Partial<CloudBasePersistenceOptions> = {
       postgresUrl: env.CLOUDBASE_POSTGRES_URL,
-      storageBucket: env.CLOUDBASE_STORAGE_BUCKET,
+      envId: env.CLOUDBASE_ENV_ID,
+      bucketId: env.CLOUDBASE_STORAGE_BUCKET,
       storageToken: env.CLOUDBASE_STORAGE_TOKEN,
       signedUrlTtlSeconds: env.CLOUDBASE_SIGNED_URL_TTL_SECONDS
         ? Number(env.CLOUDBASE_SIGNED_URL_TTL_SECONDS)

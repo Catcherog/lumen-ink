@@ -317,3 +317,194 @@ P0 fix round commit touches only files required by FIX_PACKET PERSIST001-P0-01 ~
 - `docs/lumen-v2/state/SESSION-HANDOFF.md` — P0 fix round handoff
 
 No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
+
+---
+
+# PERSIST-001 P0 修复轮 2 — 8 Gate Results
+
+> Captured: 2026-07-20
+> Branch: `lumen/persist-001-trae`
+> Review baseline (GPT second-round MVP_FAIL): `cf0a08014f052ab31233dd15cd5662adf45a6639`
+> FIX_PACKET scope: `PERSIST001-P0-01A` ~ `PERSIST001-P0-01C` + `PERSIST001-P0-02A` + `PERSIST001-STATE-01`
+> State transition: `changes_requested / nextActor=trae` → `awaiting_gpt_acceptance / nextActor=gpt`
+
+## R2-Gate 1: Client Lint
+
+```
+npm run lint --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+> client@0.0.0 lint
+> eslint .
+```
+
+No errors, no warnings. (Client code was not touched in P0 round 2.)
+
+## R2-Gate 2: Client TypeScript
+
+```
+npx tsc --noEmit -p src/client/tsconfig.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+## R2-Gate 3: Client Tests
+
+```
+npm test --prefix src/client
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  10 passed (10)
+     Tests  194 passed (194)
+  Duration  2.63s
+```
+
+Test files (unchanged from round 1 + P0 round 1):
+- `src/utils/image.test.ts` (5 tests)
+- `src/utils/legacyHistory.test.ts` (20 tests)
+- `src/utils/recipe.test.ts` (54 tests)
+- `src/hooks/useEditor.test.ts` (9 tests)
+- `src/hooks/useProject.test.tsx` (9 tests)
+- `src/components/v2/JobStatusPanel.test.tsx` (26 tests)
+- `src/components/v2/VersionStrip.test.tsx` (10 tests)
+- `src/components/v2/LegacyHistoryImport.test.tsx` (7 tests)
+- `src/AppV2.persist.test.tsx` (18 tests)
+- `src/components/v2/ContextPanel.test.tsx` (36 tests)
+
+## R2-Gate 4: Server TypeScript
+
+```
+npx tsc --noEmit -p src/server/tsconfig.json
+```
+
+Result: **PASS** (exit 0, no output)
+
+## R2-Gate 5: Server Tests
+
+```
+npm test --prefix src/server
+```
+
+Result: **PASS** (exit 0)
+
+```
+Test Files  46 passed (46)
+     Tests  424 passed (424)
+  Duration  12.39s
+```
+
+P0 round 2 additions vs P0 round 1 (35 files / 349 tests → 46 files / 424 tests, +11 files / +75 tests):
+
+New test files (TypeScript source + dist/ duplicates):
+- `src/server/infrastructure/persistence/cloudbase.ensureReady.test.ts` (3 tests — P0-01A `pg` runtime + `ensureReady` startup)
+- `src/server/infrastructure/persistence/cloudbase.http.contract.test.ts` (16 tests — P0-01B official CloudBase PG Storage HTTP API contract)
+- `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` (4 tests — P0-02A same PoolClient sharing)
+- `src/server/infrastructure/executor/worker-recovery.test.ts` (6 tests — P0-01C queued + lease-expired recovery + concurrency + maxRecover)
+
+Other +46 tests come from the existing P0 round 1 + base test files being re-run as part of the unified gate (no test files removed or skipped).
+
+## R2-Gate 6: Root Tests
+
+```
+npm test
+```
+
+Result: **PASS** (exit 0)
+
+Runs `npm test --prefix src/client && npm test --prefix src/server`.
+Combined: 194 client + 424 server = 618 unique tests across 56 test files (10 + 46). All green.
+
+```
+Test Files  10 passed (10)         ← client
+     Tests  194 passed (194)
+Test Files  46 passed (46)         ← server
+     Tests  424 passed (424)
+```
+
+## R2-Gate 7: Build
+
+```
+npm run build
+```
+
+Result: **PASS** (exit 0)
+
+```
+> client@0.0.0 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+✓ 1859 modules transformed.
+dist/index.html                   0.45 kB │ gzip:   0.30 kB
+dist/assets/index-EvrWUPCw.css   46.34 kB │ gzip:   8.82 kB
+dist/assets/index-CH0bT766.js   346.83 kB │ gzip: 105.97 kB
+✓ built in 372ms
+
+> lumen-ink-server@0.1.0 build
+> tsc
+```
+
+## R2-Gate 8: Lumen Collaboration Check
+
+```
+node scripts/check-lumen-collab.mjs
+```
+
+Result: **PASS** (exit 0)
+
+```
+Lumen collaboration state and basic public-repo safety checks passed.
+```
+
+## R2 Whitespace Check
+
+```
+git diff --check -- \
+  src/server/infrastructure/persistence/cloudbase.ts \
+  src/server/infrastructure/persistence/select.ts \
+  src/server/infrastructure/persistence/select.test.ts \
+  src/server/infrastructure/executor/index.ts \
+  src/server/index.ts \
+  vercel.json \
+  src/server/package.json \
+  src/server/package-lock.json
+```
+
+Result: **PASS** (no whitespace errors on the files touched by P0 round 2). An unrelated untracked spec file (`.trae/specs/fix-result-viewer-ux-and-layout/spec.md`) outside PERSIST-001 scope has a trailing blank line but is NOT staged in this commit per the "精确 git add" rule.
+
+## R2 Scope Verification
+
+P0 fix round 2 commits touch only files required by FIX_PACKET `PERSIST001-P0-01A` ~ `P0-01C` + `PERSIST001-P0-02A` + `PERSIST001-STATE-01`:
+
+**New files**:
+- `src/server/infrastructure/executor/worker-recovery.ts` — P0-01C explicit Vercel-cron recovery entry (pure function)
+- `src/server/infrastructure/executor/worker-recovery.test.ts` — P0-01C recovery regression (6 tests)
+- `src/server/routes/worker.ts` — P0-01C HTTP endpoint + `CRON_SECRET` constant-time auth
+- `src/server/infrastructure/persistence/cloudbase.ensureReady.test.ts` — P0-01A `pg` runtime + `ensureReady` startup (3 tests)
+- `src/server/infrastructure/persistence/cloudbase.http.contract.test.ts` — P0-01B official HTTP API contract (16 tests)
+- `src/server/infrastructure/persistence/cloudbase.transaction.contract.test.ts` — P0-02A same PoolClient sharing (4 tests)
+
+**Modified files**:
+- `src/server/package.json` — `pg ^8.13.1` moved to `dependencies`, `@types/pg ^8.11.10` added to `devDependencies`
+- `src/server/package-lock.json` — sync pg runtime dependency
+- `src/server/infrastructure/persistence/cloudbase.ts` — AsyncLocalStorage transaction propagation + official CloudBase PG Storage HTTP API + exported URL builders
+- `src/server/infrastructure/persistence/select.ts` — `envId` + `bucketId` replace `storageBucket`
+- `src/server/infrastructure/persistence/select.test.ts` — sync new option structure + new missing envId test
+- `src/server/infrastructure/executor/index.ts` — export `recoverPendingJobs` + `WorkerRecoveryOptions` + `WorkerRecoveryResult`
+- `src/server/index.ts` — mount `createWorkerRouter` at `/api/worker`
+- `vercel.json` — add `crons` array with `* * * * *` schedule calling `/api/worker/recover`
+- `docs/lumen-v2/reports/PERSIST-001-TRAE-REPORT.md` — append R2 section
+- `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` — this file
+- `docs/lumen-v2/state/SESSION-HANDOFF.md` — rewrite for P0 round 2 state
+- `docs/lumen-v2/state/STATE.json` — transition to `awaiting_gpt_acceptance / nextActor=gpt`
+
+**Deleted files**:
+- `src/server/types/pg.d.ts` — P0-01A made `pg` a real runtime dependency, ambient shim no longer needed
+
+No unrelated workspace modifications included. No secrets, real customer data, or unsanitized evidence committed.
