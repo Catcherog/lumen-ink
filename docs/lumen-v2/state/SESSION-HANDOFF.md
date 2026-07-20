@@ -7,7 +7,7 @@
 - **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
 - **HARDEN-001A 已合并到 main**：fast-forward `e08eb3e..4e720b6`（mergeCommit `4e720b6`）
 - **HARDEN-001B 已合并到 main**：fast-forward `4e720b6..7be5f76`（mergeCommit `7be5f76`）
-- **HARDEN-001C 实施分支**：`lumen/harden-001c-trae`（基于 main `7be5f76`，待 push）
+- **HARDEN-001C 实施分支**：`lumen/harden-001c-trae`（基于 main `7be5f76`，已 push 到 `origin/lumen/harden-001c-trae`，HEAD `17e8045`，2026-07-21）
 - 主任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`
 - **当前批次 Trae 报告**：`docs/lumen-v2/reports/HARDEN-001C-TRAE-REPORT.md`
 - **当前批次证据**：`docs/lumen-v2/evidence/HARDEN-001C/gate-results.md`
