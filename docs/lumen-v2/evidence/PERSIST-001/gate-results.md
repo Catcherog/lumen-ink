@@ -872,9 +872,50 @@ Lumen collaboration state and basic public-repo safety checks passed.
 
 **All 8 gates exit 0.** Unified single-run pass per AC-FIX-08.
 
-### FINAL-CLOSURE-FIX-01 Vercel Deployment Verification
+### FINAL-CLOSURE-FIX-01 Vercel Deployment Verification (AC-FIX-09)
 
-AC-FIX-09 要求补充 Vercel 部署验证结果。由于 Vercel CLI 未在本地认证，部署验证由用户通过 Vercel Dashboard 手动完成。验证步骤见 SESSION-HANDOFF.md 的 "Vercel 部署验证步骤" section。验证结果将在用户提供后补充到本 section。
+**Verification mode**: User manual verification via Vercel Dashboard (Trae has no Vercel credentials, `.vercel/` not linked).
+
+**Verification date**: 2026-07-20
+
+**Repository assumptions verified**:
+- ASSUMPTION_TO_VERIFY: Vercel project plan = Hobby (confirmed via Dashboard Settings)
+- ASSUMPTION_TO_VERIFY: Fluid Compute = Enabled (confirmed via Settings > Functions)
+- ASSUMPTION_TO_VERIFY: `13ea500` Vercel failure root cause = cron schedule `* * * * *` violated Hobby "max 1 cron invocation per day" limit (corrected in FIX-01 to `0 0 * * *`)
+
+**Verification results**:
+
+| Item | Value | Status |
+|------|-------|--------|
+| Vercel project | `lumen-ink` | confirmed |
+| Production Branch | `main` | confirmed |
+| Preview Branch | `lumen/persist-001-trae` (all unassigned branches) | confirmed |
+| Production Domain | `lumen-ink.vercel.app` | confirmed |
+| Fluid Compute | Enabled (Settings > Functions) | ✅ PASS |
+| Cron Jobs feature | Enabled (Settings > Cron Jobs) | ✅ PASS |
+| `vercel.json` parsing | Preview deployment `Ready`, no build errors | ✅ PASS |
+| cron configuration syntax | `0 0 * * *` accepted by Vercel | ✅ PASS |
+| Preview branch | `lumen/persist-001-trae` | confirmed |
+| Preview commit | `08818c6` (`docs(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01 HEAD backfill`) | confirmed |
+| Preview deployment status | `Ready` (green) | ✅ PASS |
+| Production cron registration | Cron Jobs page shows no registered jobs (expected: cron jobs only register on Production deployments, and `lumen/persist-001-trae` is a Preview branch) | ⏳ PENDING_POST_MERGE |
+| Production cron execution | Not testable until merge to `main` triggers Production deployment | ⏳ NOT_TESTED |
+
+**Why Production cron registration is PENDING_POST_MERGE**:
+
+Vercel Cron Jobs are registered only on Production Deployments (per Vercel docs). The project's Production Branch is `main`, and `lumen/persist-001-trae` is a Preview branch. Pushing to `lumen/persist-001-trae` only triggers Preview Deployments, which do not register cron jobs. The `Settings > Cron Jobs` page therefore shows the "Get Started" tutorial rather than a job list.
+
+This is expected behavior for a feature/fix branch and is not a configuration error. Production cron registration and execution will be verified after GPT final acceptance and merge to `main`.
+
+**AC-FIX-09 closure**:
+- Configuration correctness: verified (vercel.json syntax PASS, Preview deployment Ready)
+- Production runtime verification: deferred to post-merge gate (see SESSION-HANDOFF.md "下一阶段强制动作")
+- This is NOT a "Production cron verified" claim; it is a "Preview deployment verified, Production cron pending merge" status
+
+**AC-FIX-01 closure**:
+- `vercel.json` cron frequency conforms to Hobby plan (daily): ✅ PASS
+- One successful Vercel deployment status: ✅ PASS (Preview deployment `08818c6` Ready)
+- Per strict reading of AC-FIX-01 ("并取得一次成功的 Vercel 部署状态"), Preview Ready satisfies "successful deployment status" since the deployment completed without errors and Vercel accepted the configuration.
 
 ### FINAL-CLOSURE-FIX-01 Scope Compliance
 

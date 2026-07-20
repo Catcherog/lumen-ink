@@ -701,7 +701,7 @@ Vercel Cron 默认 GET 请求，人工触发保留 POST 入口；同一 handler 
 
 | AC-FIX | 描述 | 状态 | 实现 |
 |--------|------|------|------|
-| AC-FIX-01 | vercel.json cron 频率符合 Hobby + 一次成功部署 | ✅ | cron 从 `* * * * *` 改为 `0 0 * * *`（每天 00:00 UTC = 北京时间 08:00）；Vercel 部署验证由用户提供 |
+| AC-FIX-01 | vercel.json cron 频率符合 Hobby + 一次成功部署 | ✅ | cron 从 `* * * * *` 改为 `0 0 * * *`（每天 00:00 UTC = 北京时间 08:00）；Preview 部署 `08818c6` Ready（Vercel 接受配置，无构建错误）；Production 部署待合并到 `main` |
 | AC-FIX-02 | maxDuration: 90 需 Fluid Compute 启用证据 | ✅ | 用户确认 Fluid Compute 已启用；保留 maxDuration: 90；证据为用户 Dashboard 确认 |
 | AC-FIX-03 | SESSION-HANDOFF 写入实际 baseline/HEAD/分支/状态 | ✅ | SESSION-HANDOFF.md 重写：baseline=`13ea500`，HEAD=`1aeec8e`，分支=`lumen/persist-001-trae`，status=`awaiting_gpt_acceptance / nextActor=gpt` |
 | AC-FIX-04 | Trae report 修正 HEAD/13 files/2 added/11 modified/AC-12 "10 个文件"/FC.3 "8 个修改" | ✅ | FC.2 AC-12 改为"13 个文件（2 新增 + 11 修改）"；FC.3 改为"修改文件 11 个"并补全缺失的 2 个文件；FINAL-CLOSURE HEAD 改为 `13ea500` |
@@ -709,7 +709,7 @@ Vercel Cron 默认 GET 请求，人工触发保留 POST 入口；同一 handler 
 | AC-FIX-06 | 不得声称 cloudbase.transaction.contract.test.ts 自身断言 Project pointer 不变 | ✅ | FC.5 修正：本测试只证明 ROLLBACK + 同 client；Project pointer 不变 + result object 补偿删除由 `src/server/services/GenerationService.p0.test.ts:450-568` 覆盖，已在 FC.5 引用完整路径、测试名、5 个关键断言行号 |
 | AC-FIX-07 | GET/POST worker route 测试继续通过；不复制 recovery handler | ✅ | `routes/worker.ts` 未修改；`worker.test.ts` 未修改；8 门禁验证 6 个测试全部通过 |
 | AC-FIX-08 | 修复后统一运行一次 8 门禁，记录真实输出 | ✅ | 见 FCF1.5 节 + `docs/lumen-v2/evidence/PERSIST-001/gate-results.md` 的 FINAL-CLOSURE-FIX-01-Gate 节 |
-| AC-FIX-09 | 补充 Vercel 部署验证结果 | ✅ | 用户手动验证 Vercel Dashboard，结果记录在 FCF1.6 节 + 完成包 + gate-results.md |
+| AC-FIX-09 | 补充 Vercel 部署验证结果 | ✅ (Preview) / ⏳ (Production pending merge) | Preview 部署 `08818c6` Ready，vercel.json 解析 PASS，cron 语法 PASS，Fluid Compute Enabled；Production cron 注册/执行 PENDING_POST_MERGE（Production Branch=main，需合并后验证）。详见 FCF1.6 节 |
 | AC-FIX-10 | 精确 git add + push + 状态推进 | ✅ | 精确 git add 仅 FCF1.3 范围内文件；push 后 status=`awaiting_gpt_acceptance / nextActor=gpt` |
 
 ### FCF1.3 修改文件清单（精确 git add）
@@ -787,21 +787,47 @@ Vercel Cron 默认 GET 请求，人工触发保留 POST 入口；同一 handler 
 
 ### FCF1.6 Vercel 部署验证（AC-FIX-09）
 
-**验证方式**：用户手动在 Vercel Dashboard 验证（Trae 无 Vercel 凭据，未链接 .vercel/）。
+**Verification mode**: User manual verification via Vercel Dashboard (Trae has no Vercel credentials, `.vercel/` not linked).
 
-**待用户提供的验证结果**（push 后由用户在 Vercel Dashboard 触发部署或确认自动部署）：
-- Vercel 项目名：lumen-ink（基于 git remote `https://github.com/Catcherog/lumen-ink.git` 推测）
-- 部署 URL：待用户提供
-- Deployment ID：待用户提供
-- 部署状态：待用户提供（Ready / Error / Building）
-- Cron Jobs 配置确认：待用户提供（Dashboard → Settings → Cron Jobs 应显示 `/api/worker/recover` 每天 00:00 UTC）
-- Fluid Compute 状态：用户已确认 Enabled
+**Verification date**: 2026-07-20
 
-**Trae 的核实范围**：
-- ✅ `vercel.json` cron `0 0 * * *` 符合 Hobby "每天最多 1 次" 限制（基于 source-register.md 第 105 行官方文档记录）
-- ✅ `vercel.json` maxDuration: 90 在 Fluid Compute 启用后合法（基于 source-register.md 第 74 行 + 用户确认）
-- ✅ 本地 8 门禁全部 PASS（含 build）
-- ⚠️ Vercel 实际部署状态：需用户在 push 后核实并提供结果
+**Verified facts**:
+
+| Item | Value | Status |
+|------|-------|--------|
+| Vercel project | `lumen-ink` | confirmed |
+| Production Branch | `main` | confirmed |
+| Preview Branch | `lumen/persist-001-trae` (all unassigned branches) | confirmed |
+| Production Domain | `lumen-ink.vercel.app` | confirmed |
+| Fluid Compute | Enabled (Settings > Functions) | ✅ PASS |
+| Cron Jobs feature | Enabled (Settings > Cron Jobs) | ✅ PASS |
+| `vercel.json` parsing | Preview deployment `Ready`, no build errors | ✅ PASS |
+| cron configuration syntax | `0 0 * * *` accepted by Vercel | ✅ PASS |
+| Preview branch | `lumen/persist-001-trae` | confirmed |
+| Preview commit | `08818c6` (`docs(lumen-v2): PERSIST-001 FINAL-CLOSURE-FIX-01 HEAD backfill`) | confirmed |
+| Preview deployment status | `Ready` (green) | ✅ PASS |
+| Production cron registration | Cron Jobs page shows no registered jobs (expected: cron jobs only register on Production deployments) | ⏳ PENDING_POST_MERGE |
+| Production cron execution | Not testable until merge to `main` triggers Production deployment | ⏳ NOT_TESTED |
+
+**Closure statement** (per user decision):
+> Preview deployment verified at commit `08818c6`. Vercel accepted the deployment configuration. Production cron registration and execution remain pending merge to `main`.
+
+**NOT claimed** (per user decision):
+- ❌ "Production cron verified"
+- ❌ "Cron runtime passed"
+- ❌ "AC fully production-validated"
+
+**Why Production cron is PENDING_POST_MERGE**: Vercel Cron Jobs are registered only on Production Deployments. The project's Production Branch is `main`, and `lumen/persist-001-trae` is a Preview branch. Pushing to a Preview branch only triggers Preview Deployments, which do not register cron jobs. This is expected behavior for a feature/fix branch and is not a configuration error.
+
+**Trae's verification scope**:
+- ✅ `vercel.json` cron `0 0 * * *` conforms to Hobby "max 1 cron/day" limit (per `source-register.md:105`)
+- ✅ `vercel.json` maxDuration: 90 is legal with Fluid Compute enabled (per `source-register.md:74` + user confirmation)
+- ✅ Local 8 gates all PASS (including build)
+- ✅ Vercel Preview deployment `Ready` (user-verified)
+- ⏳ Vercel Production cron registration: deferred to post-merge gate (see `SESSION-HANDOFF.md` "下一阶段强制动作")
+- ⏳ Vercel Production cron execution: deferred to post-merge gate
+
+**Next-stage mandatory actions** (post-merge to `main`): see `SESSION-HANDOFF.md` "下一阶段强制动作" section for the 5-step verification procedure.
 
 ### FCF1.7 提交信息
 
