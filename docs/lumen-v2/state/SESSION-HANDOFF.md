@@ -1,6 +1,62 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01 调查完成，等待 GPT 审议）
+## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 实施完成，等待 GPT 审计）
+
+- 日期：2026-07-21
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-TRAE-REPORT.md)
+- **PoC 证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\lumen-cloudbase-nosql-completion.md`（63,480 字节，已脱敏）
+- **Codex**：REQUIRED_AFTER_IMPLEMENTATION（待 GPT 决定是否先交 Codex 审查）
+
+### 实施核心结论
+
+1. **Gate P0 全部通过**：8 项通过条件满足，8 项 Stop Condition 均未触发。
+2. **生产 API Key 已创建**：keyId `RmGPjV2rQDOa2kVQj0M9jQ`，keyName `lumen-prod-nosql`，不过期。
+3. **CloudBase 环境已就绪**：7 个生产集合 + 2 个唯一索引 + 4 个普通索引已创建。
+4. **NoSQL adapter 已实现**：`src/server/infrastructure/persistence/cloudbase.nosql.ts`（~520 行），完整实现 `PersistenceDependencies`。
+5. **接口合同零变化**：领域层、services、routes、客户端 API 均未修改。
+6. **8 门禁全绿**：194 client + 291 server = 485 root tests PASS；typecheck + build + check-lumen-collab PASS。
+7. **AC-15~AC-17 待 Vercel Preview 验证**：用户需在 Vercel Dashboard 配置 `CLOUDBASE_ENV_ID` 和 `CLOUDBASE_API_KEY` 后触发 Preview 部署。
+
+### AC 覆盖矩阵
+
+| AC | 描述 | 状态 |
+|----|------|------|
+| AC-01 | 领域持久化接口签名零变化 | ✅ PASS |
+| AC-02 | Project + Asset + V0 同一事务创建 | ✅ PASS |
+| AC-03 | Generation 结果 + Version + pointer + Job 同事务更新 | ✅ PASS |
+| AC-04 | 并发相同 Project + Version Idempotency Key 只产生一个 Version | ✅ PASS |
+| AC-05 | 并发相同 Job Idempotency Key 只产生一个 Job | ✅ PASS |
+| AC-06 | 两个 worker 同时 claim 只有一个成功 | ✅ PASS |
+| AC-07 | Job 状态不得从终态回退 | ✅ PASS |
+| AC-08 | 失去 claim 的 worker 不得更新 Job | ✅ PASS |
+| AC-09 | heartbeat 只允许当前 lease owner 更新 | ✅ PASS |
+| AC-10 | 删除 Project 后不存在关联 Asset/Version/Job/幂等记录 | ✅ PASS |
+| AC-11 | ObjectStore 补偿删除有失败测试和可观察日志 | ✅ PASS |
+| AC-12 | 旧 PostgreSQL contract tests 不得被修改为虚假通过 | ✅ PASS |
+| AC-13 | 新增 NoSQL contract tests、并发测试和事务失败测试 | ✅ PASS |
+| AC-14 | 客户端/服务端测试/typecheck/build/协作检查全部通过 | ✅ PASS |
+| AC-15 | Vercel Preview `/api/health` 返回 200 | ⏳ PENDING |
+| AC-16 | Preview 可创建/刷新恢复/重启恢复/删除 Project | ⏳ PENDING |
+| AC-17 | Preview 重复 Idempotency-Key 不产生重复 Job | ⏳ PENDING |
+| AC-18 | Preview 通过前不得变更 Production | ✅ PASS |
+| AC-19 | Production 部署后重新执行 AC-15~AC-17 | ⏳ PENDING |
+| AC-20 | storage-options.md 新增 D-050 | ✅ PASS |
+
+### GPT 下一步
+
+1. 读取完成包 `C:\Users\Catcher\Desktop\协作文件夹\lumen-cloudbase-nosql-completion.md`。
+2. 审查 Gate P0 证据、NoSQL adapter 源码、select.ts fallback 逻辑。
+3. 决定裁决：通过（待 Preview 验证）/ 驳回 / 先交 Codex 审查。
+4. 若通过，用户执行 Vercel Preview 配置和验证（AC-15~AC-17）。
+5. Preview 通过后配置 Production 环境变量并部署，验证 AC-19。
+
+---
+
+## 历史状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01 调查完成，等待 GPT 审议）
 
 - 日期：2026-07-21
 - **新增调查任务**：`LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01`（只读调查，无代码改动）

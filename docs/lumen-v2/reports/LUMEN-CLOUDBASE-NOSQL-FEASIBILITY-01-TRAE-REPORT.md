@@ -19,8 +19,8 @@
 核心判断：
 
 1. 当前 [persistence.ts](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/src/server/domain/persistence.ts) 中冻结的 `PersistenceDependencies` 接口**没有暴露任何 SQL-specific 类型**（无 `JOIN`、无 `RETURNING`、无 `PoolClient`），只暴露领域级方法（create / get / update / claim / heartbeat / listLeaseExpired 等）。接口本身完全可以在文档数据库上等价实现。**未触发 Stop Condition #1、#3。**
-2. 当前 [cloudbase.ts](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/src/server/infrastructure/persistence/cloudbase.ts) adapter 依赖的 SQL-specific 特性（`RETURNING` / `ON CONFLICT` / `ON DELETE CASCADE` / 条件 `WHERE` 乐观锁）**均有 NoSQL 等价模式**。**未触发 Stop Condition #5**，前提是使用 CloudBase 文档数据库的多文档事务（付费版特性）或重新设计 Idempotency 表的写入顺序。
-3. 调用方 `ProjectService.createProject`（3 步 UoW）和 `GenerationService.executeJob`（4 步 UoW）依赖跨集合原子写入。这要求 CloudBase 文档数据库必须支持跨集合事务。**CloudBase 文档数据库支持事务（10 个文档级），但免费版有性能限制；建议使用付费版或改用方案 B（HTTP 云函数后端）。**
+2. 当前 [cloudbase.ts](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/src/server/infrastructure/persistence/cloudbase.ts) adapter 依赖的 SQL-specific 特性（`RETURNING` / `ON CONFLICT` / `ON DELETE CASCADE` / 条件 `WHERE` 乐观锁）**均有 NoSQL 等价模式**。**未触发 Stop Condition #5**，前提是 CloudBase 文档数据库的多文档事务能力可用（是否需要付费版需通过 Gate P0 PoC 实测确认）或重新设计 Idempotency 表的写入顺序。
+3. 调用方 `ProjectService.createProject`（3 步 UoW）和 `GenerationService.executeJob`（4 步 UoW）依赖跨集合原子写入。这要求 CloudBase 文档数据库必须支持跨集合事务。**CloudBase 文档数据库的事务能力（包括文档上限、性能限制和可用版本）必须通过 Gate P0 PoC 在目标环境中实测验证，不应在调查阶段作为确定性事实陈述。**
 4. CloudBase Node SDK 当前**未安装**，需新增 `@cloudbase/node-sdk` 依赖。
 5. **推荐方案 A（Vercel 直连 + CloudBase Node SDK）作为首选**，理由是改动范围可控（仅 1 个 adapter 文件 + 1 个测试 + 1 个依赖），且 Vercel Hobby maxDuration=300s 已覆盖 Provider 调用时长。
 6. **Stop Condition 评估：未触发任何 Stop Condition**，但有一个关键前提：CloudBase 文档数据库的多文档事务能力必须可用。
@@ -189,8 +189,8 @@
 
 **文档数据库保证方式**：
 - 使用 CloudBase 多文档事务：`db.transaction(async tx => { tx.collection('projects').add(...); tx.collection('assets').add(...); tx.collection('versions').add(...); tx.collection('version_idempotency').add(...); })`
-- **关键前提**：CloudBase 文档数据库事务支持最多 10 个文档的跨集合原子写入，3 步（4 个文档）在限制内。
-- **失败回滚**：fn 抛错 → tx 自动 abort。
+- **关键前提**：CloudBase 文档数据库的事务能力（包括跨集合原子写入的文档上限、性能特征和可用版本）**必须通过 Gate P0 PoC 在目标环境中实测验证**，不应在调查阶段作为确定性事实陈述。3 步（4 个文档）的写入规模预计在能力范围内，但具体上限和限制需以实测为准。
+- **失败回滚**：fn 抛错 -> tx 自动 abort。
 - **补偿保护**：ProjectService 外层仍保留对象上传和补偿删除逻辑（不变）。
 
 ### 不变量 2：相同 Idempotency-Key 不重复创建 Job
@@ -284,23 +284,25 @@ db.collection('generation_jobs').createIndex({ idempotencyKey: 1 }, { sparse: tr
 |---|---|---|
 | **改动范围** | 1 adapter 文件（`cloudbase.ts` 替换为 `cloudbase.nosql.ts`）+ 1 测试文件 + 1 依赖 + 1 个 `select.ts` 选项切换 | 新建 N 个云函数（projects/assets/versions/jobs/auth/objects）+ Vercel 端 HTTP client 适配层 + 凭据管理 |
 | **Secret 风险** | 中：`CLOUDBASE_SECRET_ID` + `CLOUDBASE_SECRET_KEY` 注入 Vercel env；子账号权限需精确收敛到文档数据库 + Storage。**风险点**：Vercel 凭据一旦泄露可读全集。 | 低：Vercel 仅持有 1 个云函数 HTTP 触发 token；CloudBase 凭据锁在云函数环境内，Vercel 永不接触。 |
-| **部署复杂度** | 低：Vercel env vars 一次性配置；adapter 编译到 Vercel Function 内；Cron 兼容性已验证（HARDEN-001B 已合并） | 高：需要部署多个云函数；需要维护云函数版本；CloudBase Workflow 60s 单节点限制无法承载 80-100s Provider 调用（**这是 fatal 问题**，参考 project_memory 教训） |
-| **Cron 兼容性** | 完全兼容：保持现有 Vercel Cron + HTTP 自调用模式 | 不兼容：CloudBase Workflow 60s 限制无法执行长任务；只能用云函数 HTTP 触发，但云函数也有 30s 默认超时（可调） |
-| **maxDuration 覆盖** | Vercel Hobby 300s 已覆盖 80-100s Provider 调用 | 云函数默认 20s，需调高；Workflow 60s 上限无法承载 |
+| **部署复杂度** | 低：Vercel env vars 一次性配置；adapter 编译到 Vercel Function 内；Cron 兼容性已验证（HARDEN-001B 已合并） | 高：需要部署多个云函数；需要维护云函数版本；长任务执行能力需实测验证（前版报告中的 60s 限制为经验记录，非实测结论） |
+| **Cron 兼容性** | 完全兼容：保持现有 Vercel Cron + HTTP 自调用模式 | 需实测验证：云函数/Workflow 的超时上限需在目标环境确认；前版报告中的 60s 限制为经验记录，非实测结论 |
+| **maxDuration 覆盖** | Vercel Hobby 300s 已覆盖 80-100s Provider 调用 | 需实测验证：云函数超时上限和 Workflow 执行限制需在目标环境确认 |
 | **预计长期维护成本** | 中：1 个 adapter 文件 + 1 套测试；SDK 升级风险低 | 高：N 个云函数 + Vercel HTTP client 适配层 + 函数间契约测试；CloudBase 函数调试链路复杂 |
 | **代码隔离性** | 高：替换实现完全在 `src/server/infrastructure/persistence/` 内，领域层无感知 | 中：Vercel 端需要新增 HTTP client 适配，破坏「领域层只依赖接口」原则（除非再做一层抽象） |
 | **Stop Condition 风险** | #4（改动跨多个核心领域模块）**不触发**：仅在 1 个基础设施模块内 | #4 风险更高：Vercel 端 HTTP client 也是基础设施，但范围扩大 |
 | **可观测性** | 中：日志在 Vercel，可直接看 | 低：日志分散在云函数 + Vercel |
 | **求职叙事强度** | 弱：「用了 Vercel + CloudBase NoSQL」，技术深度一般 | 强：「自建多组件后端 + 云函数」，但叙事受 CloudBase Workflow 限制影响 |
 
-### 决定性因素
+### 决定因素
 
-**CloudBase Workflow 60s 单节点限制（来自 project_memory 教训）** 是方案 B 的 **fatal blocker**：
-- Provider 调用时长 80-100s，无法在 CloudBase Workflow 内完成。
-- 只能用云函数 HTTP 触发，但云函数默认超时 20s（可调到 60s 但仍不足）。
-- 长任务需要拆分成多个短任务 + 状态机，这违反「不破坏现有 API 合同」Stop Condition #3。
+**方案 B 的长任务执行能力需要实测验证，不应在调查阶段作为确定性 fatal blocker 陈述**：
 
-**推荐：方案 A（Vercel 直连 + CloudBase Node SDK）**。
+- 前版报告将「CloudBase Workflow 60s 单节点限制」列为方案 B 的 fatal blocker，但该结论来源于 project_memory 中的经验记录，未在目标环境中实测验证。
+- CloudBase 云函数的实际超时上限（包括是否可调整、调整后的最大值）以及 Workflow 的单节点执行限制，**必须通过 Gate P0 PoC 或独立验证才能确认**。
+- Provider 调用时长 80-100s，若 CloudBase 云函数/Workflow 的超时上限确实无法覆盖，则方案 B 不适合承载长任务。但这一结论需以实测为准，不应作为调查阶段的确定性事实。
+- 即使方案 B 存在超时限制，长任务也可以通过拆分 + 状态机模式处理，但这会增加复杂度并可能影响 API 合同——这属于权衡而非确定性 fatal blocker。
+
+**推荐：方案 A（Vercel 直连 + CloudBase Node SDK）**，因为其改动范围最小且不依赖 CloudBase 云函数/Workflow 的长任务能力。
 
 ---
 

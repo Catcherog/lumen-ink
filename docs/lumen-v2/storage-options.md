@@ -462,6 +462,71 @@ review: docs/lumen-v2/reviews/STORAGE-001-GPT-REVIEW.md
 - 验收结论：`MVP_PASS_WITH_DEBT`
 - 附带条件：PERSIST-001 首门完成 D-040 契约收敛；真实 CloudBase 环境与凭据由用户提供，不进入仓库。
 
+## 12. D-050：持久化方案从 PostgreSQL 切换到 CloudBase 文档数据库
+
+> 状态：`frozen`（2026-07-21，基于 Gate P0 PoC 实测证据）
+> 任务：LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01
+> 决策者：用户授权 + Trae 执行 PoC 验证
+
+### 背景
+
+CloudBase 环境 `zeh-d7glqc07me2155c61` 的实际 RuntimeMode 为 `nosql`，PostgreSQL **未开通**（`RuntimeBackends.postgresql = false`）。原 D-037 冻结的「Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage」方案无法在此环境运行。调查任务 `LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01` 确认 `PersistenceDependencies` 接口可在文档数据库上等价实现，用户授权执行目标拓扑 PoC。
+
+### PoC 验证证据（Gate P0，2026-07-21）
+
+| 验证项 | 结果 | 证据 |
+|--------|------|------|
+| 外部 Node.js 环境 + Node SDK 连接 | PASS | `@cloudbase/node-sdk@3.18.3` 通过 `accessKey` 初始化成功 |
+| 跨集合事务提交 | PASS | `db.runTransaction()` 跨 `poc_test_collection_1` 和 `poc_test_collection_2` 原子写入 |
+| 事务失败完整回滚 | PASS | 主动抛错后两个集合均无残留文档 |
+| 并发条件更新（lease claim 模式） | PASS | 两个并发 `where().update()` 只有一个 `updated=1`，另一个 `updated=0` |
+| 并发事务（读-改-写） | PASS | 两个并发 `runTransaction()` 均成功（自动重试），最终值正确 |
+| 唯一索引幂等不变量 | PASS | 重复 `idempotencyKey` 写入抛出 `E11000 duplicate key error` |
+| 非主账号鉴权 | PASS | CloudBase Server API Key（环境级 JWT）通过 `accessKey` 参数工作 |
+| 权限收敛 | PASS | API Key 被正确拒绝跨环境访问（`INVALID_ACCESS_TOKEN`） |
+| Vercel 构建兼容 | PASS | `tsc` 构建通过，SDK 包体积在 Vercel Function 限制内 |
+| 无凭据泄露 | PASS | 凭据从环境变量读取，输出经 JWT 脱敏，临时文件已删除 |
+
+### 决策
+
+**从 CloudBase PostgreSQL + PG Storage 切换到 CloudBase 文档数据库 + CloudBase Storage。**
+
+- 元数据存储：CloudBase 文档数据库（MongoDB 兼容），7 个集合 + 2 个唯一索引 + 4 个查询索引
+- 对象存储：CloudBase Storage（`app.uploadFile/downloadFile/deleteFile/getTempFileURL`）
+- 鉴权方式：CloudBase Server API Key（环境级 JWT，通过 `accessKey` 参数注入 Node SDK）
+- 事务策略：`db.runTransaction()` + `AsyncLocalStorage` 传播事务上下文
+- 幂等策略：`version_idempotency` 和 `job_idempotency` 集合的唯一索引强制
+- 并发策略：条件 `where().update()` 实现 lease claim 乐观锁
+
+### 权衡
+
+| 维度 | PostgreSQL（原方案） | 文档数据库（新方案） |
+|------|---------------------|---------------------|
+| 环境兼容 | 需开通 PostgreSQL（当前环境未开通） | 原生支持（RuntimeMode=nosql） |
+| 事务模型 | ACID + `ON CONFLICT` + `ON DELETE CASCADE` | `runTransaction()` + 应用层级联 + 条件 update |
+| 幂等保证 | `UNIQUE` 约束 + `ON CONFLICT DO NOTHING` | 唯一索引 + E11000 错误捕获 |
+| Lease claim | `UPDATE ... WHERE lease_token IS NULL OR ...` | `where({...}).update({...})` 条件更新 |
+| ObjectStore | PG Storage HTTP API | CloudBase Storage SDK |
+| 凭据 | CAM SecretId/SecretKey | CloudBase Server API Key（环境级 JWT） |
+| 代码改动 | 0（已有 adapter） | 1 新 adapter + select.ts 微调 |
+| 接口影响 | 无 | 无（PersistenceDependencies 签名不变） |
+
+### 回滚条件
+
+- CloudBase 文档数据库事务能力在生产负载下不可靠
+- Vercel Function 包体积超限
+- 唯一索引在高并发下无法可靠阻止重复
+- 需要购买或升级资源（违反 Out of Scope）
+
+### 影响范围
+
+- 新增：`src/server/infrastructure/persistence/cloudbase.nosql.ts`
+- 修改：`src/server/infrastructure/persistence/select.ts`（优先 NoSQL，保留 PostgreSQL fallback）
+- 修改：`src/server/infrastructure/persistence/index.ts`（导出 NoSQL adapter）
+- 修改：`src/server/package.json`（新增 `@cloudbase/node-sdk@^3.18.3`）
+- 不修改：`src/server/domain/persistence.ts`（接口冻结）
+- 不修改：`src/server/services/*`、`src/server/routes/*`、`src/client/*`
+
 ## 12. 修订历史
 
 ### 2026-07-18 修订（用户重新打开局部选型）
