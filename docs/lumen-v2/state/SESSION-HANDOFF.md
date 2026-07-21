@@ -1,24 +1,61 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，HARDEN-001B GPT 证据审查通过，等待合并后进入 HARDEN-001C）
+## 当前状态（2026-07-21，HARDEN-001C 与 CloudBase NoSQL FIX-R1 实施完成，等待 GPT 证据审查）
 
 - 日期：2026-07-21
-- **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001B`（GPT 审查通过，待合并）
-- **状态**：`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`
-- **GPT 裁决**：`EVIDENCE_REVIEW_PASS`（无 S0/S1 风险，无阻塞修复，无 Codex 必要）
+- **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001C`（实施完成，等待 GPT 证据审查）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
 - **HARDEN-001A 已合并到 main**：fast-forward `e08eb3e..4e720b6`（mergeCommit `4e720b6`）
-- **HARDEN-001B 实施提交**：`4483a7c`（分支 `lumen/harden-001b-trae`，已 push 到 origin）
+- **HARDEN-001B 已合并到 main**：fast-forward `4e720b6..7be5f76`（mergeCommit `7be5f76`）
+- **HARDEN-001C 实施分支**：`lumen/harden-001c-trae`（基于 main `7be5f76`，已 push 到 origin，结果提交 `301fd3e`，2026-07-21）
 - 主任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`
-- **当前批次 GPT 验收**：`docs/lumen-v2/reviews/HARDEN-001B-GPT-REVIEW.md`
-- **当前批次 Trae 报告**：`docs/lumen-v2/reports/HARDEN-001B-TRAE-REPORT.md`
-- **当前批次证据**：`docs/lumen-v2/evidence/HARDEN-001B/gate-results.md`
-- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`（未变化，不阻塞 HARDEN-001C）
+- **当前批次 Trae 报告**：`docs/lumen-v2/reports/HARDEN-001C-TRAE-REPORT.md`
+- **当前批次证据**：`docs/lumen-v2/evidence/HARDEN-001C/gate-results.md`
+- **当前批次 Runbook**：`docs/lumen-v2/runbooks/PRODUCTION-FLAG-RUNBOOK.md`
+- **并行任务 1（PROD-CRON-VERIFY）**：`active / awaiting_user_evidence / nextActor=user`（未变化，不阻塞 HARDEN-001C / NoSQL FIX-R1）
 - **并行任务 2（PERSIST-001，未归档）**：`gpt_evidence_review_pass / nextActor=gpt`（未变化）
-- blockedTasks：`["ROUTING-001"]`（HARDEN-001B 合并后仍禁止启动 ROUTING-001；需 HARDEN-001C 也通过 + PROD-CRON-VERIFY 通过）
+- **并行任务 3（LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R1）**：`awaiting_gpt_acceptance / nextActor=gpt`；分支 `lumen/cloudbase-nosql-implement-01-fix-r1`；结果提交 `1fba413`（已 push）；Codex `REQUIRED_AFTER_GPT_REVIEW`
+- blockedTasks：`["ROUTING-001"]`（HARDEN-001C 审查通过后仍禁止启动 ROUTING-001；需 PROD-CRON-VERIFY + HARDEN-001C GPT 通过 + NoSQL GPT + Codex 通过）
 - `production_cron_registration`：`PENDING_POST_MERGE`（保持，不得提前改 VERIFIED）
 - `production_cron_execution`：`NOT_TESTED`（保持，不得提前改 PASS）
-- `mergeCompletedHead`：`4e720b6`（HARDEN-001A 已合并到 main；HARDEN-001B 合并后将更新为新 HEAD）
+- `mergeCompletedHead`：`7be5f76`（HARDEN-001B 已合并到 main；HARDEN-001C 合并后将更新为新 HEAD）
 - 冻结方案：Vercel Hobby + CloudBase PostgreSQL + CloudBase PG Storage
+- NoSQL 状态：当前版本禁止进入 Vercel Preview 或 Production，直到 GPT + Codex 均通过并显式标记 `READY_FOR_PREVIEW`
+
+## LUMEN-P0-PARALLEL-ACCELERATION-01 完成交接（2026-07-21，Trae → GPT）
+
+### 并行执行摘要
+
+- **任务 ID**：LUMEN-P0-PARALLEL-ACCELERATION-01
+- **目标**：通过两个独立 worktree 并行推进 HARDEN-001C 与 CloudBase NoSQL 修复，停止无必要的串行等待，在不进入未经验证的 Preview 或 Production 的前提下尽快恢复 P0 发布链路。
+- **Track A**：HARDEN-001B 合并 + HARDEN-001C 实施
+- **Track B**：CloudBase NoSQL FIX-R1（FIX-01 ~ FIX-08）
+- **停止条件**：未触发（无部分提交、无孤立 Job、无 fileID 丢失、无 namespace 隔离失败、无 Secret 泄露）
+
+### Track A 结果
+
+1. HARDEN-001B 已合并到 main：mergeCommit `7be5f76`，fast-forward `4e720b6..7be5f76`。
+2. HARDEN-001C 实施完成：分支 `lumen/harden-001c-trae`，结果提交 `301fd3e`。
+3. 8 门禁全绿：client 194 + server 292 = 486 root tests passed（+23 vs HARDEN-001B）。
+4. DEBT-HARDEN-001A-02 / DEBT-HARDEN-001A-03 RESOLVED。
+5. 未修改 NoSQL adapter、Cron 路径、ROUTING-001。
+
+### Track B 结果
+
+1. FIX-R1 实施完成：分支 `lumen/cloudbase-nosql-implement-01-fix-r1`，结果提交 `1fba413`。
+2. 8 门禁全绿：client 194 + server 291 = 485 root tests passed。
+3. FIX-01 ~ FIX-08 全部覆盖，15 项测试矩阵通过。
+4. 真实 CloudBase 环境验证通过（事务、幂等、lease、storage、namespace 隔离）。
+5. 未混入 HARDEN-001C；未创建 Production Deployment；未配置 Production NoSQL 环境变量。
+
+### GPT 下一步
+
+1. 审查 HARDEN-001C 证据（`docs/lumen-v2/reports/HARDEN-001C-TRAE-REPORT.md` + `docs/lumen-v2/evidence/HARDEN-001C/gate-results.md`）。
+2. 审查 NoSQL FIX-R1 证据（`docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-TRAE-REPORT.md` + `docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r1-gate-results.md`）。
+3. NoSQL GPT 通过后，执行一次限定 Codex 只读审查（事务传播、幂等竞争、lease 状态机、CloudBase command、Storage fileID/TTL、Preview/Production 隔离）。
+4. 全部通过后才可标记 NoSQL `READY_FOR_PREVIEW`；HARDEN-001C 通过后 HARDEN-001 整体可归档。
+
+---
 
 ## HARDEN-001B GPT 证据审查通过交接（2026-07-21，GPT → Trae 合并）
 

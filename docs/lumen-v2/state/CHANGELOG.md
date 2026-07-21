@@ -1,5 +1,39 @@
 # 10｜变更日志
 
+## 2026-07-21 - LUMEN-P0-PARALLEL-ACCELERATION-01 并行完成 HARDEN-001C + CloudBase NoSQL FIX-R1
+
+- 触发：GPT 任务卡 `LUMEN-P0-PARALLEL-ACCELERATION-01`，授权 Trae 通过两个独立 worktree 并行推进 HARDEN-001C 与 CloudBase NoSQL 修复。
+- 操作类型：docs(state-only) 状态同步 commit，不含新的业务代码修改（业务代码修改已分别在 `lumen/harden-001c-trae` 与 `lumen/cloudbase-nosql-implement-01-fix-r1` 分支提交并 push）。
+- Track A — HARDEN-001B 合并 + HARDEN-001C 实施：
+  - HARDEN-001B 合并到 main：mergeCommit `7be5f76`，fast-forward `4e720b6..7be5f76`。
+  - 从 `7be5f76` 创建 `lumen/harden-001c-trae`，实施完成结果提交 `301fd3e`（已 push）。
+  - 8 门禁全绿：client 194 + server 292 = 486 root tests passed；新增 23 个测试覆盖 AC-C01~AC-C14。
+  - DEBT-HARDEN-001A-02 / DEBT-HARDEN-001A-03 RESOLVED。
+- Track B — CloudBase NoSQL FIX-R1：
+  - 从 NoSQL 实施分支创建 `lumen/cloudbase-nosql-implement-01-fix-r1`，实施完成结果提交 `1fba413`（已 push）。
+  - 修复 FIX-01 ~ FIX-08：事务传播、Job 幂等、CloudBase Commands、Object Storage fileID、删除责任、Preview/Production 隔离、显式 Selector、Evidence Package。
+  - 8 门禁全绿：client 194 + server 291 = 485 root tests passed；15 项测试矩阵覆盖。
+  - 真实 CloudBase 环境验证通过；未创建 Production Deployment；未配置 Production NoSQL 环境变量。
+- 状态字段更新：
+  - `phase`: `harden-001b-gpt-review-pass-pending-merge` → `harden-001c-and-nosql-fix-r1-awaiting-gpt-acceptance`
+  - `currentTaskBatch`: `HARDEN-001B` → `HARDEN-001C`
+  - `status`: `gpt_evidence_review_pass` → `awaiting_gpt_acceptance`
+  - `nextActor`: `user_or_trae_for_merge` → `gpt`
+  - `reviewVerdict`: `EVIDENCE_REVIEW_PASS` → `PENDING_GPT_REVIEW`
+  - `harden001bMergePending`: `true` → `false`
+  - 新增 `harden001bMergedToMain` / `harden001bMergeCommit` / `harden001bMergeType` / `harden001bMergeRange`
+  - 新增 `harden001c*` 字段（基线、分支、结果提交、门禁、debt 关闭、runbook/report/evidence 路径）
+  - `parallelTasks` 新增 `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` 条目；`cloudbaseNoSqlImplement` 新增 `fixR1*` 字段
+  - `mergeCompletedHead`: `4e720b6` → `7be5f76`
+- 范围遵守：
+  - Track A 与 Track B 使用两个独立 worktree，未互相 cherry-pick。
+  - HARDEN-001C 不修改 NoSQL adapter、Cron 路径、ROUTING-001。
+  - NoSQL FIX-R1 不混入 HARDEN-001C，不进入 Preview/Production。
+  - 未将 NoSQL 标记为 `READY_FOR_PREVIEW`（需 GPT + Codex 均通过）。
+  - 未提交任何 API Key、JWT Secret、fileID 或未脱敏证据。
+- 文档同步：STATE.json / PROJECT-MEMORY.md / SESSION-HANDOFF.md / CHANGELOG.md（本节）。
+- GPT 下一步：分别审查 HARDEN-001C 与 NoSQL FIX-R1 证据；NoSQL GPT 通过后执行一次限定 Codex 只读审查。
+
 ## 2026-07-21 - POST-MERGE-PARALLEL-ACTIVATION-01 并行激活 HARDEN-001 + PROD-CRON-VERIFY
 
 - 触发：GPT 任务卡 `POST-MERGE-PARALLEL-ACTIVATION-01`，用户授权 R2 路径，HARDEN 高风险部分升级为 R3。
