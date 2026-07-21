@@ -56,6 +56,16 @@ import type {
 } from '../../domain/persistence.js';
 
 // --- CloudBase Node SDK types (imported dynamically at runtime) -----------
+//
+// FIX-R3 AC-01/AC-02/AC-03: Split SDK types to reflect real CloudBase
+// transaction vs non-transaction contracts.
+//
+// Real CloudBase behavior (verified against @cloudbase/node-sdk ^3.18.3
+// types/db.d.ts + official transaction documentation):
+//  - Non-transaction doc(id).get() returns IGetRes { data: any[] } (array)
+//  - Transaction doc(id).get() returns { data: T | null } (single doc/null)
+//  - Transaction collection does NOT support where() or count() — only
+//    doc(id) operations and add() work inside runTransaction
 
 export interface CloudBaseCommand {
   nin(values: unknown[]): unknown;
@@ -75,20 +85,41 @@ export interface CloudBaseCommand {
   inc(value: number): unknown;
 }
 
-interface CloudBaseTransaction {
-  collection(name: string): CloudBaseCollectionRef;
-  commit(): Promise<unknown>;
-  rollback(reason?: unknown): Promise<unknown>;
+/**
+ * AC-03: Transaction collection — no where(), no count().
+ * Real CloudBase transactions only support doc(id) and add(). We narrow
+ * the type so calling where() inside a transaction fails at compile time.
+ */
+interface TransactionCollectionRef {
+  add(data: Record<string, unknown>): Promise<{ id: string }>;
+  doc(id: string): TransactionDocRef;
 }
 
-interface CloudBaseCollectionRef {
+/**
+ * Non-transaction collection — supports where(), count(), doc(), add().
+ */
+interface DatabaseCollectionRef {
   add(data: Record<string, unknown>): Promise<{ id: string }>;
-  doc(id: string): CloudBaseDocRef;
+  doc(id: string): DatabaseDocRef;
   where(query: unknown): CloudBaseQuery;
   count(): Promise<{ total: number }>;
 }
 
-interface CloudBaseDocRef {
+/**
+ * AC-02: Transaction doc().get() returns { data: T | null } (single doc).
+ * When the document doesn't exist, data is null — NOT an empty array.
+ */
+interface TransactionDocRef {
+  get(): Promise<{ data: unknown | null }>;
+  update(data: Record<string, unknown>): Promise<{ updated: number }>;
+  set(data: Record<string, unknown>): Promise<{ updated: number; upserted: unknown[] }>;
+  remove(): Promise<{ deleted: number }>;
+}
+
+/**
+ * Non-transaction doc().get() returns { data: unknown[] } (array per IGetRes).
+ */
+interface DatabaseDocRef {
   get(): Promise<{ data: unknown[] }>;
   update(data: Record<string, unknown>): Promise<{ updated: number }>;
   set(data: Record<string, unknown>): Promise<{ updated: number; upserted: unknown[] }>;
@@ -103,6 +134,12 @@ interface CloudBaseQuery {
   limit(n: number): CloudBaseQuery;
 }
 
+interface CloudBaseTransaction {
+  collection(name: string): TransactionCollectionRef;
+  commit(): Promise<unknown>;
+  rollback(reason?: unknown): Promise<unknown>;
+}
+
 interface CloudBaseApp {
   database(): CloudBaseDatabase;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
@@ -112,10 +149,37 @@ interface CloudBaseApp {
 }
 
 interface CloudBaseDatabase {
-  collection(name: string): CloudBaseCollectionRef;
+  collection(name: string): DatabaseCollectionRef;
   runTransaction<T = unknown>(callback: (tx: CloudBaseTransaction) => Promise<T>, times?: number): Promise<T>;
   command: CloudBaseCommand;
 }
+
+/**
+ * AC-01: Unify transaction and non-transaction doc().get() return shapes.
+ *
+ * Real CloudBase:
+ *  - Non-transaction doc(id).get() → { data: any[] } (array)
+ *  - Transaction doc(id).get() → { data: T | null } (single doc or null)
+ *
+ * This helper normalizes both to T | null so call sites don't need to
+ * know which context they're in. For the array case, it returns the first
+ * element (or null if empty). For the single-doc case, it returns the
+ * document (or null).
+ */
+function unwrapDocumentData<T>(data: unknown): T | null {
+  if (data === null || data === undefined) return null;
+  if (Array.isArray(data)) {
+    return data.length > 0 ? (data[0] as T) : null;
+  }
+  return data as T;
+}
+
+/**
+ * CloudBase single-transaction operation limit.
+ * Real CloudBase enforces a maximum of 100 doc operations per transaction.
+ * Project deletion that exceeds this limit MUST fail closed (AC-05).
+ */
+const CLOUDBASE_TX_OP_LIMIT = 100;
 
 const TERMINAL_JOB_STATUSES: GenerationJobStatus[] = [
   'succeeded',
@@ -331,8 +395,15 @@ export function createCloudBaseNoSqlPersistence(
   /**
    * Get a collection reference. Inside a transaction, uses the transaction's
    * collection method so all operations are atomic. Outside, uses the db.
+   *
+   * FIX-R3 AC-03: The return type is a union of DatabaseCollectionRef
+   * (non-transaction, has where()) and TransactionCollectionRef (transaction,
+   * NO where()). This means TypeScript will REJECT any attempt to call
+   * where() on the result — because TransactionCollectionRef doesn't have it.
+   * Code that needs where() MUST use getDb().collection() directly to make
+   * it explicit that the call is non-transactional.
    */
-  function collection(name: string): CloudBaseCollectionRef {
+  function collection(name: string): DatabaseCollectionRef | TransactionCollectionRef {
     const ctx = transactionStorage.getStore();
     if (ctx) {
       return ctx.tx.collection(name);
@@ -368,10 +439,10 @@ export function createCloudBaseNoSqlPersistence(
 
   async function resolveFileId(storageKey: string): Promise<string> {
     const res = await collection(COLLECTIONS.objectMetadata).doc(storageKey).get();
-    if (res.data.length === 0) {
+    const meta = unwrapDocumentData<{ fileID?: string }>(res.data);
+    if (!meta) {
       throw new Error(`OBJECT_NOT_FOUND: ${storageKey}`);
     }
-    const meta = res.data[0] as { fileID?: string };
     if (!meta.fileID) {
       throw new Error(`OBJECT_METADATA_CORRUPT: ${storageKey}`);
     }
@@ -409,7 +480,7 @@ export function createCloudBaseNoSqlPersistence(
     async get(id: string): Promise<Project | null> {
       assertReady();
       const res = await collection(COLLECTIONS.projects).doc(id).get();
-      return fromDoc<Project>(res.data[0]);
+      return fromDoc<Project>(unwrapDocumentData(res.data));
     },
 
     async updatePointers(
@@ -427,37 +498,81 @@ export function createCloudBaseNoSqlPersistence(
       }
       if (Object.keys(update).length === 0) {
         const existing = await collection(COLLECTIONS.projects).doc(id).get();
-        const proj = fromDoc<Project>(existing.data[0]);
+        const proj = fromDoc<Project>(unwrapDocumentData(existing.data));
         if (!proj) throw new Error(`PROJECT_NOT_FOUND: ${id}`);
         return proj;
       }
       await collection(COLLECTIONS.projects).doc(id).update(update);
       const res = await collection(COLLECTIONS.projects).doc(id).get();
-      const proj = fromDoc<Project>(res.data[0]);
+      const proj = fromDoc<Project>(unwrapDocumentData(res.data));
       if (!proj) throw new Error(`PROJECT_NOT_FOUND: ${id}`);
       return proj;
     },
 
     /**
-     * NOSQL-R2-05: Only delete database entity metadata. Storage object
-     * cleanup (uploadFile/deleteFile/downloadFile/getTempFileURL) is the
-     * responsibility of ProjectService.deleteProject() AFTER the metadata
-     * transaction commits. This prevents irreversible Storage side-effects
-     * if the DB transaction rolls back.
+     * NOSQL-R2-05 + FIX-R3 AC-04/AC-05: Only delete database entity metadata.
+     * Storage object cleanup is the responsibility of ProjectService.
+     * deleteProject() AFTER the metadata transaction commits.
      *
-     * `object_metadata` records are NOT deleted here because they are
-     * tightly coupled to Storage objects — ProjectService needs them to
-     * resolve storageKey -> fileID for Storage cleanup after commit.
-     * ProjectService.deleteProject() is responsible for deleting both the
-     * Storage objects and their `object_metadata` records post-commit.
+     * FIX-R3 AC-04: No where() calls inside the transaction. Real CloudBase
+     * transactions only support doc(id) operations. We pre-fetch all child
+     * doc IDs OUTSIDE the transaction (using the non-transaction db), then
+     * remove each doc by ID INSIDE the transaction.
+     *
+     * FIX-R3 AC-05: Enforce CloudBase's 100-operation-per-transaction limit.
+     * If the total number of doc operations (all child docs + project doc)
+     * exceeds 100, throw CLOUDBASE_TX_LIMIT_EXCEEDED and delete NOTHING.
+     * Partial deletion is forbidden — fail closed.
+     *
+     * `object_metadata` records are NOT deleted here (tightly coupled to
+     * Storage objects; ProjectService cleans them up post-commit).
      */
     async deleteCascade(id: string): Promise<void> {
       assertReady();
-      await collection(COLLECTIONS.versionIdempotency).where({ projectId: id }).remove();
-      await collection(COLLECTIONS.jobs).where({ projectId: id }).remove();
-      await collection(COLLECTIONS.jobIdempotency).where({ projectId: id }).remove();
-      await collection(COLLECTIONS.versions).where({ projectId: id }).remove();
-      await collection(COLLECTIONS.assets).where({ projectId: id }).remove();
+
+      // AC-04: Pre-fetch doc IDs using the NON-transaction db.
+      // getDb().collection() bypasses the transaction context, reading
+      // from the committed state. This is safe because:
+      //  - If a pre-fetched doc is already gone at commit time, remove()
+      //    returns { deleted: 0 } — harmless no-op.
+      //  - If a new doc is added after pre-fetch, it's not in our list,
+      //    but the project doc is deleted so the orphan is harmless.
+      const childCollections = [
+        COLLECTIONS.versionIdempotency,
+        COLLECTIONS.jobs,
+        COLLECTIONS.jobIdempotency,
+        COLLECTIONS.versions,
+        COLLECTIONS.assets,
+      ];
+
+      const idsByCollection: { collection: string; ids: string[] }[] = [];
+      for (const collName of childCollections) {
+        const res = await getDb().collection(collName).where({ projectId: id }).get();
+        const ids = res.data.map((doc) => (doc as { _id: string })._id);
+        idsByCollection.push({ collection: collName, ids });
+      }
+
+      // AC-05: Count total doc operations. +1 for the project doc itself.
+      const totalOps =
+        idsByCollection.reduce((sum, { ids }) => sum + ids.length, 0) + 1;
+      if (totalOps > CLOUDBASE_TX_OP_LIMIT) {
+        throw new Error(
+          `CLOUDBASE_TX_LIMIT_EXCEEDED: project ${id} requires ${totalOps} ` +
+          `doc operations, limit is ${CLOUDBASE_TX_OP_LIMIT}. ` +
+          `Refusing partial deletion — fail closed.`
+        );
+      }
+
+      // AC-04: Inside the transaction, remove each doc by ID.
+      // collection() returns the transaction collection when inside
+      // unitOfWork.run(). Transaction collections only support doc(id)
+      // operations — no where().
+      for (const { collection: collName, ids } of idsByCollection) {
+        for (const docId of ids) {
+          await collection(collName).doc(docId).remove();
+        }
+      }
+      // Finally remove the project doc itself.
       await collection(COLLECTIONS.projects).doc(id).remove();
     },
   };
@@ -474,12 +589,12 @@ export function createCloudBaseNoSqlPersistence(
     async get(id: string): Promise<Asset | null> {
       assertReady();
       const res = await collection(COLLECTIONS.assets).doc(id).get();
-      return fromDoc<Asset>(res.data[0]);
+      return fromDoc<Asset>(unwrapDocumentData(res.data));
     },
 
     async listByProject(projectId: string): Promise<Asset[]> {
       assertReady();
-      const res = await collection(COLLECTIONS.assets).where({ projectId }).get();
+      const res = await getDb().collection(COLLECTIONS.assets).where({ projectId }).get();
       return fromDocArray<Asset>(res.data);
     },
   };
@@ -501,22 +616,25 @@ export function createCloudBaseNoSqlPersistence(
       assertReady();
       const idemId = idempotencyDocId(projectId, idempotencyKey);
       // Fast path: check if idempotency record already exists.
+      // AC-01: unwrapDocumentData handles both array (non-tx) and single-doc
+      // (tx) return shapes.
       const existing = await collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
-      if (existing.data.length > 0) {
-        const idemRecord = existing.data[0] as { versionId: string };
+      const existingDoc = unwrapDocumentData<{ versionId: string }>(existing.data);
+      if (existingDoc) {
         const existingVersion = await collection(COLLECTIONS.versions)
-          .doc(idemRecord.versionId)
+          .doc(existingDoc.versionId)
           .get();
-        const v = fromDoc<Version>(existingVersion.data[0]);
+        const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
         if (v) return v;
       }
       // Atomic creation via runTransaction. CloudBase transaction supports
       // doc(id).get() / add() / doc(id).set() inside the callback.
       try {
         await getDb().runTransaction(async (tx) => {
+          // AC-02: Transaction doc().get() returns { data: T | null }.
           // Re-check inside transaction to guard against concurrent inserts.
           const recheck = await tx.collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
-          if (recheck.data.length > 0) {
+          if (recheck.data) {
             return; // Another caller won; we will fall through to the retry below.
           }
           await tx.collection(COLLECTIONS.versions).add(toDoc(version));
@@ -534,12 +652,12 @@ export function createCloudBaseNoSqlPersistence(
         if (msg.includes('E11000') || msg.includes('duplicate key')) {
           // Concurrent insert won; return the existing version.
           const retry = await collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
-          if (retry.data.length > 0) {
-            const idemRecord = retry.data[0] as { versionId: string };
+          const retryDoc = unwrapDocumentData<{ versionId: string }>(retry.data);
+          if (retryDoc) {
             const existingVersion = await collection(COLLECTIONS.versions)
-              .doc(idemRecord.versionId)
+              .doc(retryDoc.versionId)
               .get();
-            const v = fromDoc<Version>(existingVersion.data[0]);
+            const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
             if (v) return v;
           }
         }
@@ -550,12 +668,12 @@ export function createCloudBaseNoSqlPersistence(
     async get(id: string): Promise<Version | null> {
       assertReady();
       const res = await collection(COLLECTIONS.versions).doc(id).get();
-      return fromDoc<Version>(res.data[0]);
+      return fromDoc<Version>(unwrapDocumentData(res.data));
     },
 
     async listByProject(projectId: string): Promise<Version[]> {
       assertReady();
-      const res = await collection(COLLECTIONS.versions)
+      const res = await getDb().collection(COLLECTIONS.versions)
         .where({ projectId })
         .orderBy('createdAt', 'asc')
         .get();
@@ -607,27 +725,30 @@ export function createCloudBaseNoSqlPersistence(
       const idemId = idempotencyDocId(input.projectId, input.idempotencyKey);
 
       // Fast path: check if idempotency record already exists.
+      // AC-01: unwrapDocumentData handles both array (non-tx) and single-doc
+      // (tx) return shapes.
       const existing = await collection(COLLECTIONS.jobIdempotency).doc(idemId).get();
-      if (existing.data.length > 0) {
-        const idemRecord = existing.data[0] as { jobId: string };
+      const existingDoc = unwrapDocumentData<{ jobId: string }>(existing.data);
+      if (existingDoc) {
         const existingJob = await collection(COLLECTIONS.jobs)
-          .doc(idemRecord.jobId)
+          .doc(existingDoc.jobId)
           .get();
-        const j = fromDoc<GenerationJob>(existingJob.data[0]);
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(existingJob.data));
         if (j) return { job: j, created: false };
       }
 
       // Atomic creation via runTransaction.
       try {
         const result = await getDb().runTransaction(async (tx) => {
+          // AC-02: Transaction doc().get() returns { data: T | null }.
           // Re-check inside transaction to guard against concurrent inserts.
           const recheck = await tx.collection(COLLECTIONS.jobIdempotency).doc(idemId).get();
-          if (recheck.data.length > 0) {
-            const idemRecord = recheck.data[0] as { jobId: string };
+          if (recheck.data) {
+            const recheckDoc = recheck.data as { jobId: string };
             const existingJob = await tx.collection(COLLECTIONS.jobs)
-              .doc(idemRecord.jobId)
+              .doc(recheckDoc.jobId)
               .get();
-            const j = fromDoc<GenerationJob>(existingJob.data[0]);
+            const j = fromDoc<GenerationJob>(unwrapDocumentData(existingJob.data));
             if (j) return { job: j, created: false };
             return null; // fall through to retry path below
           }
@@ -651,12 +772,12 @@ export function createCloudBaseNoSqlPersistence(
       }
       // E11000 or transaction returned null -> another caller won.
       const retry = await collection(COLLECTIONS.jobIdempotency).doc(idemId).get();
-      if (retry.data.length > 0) {
-        const idemRecord = retry.data[0] as { jobId: string };
+      const retryDoc = unwrapDocumentData<{ jobId: string }>(retry.data);
+      if (retryDoc) {
         const existingJob = await collection(COLLECTIONS.jobs)
-          .doc(idemRecord.jobId)
+          .doc(retryDoc.jobId)
           .get();
-        const j = fromDoc<GenerationJob>(existingJob.data[0]);
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(existingJob.data));
         if (j) return { job: j, created: false };
       }
       throw new Error(`IDEMPOTENCY_RESOLVE_FAILED: ${idemId}`);
@@ -665,7 +786,7 @@ export function createCloudBaseNoSqlPersistence(
     async get(id: string): Promise<GenerationJob | null> {
       assertReady();
       const res = await collection(COLLECTIONS.jobs).doc(id).get();
-      return fromDoc<GenerationJob>(res.data[0]);
+      return fromDoc<GenerationJob>(unwrapDocumentData(res.data));
     },
 
     async update(id: string, patch: JobPatch): Promise<GenerationJob> {
@@ -677,7 +798,7 @@ export function createCloudBaseNoSqlPersistence(
         if (res.updated === 0) throw new Error(`JOB_NOT_FOUND: ${id}`);
       }
       const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-      const j = fromDoc<GenerationJob>(doc.data[0]);
+      const j = fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
       if (!j) throw new Error(`JOB_NOT_FOUND: ${id}`);
       return j;
     },
@@ -693,7 +814,7 @@ export function createCloudBaseNoSqlPersistence(
       const update = buildUpdateFromPatch(patch, cmd);
       if (Object.keys(update).length === 0) {
         const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-        const j = fromDoc<GenerationJob>(doc.data[0]);
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
         if (!j) return null;
         if (j.leaseToken !== leaseToken || isTerminalStatus(j.status)) return null;
         return j;
@@ -706,7 +827,7 @@ export function createCloudBaseNoSqlPersistence(
       const res = await getDb().collection(COLLECTIONS.jobs).where(query).update(update);
       if (res.updated === 0) return null;
       const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-      return fromDoc<GenerationJob>(doc.data[0]);
+      return fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
     },
 
     /**
@@ -718,7 +839,7 @@ export function createCloudBaseNoSqlPersistence(
       const update = buildUpdateFromPatch(patch, cmd);
       if (Object.keys(update).length === 0) {
         const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-        const j = fromDoc<GenerationJob>(doc.data[0]);
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
         if (!j) return null;
         if (isTerminalStatus(j.status)) return null;
         return j;
@@ -730,7 +851,7 @@ export function createCloudBaseNoSqlPersistence(
       const res = await getDb().collection(COLLECTIONS.jobs).where(query).update(update);
       if (res.updated === 0) return null;
       const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-      return fromDoc<GenerationJob>(doc.data[0]);
+      return fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
     },
 
     /**
@@ -767,7 +888,8 @@ export function createCloudBaseNoSqlPersistence(
       const res = await getDb().collection(COLLECTIONS.jobs).where(query).update(update);
       if (res.updated > 0) return true;
       const doc = await collection(COLLECTIONS.jobs).doc(id).get();
-      if (doc.data.length === 0) throw new Error(`JOB_NOT_FOUND: ${id}`);
+      const j = unwrapDocumentData<GenerationJob>(doc.data);
+      if (!j) throw new Error(`JOB_NOT_FOUND: ${id}`);
       return false;
     },
 
@@ -799,7 +921,7 @@ export function createCloudBaseNoSqlPersistence(
     async listActiveByProject(projectId: string): Promise<GenerationJob[]> {
       assertReady();
       const cmd = getCommand();
-      const res = await collection(COLLECTIONS.jobs)
+      const res = await getDb().collection(COLLECTIONS.jobs)
         .where({
           projectId,
           status: cmd.in(ACTIVE_JOB_STATUSES),
@@ -814,7 +936,7 @@ export function createCloudBaseNoSqlPersistence(
     async listLeaseExpired(now: string): Promise<GenerationJob[]> {
       assertReady();
       const cmd = getCommand();
-      const res = await collection(COLLECTIONS.jobs)
+      const res = await getDb().collection(COLLECTIONS.jobs)
         .where(
           cmd.and([
             { status: cmd.in(ACTIVE_JOB_STATUSES) },
@@ -906,7 +1028,7 @@ export function createCloudBaseNoSqlPersistence(
     async get(key: string): Promise<AuthThrottleBucket | null> {
       assertReady();
       const res = await collection(COLLECTIONS.authThrottle).doc(key).get();
-      const doc = res.data[0] as AuthThrottleBucket | undefined;
+      const doc = unwrapDocumentData<AuthThrottleBucket>(res.data);
       return doc || null;
     },
 

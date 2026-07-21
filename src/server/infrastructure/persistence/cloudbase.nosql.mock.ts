@@ -55,8 +55,14 @@ export interface MockDatabaseHandle {
   command: MockCommand;
 }
 
+/**
+ * FIX-R3 AC-03: Transaction collection does NOT expose where() or count().
+ * Real CloudBase transactions only support doc(id).get/set/update/remove
+ * and add(). Calling where() inside a transaction fails at runtime; we
+ * narrow the type so it fails at compile time instead.
+ */
 export interface MockTransactionHandle {
-  collection(name: string): MockCollectionHandle;
+  collection(name: string): MockTransactionCollectionHandle;
   commit(): Promise<void>;
   rollback(reason?: unknown): Promise<void>;
 }
@@ -68,8 +74,36 @@ export interface MockCollectionHandle {
   count(): Promise<{ total: number }>;
 }
 
+/**
+ * FIX-R3 AC-03: Transaction collection — no where(), no count().
+ * Only doc(id) operations and add() are supported inside a transaction.
+ */
+export interface MockTransactionCollectionHandle {
+  add(data: Record<string, unknown>): Promise<{ id: string }>;
+  doc(id: string): MockTransactionDocHandle;
+}
+
 export interface MockDocHandle {
+  /**
+   * Non-transaction get: returns { data: unknown[] } (array).
+   * Real CloudBase doc().get() outside a transaction returns an array
+   * in `data` (IGetRes.data: any[]).
+   */
   get(): Promise<{ data: unknown[] }>;
+  update(data: Record<string, unknown>): Promise<{ updated: number }>;
+  set(data: Record<string, unknown>): Promise<{ updated: number; upserted: unknown[] }>;
+  remove(): Promise<{ deleted: number }>;
+}
+
+/**
+ * FIX-R3 AC-02: Transaction doc().get() returns { data: unknown | null }
+ * (single document, NOT an array). When the document doesn't exist,
+ * data is null. This matches real CloudBase transaction behavior where
+ * doc(id).get() inside runTransaction returns the document object directly
+ * or null, not wrapped in an array.
+ */
+export interface MockTransactionDocHandle {
+  get(): Promise<{ data: unknown | null }>;
   update(data: Record<string, unknown>): Promise<{ updated: number }>;
   set(data: Record<string, unknown>): Promise<{ updated: number; upserted: unknown[] }>;
   remove(): Promise<{ deleted: number }>;
@@ -274,41 +308,50 @@ interface TransactionOp {
 
 // --- Mock handles ---------------------------------------------------------
 
+/**
+ * Resolve a document by id, applying transaction log overlay.
+ * Shared by both non-transaction and transaction collection handles.
+ */
+function ensureDoc(
+  state: MockCloudBaseState,
+  collectionName: string,
+  id: string,
+  txLog?: TransactionOp[]
+): MockDocument | null {
+  if (txLog) {
+    for (let i = txLog.length - 1; i >= 0; i--) {
+      const op = txLog[i];
+      if (op.collectionName === collectionName && op.id === id) {
+        if (op.type === 'remove') return null;
+        if (op.type === 'add' || op.type === 'set') {
+          return { ...(op.data as MockDocument) };
+        }
+        if (op.type === 'update') {
+          const coll = getCollection(state, collectionName);
+          const existing = coll.docs.get(id);
+          if (existing) return applyUpdate(existing, op.data as Record<string, unknown>);
+          return null;
+        }
+      }
+    }
+  }
+  const coll = getCollection(state, collectionName);
+  const doc = coll.docs.get(id);
+  return doc ? { ...doc } : null;
+}
+
 function createCollectionHandle(
   state: MockCloudBaseState,
   collectionName: string,
   txLog?: TransactionOp[]
 ): MockCollectionHandle {
-  const ensureDoc = (id: string): MockDocument | null => {
-    // Check transaction log first
-    if (txLog) {
-      for (let i = txLog.length - 1; i >= 0; i--) {
-        const op = txLog[i];
-        if (op.collectionName === collectionName && op.id === id) {
-          if (op.type === 'remove') return null;
-          if (op.type === 'add' || op.type === 'set') {
-            return { ...(op.data as MockDocument) };
-          }
-          if (op.type === 'update') {
-            const coll = getCollection(state, collectionName);
-            const existing = coll.docs.get(id);
-            if (existing) return applyUpdate(existing, op.data as Record<string, unknown>);
-            return null;
-          }
-        }
-      }
-    }
-    const coll = getCollection(state, collectionName);
-    const doc = coll.docs.get(id);
-    return doc ? { ...doc } : null;
-  };
 
   return {
     async add(data: Record<string, unknown>): Promise<{ id: string }> {
       const id = (data._id as string) || generateId();
       if (txLog) {
         // Check if already exists in log or in committed state
-        const existing = ensureDoc(id);
+        const existing = ensureDoc(state, collectionName, id, txLog);
         if (existing) {
           const err = new Error('E11000 duplicate key error');
           throw err;
@@ -327,12 +370,12 @@ function createCollectionHandle(
     doc(id: string): MockDocHandle {
       return {
         async get() {
-          const doc = ensureDoc(id);
+          const doc = ensureDoc(state, collectionName, id, txLog);
           return { data: doc ? [doc] : [] };
         },
         async update(data: Record<string, unknown>) {
           if (txLog) {
-            const existing = ensureDoc(id);
+            const existing = ensureDoc(state, collectionName, id, txLog);
             if (!existing) return { updated: 0 };
             txLog.push({ collectionName, type: 'update', id, data });
             return { updated: 1 };
@@ -355,7 +398,7 @@ function createCollectionHandle(
         },
         async remove() {
           if (txLog) {
-            const existing = ensureDoc(id);
+            const existing = ensureDoc(state, collectionName, id, txLog);
             if (!existing) return { deleted: 0 };
             txLog.push({ collectionName, type: 'remove', id });
             return { deleted: 1 };
@@ -485,6 +528,68 @@ function createCollectionHandle(
   };
 }
 
+/**
+ * FIX-R3 AC-02/AC-03: Transaction collection handle.
+ *
+ * Real CloudBase transactions differ from non-transaction collection
+ * access in two critical ways:
+ *  1. `where()` and `count()` are NOT supported — only `doc(id)` and
+ *     `add()` work inside `runTransaction`. We omit them from the type
+ *     so TypeScript rejects transaction-code that tries to call where().
+ *  2. `doc(id).get()` returns `{ data: T | null }` (single document or
+ *     null when not found), NOT `{ data: T[] }` (array). The non-transaction
+ *     `doc(id).get()` returns an array per IGetRes.
+ */
+function createTransactionCollectionHandle(
+  state: MockCloudBaseState,
+  collectionName: string,
+  txLog: TransactionOp[]
+): MockTransactionCollectionHandle {
+  return {
+    async add(data: Record<string, unknown>): Promise<{ id: string }> {
+      const id = (data._id as string) || generateId();
+      const existing = ensureDoc(state, collectionName, id, txLog);
+      if (existing) {
+        throw new Error('E11000 duplicate key error');
+      }
+      txLog.push({ collectionName, type: 'add', id, data: { ...data, _id: id } });
+      return { id };
+    },
+
+    doc(id: string): MockTransactionDocHandle {
+      return {
+        /**
+         * AC-02: Returns { data: unknown | null } — single document.
+         * This matches real CloudBase transaction behavior where
+         * doc(id).get() inside runTransaction returns the document
+         * object directly (or null if not found), not wrapped in
+         * an array like the non-transaction IGetRes.
+         */
+        async get() {
+          const doc = ensureDoc(state, collectionName, id, txLog);
+          return { data: doc };
+        },
+        async update(data: Record<string, unknown>) {
+          const existing = ensureDoc(state, collectionName, id, txLog);
+          if (!existing) return { updated: 0 };
+          txLog.push({ collectionName, type: 'update', id, data });
+          return { updated: 1 };
+        },
+        async set(data: Record<string, unknown>) {
+          txLog.push({ collectionName, type: 'set', id, data: { ...data, _id: id } });
+          return { updated: 1, upserted: [id] };
+        },
+        async remove() {
+          const existing = ensureDoc(state, collectionName, id, txLog);
+          if (!existing) return { deleted: 0 };
+          txLog.push({ collectionName, type: 'remove', id });
+          return { deleted: 1 };
+        },
+      };
+    },
+  };
+}
+
 function generateId(): string {
   return `mock-${Math.random().toString(36).slice(2, 12)}`;
 }
@@ -502,9 +607,19 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
       const txLog: TransactionOp[] = [];
       const txHandle: MockTransactionHandle = {
         collection(name: string) {
-          return createCollectionHandle(state, name, txLog);
+          return createTransactionCollectionHandle(state, name, txLog);
         },
         async commit() {
+          // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
+          // operations. Fail closed — do NOT partially apply a txLog that
+          // exceeds the limit.
+          const CLOUDBASE_TX_OP_LIMIT = 100;
+          if (txLog.length > CLOUDBASE_TX_OP_LIMIT) {
+            throw new Error(
+              `CLOUDBASE_TX_LIMIT_EXCEEDED: transaction has ${txLog.length} operations, ` +
+              `limit is ${CLOUDBASE_TX_OP_LIMIT}. Project deletion must fail closed.`
+            );
+          }
           // NOSQL-R2-08 scenario 3: Optimistic concurrency control.
           // Before applying the txLog, check if any 'add' operation's _id
           // already exists in the committed state (meaning another

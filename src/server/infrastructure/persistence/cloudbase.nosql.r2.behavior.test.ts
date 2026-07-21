@@ -44,7 +44,8 @@ import {
   createCloudBaseNoSqlPersistence,
   type CloudBaseNoSqlOptions,
 } from './cloudbase.nosql.js';
-import type { Project, Asset, Version, GenerationJob } from '../../domain/persistence.js';
+import type { Project, Asset, Version, GenerationJob, JobExecutor } from '../../domain/persistence.js';
+import { ProjectService } from '../../services/ProjectService.js';
 
 // --- Test fixtures --------------------------------------------------------
 
@@ -464,56 +465,277 @@ describe('NOSQL-R2-08 scenario 9: JobPatch uses real buildUpdateFromPatch', () =
   });
 });
 
-describe('NOSQL-R2-08 scenario 10: Preview namespace cannot read Production data', () => {
-  let prod: Awaited<ReturnType<typeof makeReadyDeps>>;
-  let preview: Awaited<ReturnType<typeof makeReadyDeps>>;
-  beforeEach(async () => {
-    // Two separate adapters pointing at the same env but different namespaces
-    prod = await makeReadyDeps(PROD_OPTIONS);
-    const prodState = mockContainer.state!;
-    const prodApp = mockContainer.app!;
+describe('NOSQL-R2-08 scenario 10: Preview/Production share Mock state, isolated by namespace (AC-09)', () => {
+  it('Prod and Preview share ONE Mock state but cannot read each other DB or Storage data', async () => {
+    // AC-09: Both adapters share ONE MockCloudBaseState (same CloudBase env),
+    // isolated ONLY by CLOUDBASE_DATA_NAMESPACE (collection name prefix) and
+    // CLOUDBASE_STORAGE_PREFIX (cloudPath prefix). This proves the namespace
+    // mechanism — not separate Mock instances — provides isolation.
+    const sharedState = createMockCloudBaseState('test-env');
+    const sharedApp = createMockCloudBaseApp(sharedState);
+    mockContainer.state = sharedState;
+    mockContainer.app = sharedApp;
 
-    // Save prod state, then create preview using a FRESH mock state
-    // (in real CloudBase, both would share the same env but the collection
-    // name prefix isolates them)
-    preview = await makeReadyDeps(PREVIEW_OPTIONS);
-
-    // Restore prod state for prod assertions
-    mockContainer.state = prodState;
-    mockContainer.app = prodApp;
-  });
-
-  it('Production project is invisible to Preview adapter', async () => {
-    // Write a project using the PROD adapter
-    await prod.deps.projects.create(makeProject('p-prod'));
-
-    // Switch the mock to preview's state for preview operations
-    mockContainer.state = createMockCloudBaseState('test-env');
-    mockContainer.app = createMockCloudBaseApp(mockContainer.state);
-    // Re-init preview adapter against its own state
-    const previewState = createMockCloudBaseState('test-env');
-    mockContainer.state = previewState;
-    mockContainer.app = createMockCloudBaseApp(previewState);
+    const prodDeps = createCloudBaseNoSqlPersistence(PROD_OPTIONS);
+    await prodDeps.ensureReady();
     const previewDeps = createCloudBaseNoSqlPersistence(PREVIEW_OPTIONS);
     await previewDeps.ensureReady();
 
-    // Seed a project in preview namespace
+    // --- DB isolation ---
+    await prodDeps.projects.create(makeProject('p-prod'));
     await previewDeps.projects.create(makeProject('p-preview'));
 
-    // Verify namespaces are distinct: prod_projects vs preview_projects
-    expect(previewState.database.collections.has('prod_projects')).toBe(false);
-    expect(previewState.database.collections.has('preview_projects')).toBe(true);
+    // Both collections coexist in the SAME state under different names
+    expect(sharedState.database.collections.has('prod_projects')).toBe(true);
+    expect(sharedState.database.collections.has('preview_projects')).toBe(true);
+    const prodColl = sharedState.database.collections.get('prod_projects')!;
+    const previewColl = sharedState.database.collections.get('preview_projects')!;
+    expect(prodColl.docs.has('p-prod')).toBe(true);
+    expect(prodColl.docs.has('p-preview')).toBe(false);
+    expect(previewColl.docs.has('p-preview')).toBe(true);
+    expect(previewColl.docs.has('p-prod')).toBe(false);
 
-    // Preview adapter cannot see the prod project
-    const fetched = await previewDeps.projects.get('p-prod');
-    expect(fetched).toBeNull();
+    // Cross-namespace reads return null
+    expect(await prodDeps.projects.get('p-preview')).toBeNull();
+    expect(await previewDeps.projects.get('p-prod')).toBeNull();
+    // Own-namespace reads succeed
+    expect((await prodDeps.projects.get('p-prod'))?.id).toBe('p-prod');
+    expect((await previewDeps.projects.get('p-preview'))?.id).toBe('p-preview');
 
-    // But it CAN see its own project
-    const own = await previewDeps.projects.get('p-preview');
-    expect(own).not.toBeNull();
-    expect(own!.id).toBe('p-preview');
+    // --- Storage isolation ---
+    await prodDeps.objects.put('asset-1.png', new Uint8Array([1, 2, 3]), 'image/png');
+    await previewDeps.objects.put('asset-1.png', new Uint8Array([4, 5, 6]), 'image/png');
 
-    await prod.deps.close();
+    // Both files coexist in the SAME storage under different fileIDs
+    const prodFileID = `cloud://test-env/prod/asset-1.png`;
+    const previewFileID = `cloud://test-env/preview/asset-1.png`;
+    expect(sharedState.storage.files.has(prodFileID)).toBe(true);
+    expect(sharedState.storage.files.has(previewFileID)).toBe(true);
+
+    // Each adapter reads its own bytes
+    const prodBytes = await prodDeps.objects.get('asset-1.png');
+    expect(Array.from(prodBytes)).toEqual([1, 2, 3]);
+    const previewBytes = await previewDeps.objects.get('asset-1.png');
+    expect(Array.from(previewBytes)).toEqual([4, 5, 6]);
+
+    await prodDeps.close();
     await previewDeps.close();
+  });
+});
+
+// --- FIX-R3 AC-10: Concurrent idempotency — both transactions read before commit --
+
+describe('FIX-R3 AC-10: concurrent idempotency — both transactions read before commit', () => {
+  it('two interleaved transactions competing for same key -> one winner, one E11000', async () => {
+    // Force both transactions to complete their first doc().get() before
+    // either proceeds to add() + commit. This proves the Mock's commit-time
+    // E11000 detection works when both transactions saw no existing doc.
+    const state = createMockCloudBaseState('test-env');
+    const app = createMockCloudBaseApp(state);
+    const db = app.database();
+
+    let readCount = 0;
+    let resolveBothRead!: () => void;
+    const bothRead = new Promise<void>((resolve) => { resolveBothRead = resolve; });
+
+    const txA = db.runTransaction(async (tx) => {
+      const doc = await tx.collection('idem').doc('p1__shared').get();
+      readCount++;
+      if (readCount === 2) resolveBothRead();
+      await bothRead;
+      expect(doc.data).toBeNull();
+      await tx.collection('idem').add({ _id: 'p1__shared', jobId: 'job-A' });
+      await tx.collection('jobs').add({ _id: 'job-A', projectId: 'p1' });
+      return 'A';
+    });
+
+    const txB = db.runTransaction(async (tx) => {
+      const doc = await tx.collection('idem').doc('p1__shared').get();
+      readCount++;
+      if (readCount === 2) resolveBothRead();
+      await bothRead;
+      expect(doc.data).toBeNull();
+      await tx.collection('idem').add({ _id: 'p1__shared', jobId: 'job-B' });
+      await tx.collection('jobs').add({ _id: 'job-B', projectId: 'p1' });
+      return 'B';
+    });
+
+    const [resultA, resultB] = await Promise.allSettled([txA, txB]);
+
+    const successCount = [resultA, resultB].filter((r) => r.status === 'fulfilled').length;
+    const failCount = [resultA, resultB].filter((r) => r.status === 'rejected').length;
+    expect(successCount).toBe(1);
+    expect(failCount).toBe(1);
+
+    const failed = [resultA, resultB].find(
+      (r) => r.status === 'rejected'
+    ) as PromiseRejectedResult;
+    expect(failed.reason.message).toContain('E11000');
+
+    // One idempotency record, one Job — zero orphans
+    expect(state.database.collections.get('idem')?.docs.size).toBe(1);
+    expect(state.database.collections.get('jobs')?.docs.size).toBe(1);
+  });
+
+  it('adapter createIdempotent handles concurrent E11000 -> one Job, one idem, zero orphans', async () => {
+    const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
+    const jobA = makeJob('job-a', 'p1', 'shared-key');
+    const jobB = makeJob('job-b', 'p1', 'shared-key');
+
+    const [resultA, resultB] = await Promise.all([
+      deps.jobs.createIdempotent(jobA),
+      deps.jobs.createIdempotent(jobB),
+    ]);
+
+    expect(resultA.job.id).toBe(resultB.job.id);
+    expect(resultA.created || resultB.created).toBe(true);
+    expect(resultA.created && resultB.created).toBe(false);
+    expect(state.database.collections.get('prod_generation_jobs')?.docs.size).toBe(1);
+    expect(state.database.collections.get('prod_job_idempotency')?.docs.size).toBe(1);
+
+    await deps.close();
+  });
+});
+
+// --- FIX-R3 AC-05: deleteCascade 100-op limit fail closed -------------------
+
+describe('FIX-R3 AC-05: deleteCascade 100-op limit fail closed', () => {
+  it('project with >100 child docs -> CLOUDBASE_TX_LIMIT_EXCEEDED, no partial deletion', async () => {
+    const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
+
+    // Create a project with 100 assets (each counts as 1 doc in deleteCascade)
+    // + 1 project doc = 101 ops > 100 limit.
+    await deps.projects.create(makeProject('p-big'));
+    for (let i = 0; i < 100; i++) {
+      await deps.assets.create(makeAsset(`a${i}`, 'p-big', `key-${i}`));
+    }
+
+    await expect(deps.projects.deleteCascade('p-big')).rejects.toThrow(
+      'CLOUDBASE_TX_LIMIT_EXCEEDED'
+    );
+
+    // Fail closed: project + all assets still exist (no partial deletion)
+    expect(state.database.collections.get('prod_projects')?.docs.has('p-big')).toBe(true);
+    expect(state.database.collections.get('prod_assets')?.docs.size).toBe(100);
+
+    await deps.close();
+  });
+
+  it('project with exactly 100 child docs -> succeeds (at the limit)', async () => {
+    const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
+
+    // 99 assets + 1 project = 100 ops (exactly at the limit).
+    await deps.projects.create(makeProject('p-limit'));
+    for (let i = 0; i < 99; i++) {
+      await deps.assets.create(makeAsset(`a${i}`, 'p-limit', `key-${i}`));
+    }
+
+    await deps.projects.deleteCascade('p-limit');
+
+    expect(state.database.collections.get('prod_projects')?.docs.has('p-limit')).toBe(false);
+    expect(state.database.collections.get('prod_assets')?.docs.size).toBe(0);
+
+    await deps.close();
+  });
+});
+
+// --- FIX-R3 AC-06/07/08: Storage boundary on ProjectService.deleteProject ---
+
+describe('FIX-R3 AC-06/07/08: Storage boundary on deleteProject', () => {
+  const dummyExecutor: JobExecutor = {
+    enqueue: vi.fn(),
+    cancel: vi.fn(),
+  };
+
+  async function setupProjectWithAssets(
+    deps: Awaited<ReturnType<typeof makeReadyDeps>>['deps'],
+    assetCount: number
+  ): Promise<{ projectId: string; storageKeys: string[] }> {
+    const projectId = 'p-delete';
+    await deps.projects.create(makeProject(projectId));
+    const storageKeys: string[] = [];
+    for (let i = 0; i < assetCount; i++) {
+      const key = `storage-key-${i}`;
+      await deps.objects.put(key, new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, projectId, key));
+      storageKeys.push(key);
+    }
+    return { projectId, storageKeys };
+  }
+
+  it('AC-06: DB delete failure -> objects.delete called 0 times', async () => {
+    const setup = await makeReadyDeps(PROD_OPTIONS);
+    const { deps } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    const { projectId, storageKeys } = await setupProjectWithAssets(deps, 3);
+
+    // Spy on objects.delete to count calls
+    const deleteSpy = vi.spyOn(deps.objects, 'delete');
+
+    // Make deleteCascade throw by exceeding the 100-op limit.
+    // Add 98 more assets (3 + 98 = 101 child docs + 1 project = 102 ops).
+    for (let i = 3; i < 101; i++) {
+      await deps.assets.create(makeAsset(`a${i}`, projectId, `key-${i}`));
+    }
+
+    await expect(service.deleteProject(projectId)).rejects.toThrow(
+      'CLOUDBASE_TX_LIMIT_EXCEEDED'
+    );
+
+    // AC-06: Storage deleteFile was NEVER called
+    expect(deleteSpy).not.toHaveBeenCalled();
+
+    await deps.close();
+  });
+
+  it('AC-07: DB delete success -> objects.delete called exactly once per key', async () => {
+    const setup = await makeReadyDeps(PROD_OPTIONS);
+    const { deps } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    const { projectId, storageKeys } = await setupProjectWithAssets(deps, 3);
+
+    const deleteSpy = vi.spyOn(deps.objects, 'delete');
+
+    const result = await service.deleteProject(projectId);
+
+    expect(result.deleted).toBe(true);
+    expect(result.cleanupFailures).toHaveLength(0);
+    // AC-07: each object deleted exactly once
+    expect(deleteSpy).toHaveBeenCalledTimes(storageKeys.length);
+    for (const key of storageKeys) {
+      expect(deleteSpy).toHaveBeenCalledWith(key);
+    }
+
+    await deps.close();
+  });
+
+  it('AC-08: Storage cleanup partial failure -> cleanupFailures preserved, metadata gone', async () => {
+    const setup = await makeReadyDeps(PROD_OPTIONS);
+    const { deps } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    const { projectId, storageKeys } = await setupProjectWithAssets(deps, 3);
+
+    // Make objects.delete fail for the second key only
+    const deleteSpy = vi.spyOn(deps.objects, 'delete').mockImplementation(async (key: string) => {
+      if (key === storageKeys[1]) {
+        throw new Error('STORAGE_DELETE_FAILED');
+      }
+    });
+
+    const result = await service.deleteProject(projectId);
+
+    expect(result.deleted).toBe(true);
+    // AC-08: failed key is in cleanupFailures (retry info preserved)
+    expect(result.cleanupFailures).toEqual([storageKeys[1]]);
+
+    // AC-08: metadata is already gone (DB transaction committed)
+    // — not in an uncertain "DB exists but objects partially deleted" state
+    expect(await deps.projects.get(projectId)).toBeNull();
+    expect((await deps.assets.listByProject(projectId)).length).toBe(0);
+
+    // All 3 delete attempts were made (the loop continues past failures)
+    expect(deleteSpy).toHaveBeenCalledTimes(3);
+
+    await deps.close();
   });
 });

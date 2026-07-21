@@ -150,7 +150,7 @@
     "status": "awaiting_gpt_acceptance",
     "nextActor": "gpt",
     "riskLevel": "HIGH",
-    "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R2-TRAE-REPORT.md",
+    "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md",
     "pocEvidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md",
     "completionPackage": "C:\\Users\\Catcher\\Desktop\\协作文件夹\\picture-edit-collab-completion.md",
     "envId": "zeh-d7glqc07me2155c61",
@@ -160,7 +160,7 @@
     "gateP0Status": "PASS",
     "gateP1ImplementationStatus": "COMPLETE",
     "pendingAc": ["AC-15", "AC-16", "AC-17", "AC-19"],
-    "codexStatus": "REQUIRED_AFTER_R2",
+    "codexStatus": "REQUIRED_AFTER_R3_GPT_PASS",
     "readyForPreview": false,
     "fixR1Verdict": "FIX_REQUIRED",
     "fixR1ReviewPath": "docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-GPT-REVIEW.md",
@@ -184,7 +184,30 @@
       "package-lock.json (modified, project rename gemini-image-editor -> lumen-ink)"
     ],
     "fixR2StopConditions": "NoSQL remains readyForPreview=false; no merge to main; no Preview/Production config; no Production API Key usage",
-    "lastUpdatedAt": "2026-07-21",
+    "fixR3Status": "COMPLETE",
+    "fixR3TaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-SDK-CONTRACT",
+    "fixR3BaseSha": "87d0ba5",
+    "fixR3ResultSha": "pending-commit",
+    "fixR3Branch": "lumen/cloudbase-nosql-implement-01-fix-r3",
+    "fixR3GateResult": "8/8 PASS (client 194 + server 331 = 525 root tests; +14 vs R2: 7 SDK contract tests + 7 AC-05/06/07/08/09/10 behavior tests)",
+    "fixR3TraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md",
+    "fixR3Evidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r3-gate-results.md",
+    "fixR3Scope": "AC-01 through AC-12: unwrapDocumentData() unified helper; SDK type split (DatabaseCollectionRef/TransactionCollectionRef/DocumentGetResult/TransactionDocumentGetResult); transaction where() compile-time guard; deleteCascade pre-fetch + 100-op fail-closed; Storage boundary tests (AC-06/07/08); Preview/Production shared Mock state (AC-09); concurrent idempotency tests (AC-10); @cloudbase/node-sdk installed-version contract tests (7 tests, no credentials)",
+    "fixR3FilesChanged": [
+      "src/server/infrastructure/persistence/cloudbase.nosql.ts (modified, +250 lines: unwrapDocumentData, type split, 9 .data[0] migrations, 4 non-tx where() fixes, deleteCascade rewrite)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.mock.ts (modified, +171 lines: tx doc().get() returns single doc/null, tx collection type restricted, commit() 100-op limit)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.r2.behavior.test.ts (modified, +310 lines: scenario 10 rewrite + AC-05/06/07/08/09/10 tests)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.sdk-contract.test.ts (new, 7 tests verifying installed @cloudbase/node-sdk API surface without credentials/network)"
+    ],
+    "fixR3StopConditions": "readyForPreview=false unchanged; no merge to main; no Vercel Preview/Production config; no Production API Key usage; Codex deferred until GPT R3 evidence review pass",
+    "fixR3CodexScope": "cloudbase.nosql.ts + Mock/NoSQL tests + select.ts + ProjectService/GenerationService + FIX-R3 Base→Result diff + CloudBase transaction/idempotency/delete/Storage boundary (read-only, no modifications)",
+    "fixR3RemainingRisks": [
+      "Mock-only behavioral evidence for idempotency/100-op/Storage boundary; real CloudBase semantics may differ slightly",
+      "AC-10 adapter-level test relies on JS single-threadedness; Mock-level test exercises true commit-time E11000",
+      "100-op limit is pre-check + Mock commit-check; errs fail-closed but may be stricter than real CloudBase",
+      "ws optional dependency warning in SDK contract test (7/7 pass, no functional impact)"
+    ],
+    "lastUpdatedAt": "2026-07-22",
     "lastUpdatedBy": "trae"
   }
 }

@@ -1,6 +1,99 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2 实施完成，等待 GPT 审计）
+## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R3 实施完成，等待 GPT 增量审查）
+
+- 日期：2026-07-22
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-SDK-CONTRACT`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Route**：R2（Trae 实施 + GPT 增量审查 + 限定 Codex 只读审查）
+- **Base SHA**：`87d0ba5`（FIX-R2 state update commit）
+- **Result SHA**：`pending-commit`（将在 commit 后填入）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r3`
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r3-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r3-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **Codex**：`REQUIRED_AFTER_R3_GPT_PASS`（GPT 通过 R3 后执行限定只读审查，范围见下）
+- **readyForPreview**：`false`（保持，禁止配置 Preview / Production）
+
+### R3 实施核心结论（增量报告，不重审 R1/R2 历史）
+
+GPT FIX-R3 任务卡指出 R2 adapter 与真实 CloudBase 事务 API 存在契约偏差。R3 全部修复 AC-01 ~ AC-12：
+
+1. **AC-01**：新增 `unwrapDocumentData<T>(data)` 统一处理 array / single-doc / null；9 处 `.data[0]`/`.data.length` 引用迁移完成。
+2. **AC-02**：Mock `tx.collection().doc().get()` 改为返回 `{ data: doc | null }`（单文档/null，非数组），匹配真实 SDK。
+3. **AC-03**：SDK 类型拆分为 `DatabaseCollectionRef`（有 where）/ `TransactionCollectionRef`（无 where）/ `DocumentGetResult` / `TransactionDocumentGetResult`；`collection()` 辅助函数返回联合类型，TS 编译时禁止事务内 `where()`。
+4. **AC-04**：4 处非事务 `where()` 调用迁移到 `getDb().collection().where()`；事务体仅使用 `collection(coll).doc(id).*`。
+5. **AC-05**：`deleteCascade` 重写为预取 doc ID + 100-op 上限检查 + 事务内逐个 `doc(id).remove()`；超限 fail closed（生产 + Mock 双重检查）。
+6. **AC-06/07/08**：3 个新测试验证 Storage 边界（DB 失败 0 次 delete、成功每对象 1 次、部分失败 cleanupFailures 保留）。
+7. **AC-09**：scenario 10 重写，Prod + Preview 共享同一个 `MockCloudBaseState`，仅靠命名空间前缀隔离 DB + Storage。
+8. **AC-10**：2 个新测试验证并发幂等（Mock 级别 commit-time E11000 + 适配器级别 createIdempotent）。
+9. **AC-11**：8 门禁全绿，525 root tests（194 client + 331 server，相比 R2 +14：7 SDK 契约 + 7 行为测试）。
+10. **AC-12**：`readyForPreview=false` 保持不变。
+11. **SDK 契约测试**：新增 `cloudbase.nosql.sdk-contract.test.ts`，7 个测试验证**安装版** `@cloudbase/node-sdk@^3.18.3` API 表面（无凭据、无网络）。
+
+### 8 门禁结果
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc (build) | PASS | 0 errors |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 331 tests / 30 files |
+| 6 | Root tests | PASS | 525 combined |
+| 7 | Build (client + server) | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+
+### 文件变更
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.ts` | 修改 (+250 lines) | unwrapDocumentData、4 类 SDK 类型拆分、9 处 .data[0] 迁移、4 处非事务 where 修复、deleteCascade 重写 |
+| `cloudbase.nosql.mock.ts` | 修改 (+171 lines) | tx doc().get() 返回单文档/null、tx collection 类型限制、commit() 100-op 检查 |
+| `cloudbase.nosql.r2.behavior.test.ts` | 修改 (+310 lines) | scenario 10 重写 + AC-05/06/07/08/09/10 测试 |
+| `cloudbase.nosql.sdk-contract.test.ts` | 新增 (7 tests) | 验证安装版 @cloudbase/node-sdk API 表面 |
+
+### Stop Conditions（保持）
+
+- ✅ `readyForPreview` 保持 `false`
+- ✅ 禁止合并到 main
+- ✅ 禁止配置 Vercel Preview / Production
+- ✅ 禁止使用 Production API Key
+- ✅ Codex 审查在 GPT 通过 R3 后执行
+- ✅ 未修改冻结 `PersistenceDependencies` 接口
+- ✅ 未超过 100 事务操作上限（fail closed）
+- ✅ 真实 SDK 契约与安装包源代码一致
+
+### GPT 下一步（增量审查，不重审 R1/R2 全历史）
+
+1. 读取完成包 `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`。
+2. 核验 `git diff 87d0ba5..HEAD` 包含真实代码修改（4 文件，+595/-136）。
+3. 审查 4 个变更文件对照 AC-01 ~ AC-12。
+4. 审查 14 个新增测试对照 R3 测试矩阵。
+5. 若通过，授权 Codex 限定只读审查（范围：`cloudbase.nosql.ts` + Mock/NoSQL 测试 + `select.ts` + `ProjectService`/`GenerationService` + FIX-R3 Base→Result diff + CloudBase 事务/幂等/删除/Storage 边界）。
+6. Codex 不得修改代码。
+
+### 最短收尾顺序（来自任务卡）
+
+1. Trae 执行 FIX-R3 ✅
+2. GPT 做一次增量审查，不重审 R1/R2 全历史 ⏳
+3. Codex 做限定只读审查 ⏳
+4. 配置独立 Preview namespace/prefix，执行真实 CloudBase 冒烟测试 ⏳
+5. Preview 通过后解除 `readyForPreview=false` ⏳
+6. 合并 main，恢复 Production Cron 与持久化验证 ⏳
+7. 关闭 PERSIST-001、PROD-CRON-VERIFY、ROUTING-001，完成项目归档 ⏳
+
+### 剩余风险
+
+1. Mock-only 行为证据：并发幂等、100-op 上限、Storage 边界均基于 Mock SDK，真实 CloudBase 语义可能略有差异。
+2. AC-10 适配器级测试依赖 JS 单线程，Mock 级测试才真正触发 commit-time E11000。
+3. 100-op 上限是 pre-check + Mock commit-check，errs fail-closed 但可能比真实 CloudBase 更严格。
+4. SDK 契约测试触发 `ws` 可选依赖警告（7/7 通过，无功能影响）。
+
+---
+
+## 历史状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2 实施完成，等待 GPT 审计）
 
 - 日期：2026-07-21
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` FIX-R2
