@@ -20,6 +20,7 @@ import type { GenerationService } from '../services/GenerationService.js';
 import { DomainError, isDomainError } from '../domain/errors.js';
 import type { DomainErrorCode } from '../domain/errors.js';
 import { mountProjectJobsRoutes } from './jobs.js';
+import { redactError } from '../security/redaction.js';
 
 /**
  * Map a stable DomainErrorCode to an HTTP status. The mapping is fixed so
@@ -142,7 +143,10 @@ export function createProjectsRouter(deps: {
         sendDomainError(res, err);
         return;
       }
-      console.error('[routes.projects] POST / failed', err);
+      // HARDEN-001C (AC-C10/C14): route raw errors through redactError so
+      // secrets / stacks / upstream payloads are scrubbed before logging.
+      const redacted = redactError(err, { errorCode: 'SAVE_FAILED' });
+      console.error('[routes.projects] POST / failed', redacted.log);
       res.status(500).json({
         errorCode: 'SAVE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',
@@ -169,7 +173,8 @@ export function createProjectsRouter(deps: {
         sendDomainError(res, err);
         return;
       }
-      console.error('[routes.projects] GET /:id failed', err);
+      const redacted = redactError(err, { errorCode: 'SAVE_FAILED' });
+      console.error('[routes.projects] GET /:id failed', redacted.log);
       res.status(500).json({
         errorCode: 'SAVE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',
@@ -188,7 +193,8 @@ export function createProjectsRouter(deps: {
         sendDomainError(res, err);
         return;
       }
-      console.error('[routes.projects] DELETE /:id failed', err);
+      const redacted = redactError(err, { errorCode: 'SAVE_FAILED' });
+      console.error('[routes.projects] DELETE /:id failed', redacted.log);
       res.status(500).json({
         errorCode: 'SAVE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',
@@ -210,7 +216,8 @@ export function createProjectsRouter(deps: {
         sendDomainError(res, err);
         return;
       }
-      console.error('[routes.projects] activate failed', err);
+      const redacted = redactError(err, { errorCode: 'SAVE_FAILED' });
+      console.error('[routes.projects] activate failed', redacted.log);
       res.status(500).json({
         errorCode: 'SAVE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',
@@ -232,7 +239,8 @@ export function createProjectsRouter(deps: {
         sendDomainError(res, err);
         return;
       }
-      console.error('[routes.projects] approve failed', err);
+      const redacted = redactError(err, { errorCode: 'SAVE_FAILED' });
+      console.error('[routes.projects] approve failed', redacted.log);
       res.status(500).json({
         errorCode: 'SAVE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',

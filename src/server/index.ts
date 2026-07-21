@@ -172,6 +172,13 @@ const authThrottle = createAuthThrottle({
 
 const app = express();
 
+// D-034 / HARDEN-001C (DEBT-HARDEN-001A-03): trust the first proxy hop so
+// `req.ip` reads from `X-Forwarded-For` on Vercel. Without this, every
+// login-failure throttle bucket collapsed to the reverse-proxy IP and the
+// throttle was effectively disabled. Set unconditionally (local dev behind
+// a proxy also benefits); no regression in direct-connect local mode.
+app.set('trust proxy', 1);
+
 // D-034: Allowlist-based CORS. Requests with no Origin (same-process tests,
 // health tooling) are allowed; configured origins are allowed; all others
 // are rejected.

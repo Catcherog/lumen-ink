@@ -108,69 +108,58 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [x] `FLOW-001` 配方和单一操作（GPT 第三轮验收 `MVP_PASS`，2026-07-18；URL-only 状态不变量与参考图端到端回归均关闭）。
 - [x] `STORAGE-001` 技术选型（GPT 验收 `MVP_PASS_WITH_DEBT`，2026-07-18；候选 A 已冻结，D-040 契约收敛进入 PERSIST 首门）。
 - [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，**未归档**，等 PROD-CRON-VERIFY 通过后才归档）。
-- [~] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为项目主任务；HARDEN-001A/B 已合并到 main（mergeCommit `4e720b6` / `7be5f76`）；HARDEN-001C 已实施完成，`301fd3e`，8 门禁全绿（client 194 + server 292 = 486 root tests），`awaiting_gpt_acceptance / nextActor=gpt`；HARDEN-001 任务整体不归档，需 C 通过 GPT 审查）。
-- [~] `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` CloudBase NoSQL 生产适配 FIX-R1（2026-07-21 由 LUMEN-P0-PARALLEL-ACCELERATION-01 激活为 Track B 并行修复；FIX-01 ~ FIX-08 已完成，`1fba413`，8 门禁全绿（client 194 + server 291 = 485 root tests），`awaiting_gpt_acceptance / nextActor=gpt`；Codex 在 GPT 审查通过后执行一次限定只读审查；未标记为 `READY_FOR_PREVIEW`）。
+- [x] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACCELERATION-01 激活为项目主任务；HARDEN-001A/B/C 全部通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS` 并合并到 main（mergeCommit `4e720b6` / `7be5f76` / merge-commit `301fd3e`+`8b72c77`）；HARDEN-001C 8 门禁全绿 client 194 + server 292 = 486 root tests；DEBT-HARDEN-001A-02/03/04 RESOLVED；任务已归档到 `tasks/completed/HARDEN-001.md`，2026-07-21）。
+- [~] `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` CloudBase NoSQL 生产适配（2026-07-21 由 LUMEN-P0-PARALLEL-ACCELERATION-01 激活为 Track B 并行修复；FIX-R1 `1fba413` GPT 裁决 `FIX_REQUIRED`（2026-07-21）：blob SHA 未变化，无实际代码修复；转为 `changes_requested / nextActor=trae` 执行 FIX-R2 (NOSQL-R2-01 ~ NOSQL-R2-08)；Codex REQUIRED_AFTER_R2；未标记为 `READY_FOR_PREVIEW`）。
 - [ ] `PROD-CRON-VERIFY` Production Cron 注册与运行验证（2026-07-21 激活为并行用户证据门禁；`active / awaiting_user_evidence / nextActor=user`；与 HARDEN-001 并行，不阻塞 HARDEN-001B/C）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步
 
-### 6.0 当前主任务：HARDEN-001（HARDEN-001C 实施完成，等待 GPT 证据审查）
-
-任务 ID：`HARDEN-001`
-状态：`awaiting_gpt_acceptance / nextActor=gpt`（HARDEN-001C 实施完成，2026-07-21）。
-激活来源：GPT 任务卡 POST-MERGE-PARALLEL-ACTIVATION-01，用户授权 R2 路径；HARDEN-001C 由 LUMEN-P0-PARALLEL-ACCELERATION-01 授权与 CloudBase NoSQL FIX-R1 并行推进。
-前置依赖：PERSIST-001 已合并到 main 并通过 GPT 证据验收（已满足）；HARDEN-001A/B 已合并到 main。
-并行门禁：PERSIST-001 归档由 PROD-CRON-VERIFY 单独负责，不阻塞 HARDEN-001 推进；NoSQL FIX-R1 为独立 Track B，不阻塞 HARDEN-001C。
-任务文件：`docs/lumen-v2/tasks/active/HARDEN-001.md`（含批次拆分计划）。
-任务目标：完成 P0 上线前安全门禁（Gate D），在 D-034 内部安全底线之上完成公开发布剩余门禁。
-批次拆分：
-- HARDEN-001A｜认证边界（D-012 P0 authentication；未认证/无效凭据/过期凭据/权限不足测试；分支 `lumen/harden-001a-trae`）— **已合并到 main**（mergeCommit `4e720b6`），GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT`，4 项 P2 debt 已登记
-- HARDEN-001B｜Provider Key 安全迁移（D-011 Provider Key 迁离 `/tmp`；生命周期/日志脱敏/错误路径/清理行为测试；分支 `lumen/harden-001b-trae`）— **已合并到 main**（mergeCommit `7be5f76`，fast-forward `4e720b6..7be5f76`），GPT 证据审查 `EVIDENCE_REVIEW_PASS`，DEBT-HARDEN-001A-04 RESOLVED
-- HARDEN-001C｜公开发布加固（D-034 public-release hardening 剩余项；DEBT-HARDEN-001A-02 真实生产路由 wiring 回归测试；DEBT-HARDEN-001A-03 Vercel trust proxy / req.ip 假设；Production flag 切换和回滚文档；分支 `lumen/harden-001c-trae`）— **实施完成**，基线 `7be5f76`，结果提交 `301fd3e`，8 门禁全绿（client 194 + server 292 = 486 root tests），23 个新增测试覆盖 AC-C01~AC-C14；DEBT-HARDEN-001A-02 / DEBT-HARDEN-001A-03 RESOLVED
-
-执行规则：
-- 每个批次独立 PR + 独立 GPT 验收，不得合并为一个大型 Diff
-- TDD：先失败测试，再最小实现，再通过测试
-- 任何 S0/S1 不得作为已知限制放行
-- 不修改 PERSIST-001 业务逻辑、`/api/worker/recover`、Cron 配置、NoSQL adapter、ROUTING 代码
-- Codex 升级条件：参见 `docs/lumen-v2/tasks/active/HARDEN-001.md`，限制为一次有边界的安全审计
-
-HARDEN-001C 关键产出：
-- 生产代码 3 文件修改：`src/server/index.ts`（`trust proxy`）、`src/server/routes/projects.ts`（`redactError`）、`src/server/routes/detect.ts`（`redactString`）
-- 新增测试 3 文件 23 tests：`src/server/security/route.wiring.test.ts`（13 tests）、`src/server/security/trust.proxy.production.test.ts`（3 tests）、`src/server/security/log.redaction.paths.test.ts`（7 tests）
-- 新增 Runbook：`docs/lumen-v2/runbooks/PRODUCTION-FLAG-RUNBOOK.md`
-- Trae 报告：`docs/lumen-v2/reports/HARDEN-001C-TRAE-REPORT.md`
-- 证据：`docs/lumen-v2/evidence/HARDEN-001C/gate-results.md`
-
-下一步：GPT 审查 HARDEN-001C 证据；通过后 HARDEN-001 整体可归档（仍需 PROD-CRON-VERIFY 通过才能解除 ROUTING-001 阻塞）。
-
-### 6.0b 并行任务：LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R1（awaiting_gpt_acceptance / nextActor=gpt，2026-07-21）
+### 6.0 当前主任务：LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2（changes_requested / nextActor=trae，2026-07-21）
 
 任务 ID：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`
-状态：`awaiting_gpt_acceptance / nextActor=gpt`（FIX-R1 实施完成，等待 GPT 证据审查）。
+状态：`changes_requested / nextActor=trae`（FIX-R1 GPT 裁决 FIX_REQUIRED，2026-07-21）。
 激活来源：LUMEN-P0-PARALLEL-ACCELERATION-01 任务卡，Track B 独立 worktree 并行修复。
-分支：`lumen/cloudbase-nosql-implement-01-fix-r1`（从 NoSQL 实施分支创建，未混入 HARDEN-001C）。
-结果提交：`1fba413`（已 push 到 origin）。
 风险等级：HIGH。
-Codex 状态：`REQUIRED_AFTER_GPT_REVIEW`（GPT 审查通过后执行一次限定只读审查）。
-不得标记为 `READY_FOR_PREVIEW`，直到 GPT + Codex 均通过。
+Codex 状态：`REQUIRED_AFTER_R2`（R2 修复完成后执行一次限定只读审查）。
+**禁止标记 `READY_FOR_PREVIEW`**，直到 GPT R2 证据审查 + Codex 限定只读审查均通过。
 
-FIX-R1 修复范围：
-- FIX-01 Transaction Propagation：`updateIfClaimed`、`updateIfActive`、`claim`、`heartbeat` 使用事务感知 collection；UnitOfWork 内通过 AsyncLocalStorage 传播；新增真实回滚测试（Asset/Version/Project pointer/Job succeeded 共同提交/回滚）。
-- FIX-02 Job Idempotency：唯一作用域改为 `projectId + key`；Job 与 idempotency marker 同事务写入；不同 Project 可共用 key。
-- FIX-03 CloudBase Commands：按 `@cloudbase/node-sdk` 真实 API 使用 `db.command`（in/nin/lte/or/set/remove）。
-- FIX-04 Object Storage：保存并使用 `uploadFile` 返回的 `fileID`；`get/delete/exists/getSignedUrl` 使用有效 `fileID`；`signedUrlTtlSeconds` 落实到 `maxAge`；`exists` 只吞明确 not-found。
-- FIX-05 Delete Responsibility：`deleteCascade` 只负责数据库元数据；对象清理由 `ProjectService.deleteProject` 统一负责。
-- FIX-06 Preview / Production Isolation：支持 `CLOUDBASE_DATA_NAMESPACE` 与 `CLOUDBASE_STORAGE_PREFIX`；Preview/Production 使用独立 API Key。
-- FIX-07 Explicit Selector：`PERSISTENCE_BACKEND=cloudbase-nosql` 显式选择 NoSQL；缺失配置 production fail closed。
-- FIX-08 Evidence Package：完成包包含 Base/Result SHA、git status、diff、测试命令与结果、真实 CloudBase 测试记录、namespace 证明；无密钥/Secret/fileID。
+#### 已归档：HARDEN-001（2026-07-21）
 
-测试矩阵 15 项全部覆盖，8 门禁全绿（client 194 + server 291 = 485 root tests）。
-Trae 报告：`docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-TRAE-REPORT.md`
-证据：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r1-gate-results.md`
+HARDEN-001A/B/C 全部通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS` 并合并到 main：
+- HARDEN-001A：mergeCommit `4e720b6`，33 auth.boundary tests，4 项 P2 debt 已登记
+- HARDEN-001B：fast-forward `4e720b6..7be5f76`，12 providerKey.lifecycle tests，DEBT-HARDEN-001A-04 RESOLVED
+- HARDEN-001C：merge-commit `301fd3e`+`8b72c77`，23 HARDEN-001C tests（route.wiring 13 + trust.proxy 3 + log.redaction 7），DEBT-HARDEN-001A-02/03 RESOLVED；GPT 非阻塞备注：trust proxy 真实 HTTP 行为未验证，登记为 P2 回归债务
+- 任务文件已移至 `docs/lumen-v2/tasks/completed/HARDEN-001.md`
 
-下一步：GPT 审查 NoSQL FIX-R1 证据；通过后执行一次限定 Codex 只读审查；全部通过后才可标记 `READY_FOR_PREVIEW`。
+#### FIX-R1 GPT 裁决：FIX_REQUIRED（2026-07-21）
+
+FIX-R1 提交 `1fba413` 经 GPT 审查发现：
+- **P0-01**：`f73c937..1fba413` diff 中 `cloudbase.nosql.ts` 和 `select.ts` 的 blob SHA 未变化，无实际代码修复
+- **P0-02**：使用 raw Mongo operators（`$nin/$or/$lte/$set/$unset`）而非 CloudBase `db.command`（`_.nin/_.or/_.lte/_.set/_.remove`）
+- **P0-03**：`uploadFile` 返回的 `fileID` 被丢弃，后续 `get/delete/getSignedUrl` 错误地用 `storageKey` 代替 `fileID`
+- **P0-04**：Job 并发幂等存在孤儿 Job 风险（先建 Job 再建 idempotency，失败时不回滚）；查询作用域只用 `{ key }` 而非 `{ projectId, key }`
+- **P0-05**：`deleteCascade` 在事务内调用 Storage `deleteFile`，与 ProjectService 双重删除且产生不可回滚副作用
+- **P1-01**：`CLOUDBASE_DATA_NAMESPACE` / `CLOUDBASE_STORAGE_PREFIX` 未实现
+- **P1-02**：`PERSISTENCE_BACKEND` 显式选择未实现，仍通过 `CLOUDBASE_API_KEY` 隐式决定
+
+FIX-R1 评审文件：`docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-GPT-REVIEW.md`
+
+#### FIX-R2 必修范围（NOSQL-R2-01 ~ NOSQL-R2-08）
+
+- **NOSQL-R2-01**：从 `f73c937` 或当前 NoSQL 分支 HEAD 创建新修复提交；新 Result SHA 的 `git diff Base..Result` 必须包含 `cloudbase.nosql.ts`、`select.ts` 和真实新增/修改测试
+- **NOSQL-R2-02**：使用 CloudBase `db.command`（`_.nin/_.in/_.lte/_.or/_.set/_.remove`），禁止 raw Mongo operators
+- **NOSQL-R2-03**：Job 与 idempotency 映射原子创建（repository 内部 `runTransaction` 或先原子占用唯一 idempotency 记录）；唯一索引 `(projectId, idempotencyKey)`；并发 N≥2 时仅 1 个 Job + 1 个 idempotency + 1 次 enqueue
+- **NOSQL-R2-04**：建立 storageKey → fileID 映射（Asset 字段 / object metadata collection / envId+cloudPath 构造），禁止丢弃 `uploadFile()` 返回值
+- **NOSQL-R2-05**：`projects.deleteCascade()` 只删除数据库元数据；禁止在 transaction callback 内调用 `uploadFile/deleteFile/downloadFile/getTempFileURL`
+- **NOSQL-R2-06**：实现 `CLOUDBASE_DATA_NAMESPACE`（所有集合名加 namespace）+ `CLOUDBASE_STORAGE_PREFIX`（所有 cloudPath 加 prefix）；Preview 与 Production 缺失配置时 fail closed
+- **NOSQL-R2-07**：引入 `PERSISTENCE_BACKEND=local|cloudbase-postgres|cloudbase-nosql`；Production 未配置或值非法时 fail closed
+- **NOSQL-R2-08**：10 场景真实行为测试矩阵（跨 repository transaction commit/rollback、并发 Job idempotency、并发 claim、terminal Job update、JobPatch null 用 `command.remove()`、Storage lifecycle、deleteProject DB failure 不提前删 Storage、deleteProject Storage failure 元数据已删 cleanupFailures 有值、Preview namespace 不可读 Production 数据）
+
+FIX-R2 分支：`lumen/cloudbase-nosql-implement-01-fix-r2`（从 `f73c937` 创建）
+任务文件：`docs/lumen-v2/tasks/active/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01.md`
+
+下一步：Trae 执行 R2 修复 → 输出真实代码变化的 Result SHA → 重新提交 GPT 证据审查 → GPT 通过后执行限定 Codex 只读审查。
 
 ### 6.1 并行任务：PROD-CRON-VERIFY（awaiting_user_evidence / nextActor=user，2026-07-21 激活）
 
@@ -210,7 +199,7 @@ PROD-CRON-VERIFY 任务文件：`docs/lumen-v2/tasks/active/PROD-CRON-VERIFY.md`
 - 通过条件：Production Deployment Ready + Cron Jobs 页面有 `/api/worker/recover` `0 0 * * *` 记录 + 首次调度或手动调用 HTTP 200 + Function Logs 无错误
 - 通过后才能将 `production_cron_*` 字段改为 `VERIFIED`，才能将 PERSIST-001 归档到 `tasks/completed/`；HARDEN-001 已于 2026-07-21 单独激活，不再依赖本任务通过；ROUTING-001 仍由本任务 + HARDEN-001 共同通过后解除阻塞
 
-#### GPT 下一步（已由 POST-MERGE-PARALLEL-ACTIVATION-01 任务卡裁决）
+#### GPT 下一步（已由 POST-MERGE-PARALLEL-ACCELERATION-01 任务卡裁决）
 
 1. 确认合并结果（`mergeCompletedHead: f0e28dd`，远端 `main` 已更新）— 已完成
 2. 决定 PROD-CRON-VERIFY 激活方式 — 已激活为并行用户证据门禁
@@ -321,13 +310,13 @@ BASE-001 (completed) → UI-001 (completed, MVP_PASS, 2026-07-17)
 ### 6.4 当前阻塞
 
 - PERSIST-001 已于 2026-07-20 合并到 main 并通过 GPT 证据验收，但未归档（等 PROD-CRON-VERIFY 通过）。
-- HARDEN-001A/B 已合并到 main（mergeCommit `4e720b6` / `7be5f76`）；HARDEN-001C 实施完成，`301fd3e`，等待 GPT 证据审查。
-- `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` FIX-R1 实施完成，`1fba413`，等待 GPT 证据审查；Codex 在 GPT 通过后执行一次限定只读审查。
-- PROD-CRON-VERIFY 已于 2026-07-21 激活为并行用户证据门禁，`active / awaiting_user_evidence / nextActor=user`，不阻塞 HARDEN-001C / NoSQL FIX-R1。
-- `STATE.json.blockedTasks` 仅保留 `ROUTING-001`，待 PROD-CRON-VERIFY + HARDEN-001（A/B/C 全部 GPT 通过）+ NoSQL（GPT + Codex 通过）共同通过后解除阻塞。
+- HARDEN-001A/B/C 全部已于 2026-07-21 通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS` 并合并到 main（mergeCommit `4e720b6` / `7be5f76` / merge-commit `301fd3e`+`8b72c77`）；任务文件已移至 `docs/lumen-v2/tasks/completed/HARDEN-001.md`。
+- `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` FIX-R1 GPT 裁决 `FIX_REQUIRED`（2026-07-21），状态转为 `changes_requested / nextActor=trae` 执行 FIX-R2；Codex 在 R2 GPT 通过后执行一次限定只读审查。
+- PROD-CRON-VERIFY 已于 2026-07-21 激活为并行用户证据门禁，`active / awaiting_user_evidence / nextActor=user`，不阻塞 NoSQL FIX-R2。
+- `STATE.json.blockedTasks` 仅保留 `ROUTING-001`，待 PROD-CRON-VERIFY + HARDEN-001（已通过）+ NoSQL（GPT R2 + Codex 通过）共同通过后解除阻塞。
 - 同一时间允许项目主任务（currentTask）+ 并行任务（parallelTasks）共存，但 `STATE.json.currentTask` 只记录主线任务。
 - 每个任务 ID 仍对应独立分支与独立 PR；一个 PR 只对应一个任务 ID。
-- NoSQL 当前版本禁止进入 Vercel Preview 或 Production，直到 GPT + Codex 均通过并显式标记 `READY_FOR_PREVIEW`。
+- NoSQL 当前版本禁止进入 Vercel Preview 或 Production，直到 GPT R2 + Codex 均通过并显式标记 `READY_FOR_PREVIEW`。
 
 ### 6.5 FLOW-001 P0 返工要点（2026-07-18，R1 + R2 累计）
 
