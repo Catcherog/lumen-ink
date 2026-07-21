@@ -1,6 +1,54 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 实施完成，等待 GPT 审计）
+## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R1 完成，等待 GPT 审计）
+
+- 日期：2026-07-21
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`
+- **轮次**：`FIX-R1`（FIX-01 ~ FIX-08）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **FIX-R1 Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-TRAE-REPORT.md)
+- **FIX-R1 门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r1-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r1-gate-results.md)
+- **原实施报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-TRAE-REPORT.md)
+- **PoC 证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\lumen-cloudbase-nosql-completion.md`
+- **Codex**：REQUIRED_AFTER_IMPLEMENTATION（待 GPT 决定是否先交 Codex 审查）
+
+### FIX-R1 核心结论
+
+1. **FIX-01 事务传播**：通过 `AsyncLocalStorage` + `db.runTransaction()` 实现跨 repository 调用的事务传播；`collection()` 优先使用当前事务上下文。
+2. **FIX-02 Job 幂等**：`createIdempotent()` 先查后写，捕获 `E11000` duplicate key 错误后回查返回已有 Job；依赖 `job_idempotency` 唯一索引。
+3. **FIX-03 CloudBase 命令**：`$nin` / `$in` / `$lte` / `$or` / `$set` / `$unset` 正确表达 lease、终态保护、三态 patch 语义。
+4. **FIX-04 对象存储**：ObjectStore 直接使用 CloudBase Storage SDK（`uploadFile` / `downloadFile` / `getTempFileURL` / `deleteFile`）。
+5. **FIX-05 删除责任**：`deleteCascade()` 级联删除 Asset/Version/Job/幂等记录，并对 `storageKey` 执行 best-effort 对象清理。
+6. **FIX-06 Preview/Production 隔离**：`select.ts` 按 `CLOUDBASE_API_KEY` 等环境变量显式选择后端，通过 Vercel Dashboard 分别配置环境实现隔离。
+7. **FIX-07 显式选择器**：NoSQL 优先，PostgreSQL fallback，本地开发走 `local.ts`，无配置时 fail-fast。
+8. **FIX-08 证据包**：本报告 + gate-results.md + STATE.json + 完成包已生成。
+
+### 8 门禁结果
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc --noEmit | PASS | — |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc --noEmit | PASS | — |
+| 5 | Server tests | PASS | 291 tests / 28 files |
+| 6 | Root tests | PASS | 485 combined |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets detected |
+
+### GPT 下一步
+
+1. 读取 FIX-R1 完成包 `C:\Users\Catcher\Desktop\协作文件夹\lumen-cloudbase-nosql-completion.md`。
+2. 审查 FIX-R1 Trae 报告、门禁证据、NoSQL adapter 源码、select.ts fallback 逻辑。
+3. 决定裁决：通过（待 Preview 验证）/ 驳回 / 先交 Codex 审查。
+4. 若通过，用户执行 Vercel Preview 配置和验证（AC-15~AC-17）。
+5. Preview 通过后配置 Production 环境变量并部署，验证 AC-19。
+
+---
+
+## 历史状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 实施完成，等待 GPT 审计）
 
 - 日期：2026-07-21
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`
