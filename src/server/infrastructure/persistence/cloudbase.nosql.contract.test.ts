@@ -1,74 +1,62 @@
 /**
- * LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01: NoSQL adapter contract tests.
+ * LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2: NoSQL adapter contract tests.
+ *
+ * NOSQL-R2-08 (2026-07-21): This file tests the adapter's pure functions
+ * and configuration handling directly against the PRODUCTION implementation
+ * — no copied logic. Behavior tests that require a CloudBase connection
+ * live in `cloudbase.nosql.r2.behavior.test.ts`.
  *
  * Tests cover:
- *  - JobPatch three-state semantics (absent/null/value) via buildUpdateFromPatch
- *  - Config validation (validateCloudBaseNoSqlConfig)
- *  - Selector behavior (NoSQL preferred when API key present)
- *  - Adapter factory returns correct __brand
- *
- * These tests do NOT connect to a real CloudBase instance. They verify the
- * adapter's logic and configuration handling.
+ *  - JobPatch three-state semantics via the real `buildUpdateFromPatch`
+ *    (NOSQL-R2-02: uses db.command, not raw $set/$unset)
+ *  - `idempotencyDocId` produces the projectId-scoped deterministic _id
+ *    (NOSQL-R2-03: scope is (projectId, key), not { key })
+ *  - Config validation requires dataNamespace + storagePrefix
+ *    (NOSQL-R2-06: Preview/Production isolation fail-closed)
+ *  - Adapter factory returns correct __brand and surface
+ *  - Selector honors explicit PERSISTENCE_BACKEND (NOSQL-R2-07)
  */
 
 import { describe, it, expect } from 'vitest';
 import {
   createCloudBaseNoSqlPersistence,
   validateCloudBaseNoSqlConfig,
+  buildUpdateFromPatch,
+  idempotencyDocId,
   type CloudBaseNoSqlOptions,
+  type CloudBaseCommand,
 } from './cloudbase.nosql.js';
 import { selectPersistenceByEnv } from './select.js';
+import { createMockCommand } from './cloudbase.nosql.mock.js';
 
-// We need to access the internal buildUpdateFromPatch function.
-// Since it's not exported, we test it indirectly through the adapter's
-// update method behavior. For direct unit testing, we replicate the logic.
+// Use the mock command (same shape as CloudBase db.command) so we can
+// assert the structure of the update object the production builder emits.
+const cmd: CloudBaseCommand = createMockCommand() as unknown as CloudBaseCommand;
 
-function buildUpdateFromPatch(patch: Record<string, unknown>): Record<string, unknown> {
-  const setFields: Record<string, unknown> = {};
-  const unsetFields: Record<string, string> = {};
-  const keys = Object.keys(patch);
-  for (const key of keys) {
-    const value = patch[key];
-    if (value === undefined) continue;
-    if (value === null) {
-      unsetFields[key] = '';
-    } else {
-      setFields[key] = value;
-    }
-  }
-  const update: Record<string, unknown> = {};
-  if (Object.keys(setFields).length > 0) update.$set = setFields;
-  if (Object.keys(unsetFields).length > 0) update.$unset = unsetFields;
-  return update;
-}
-
-describe('CloudBase NoSQL adapter - JobPatch three-state semantics', () => {
+describe('NOSQL-R2-02: buildUpdateFromPatch uses db.command operators', () => {
   it('absent field: not included in update', () => {
     const patch = { status: 'generating' as const };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toEqual({ status: 'generating' });
-    expect(update.$unset).toBeUndefined();
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.status).toBeDefined();
+    expect(update.workerId).toBeUndefined();
   });
 
-  it('null field: generates $unset', () => {
+  it('null field: emits command.remove()', () => {
     const patch = { workerId: null, leaseToken: null, leaseExpiresAt: null };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toBeUndefined();
-    expect(update.$unset).toEqual({
-      workerId: '',
-      leaseToken: '',
-      leaseExpiresAt: '',
-    });
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.workerId).toEqual({ __op: 'remove' });
+    expect(update.leaseToken).toEqual({ __op: 'remove' });
+    expect(update.leaseExpiresAt).toEqual({ __op: 'remove' });
   });
 
-  it('value field: generates $set', () => {
+  it('value field: emits command.set(value)', () => {
     const patch = { status: 'succeeded' as const, resultVersionId: 'ver-123' };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toEqual({ status: 'succeeded', resultVersionId: 'ver-123' });
-    expect(update.$unset).toBeUndefined();
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.status).toEqual({ __op: 'set', value: 'succeeded' });
+    expect(update.resultVersionId).toEqual({ __op: 'set', value: 'ver-123' });
   });
 
-  it('mixed absent/null/value: generates both $set and $unset', () => {
+  it('mixed absent/null/value: emits set and remove per field', () => {
     const patch = {
       status: 'failed' as const,
       error: 'timeout',
@@ -76,104 +64,161 @@ describe('CloudBase NoSQL adapter - JobPatch three-state semantics', () => {
       leaseToken: null,
       leaseExpiresAt: null,
     };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toEqual({ status: 'failed', error: 'timeout' });
-    expect(update.$unset).toEqual({
-      workerId: '',
-      leaseToken: '',
-      leaseExpiresAt: '',
-    });
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.status).toEqual({ __op: 'set', value: 'failed' });
+    expect(update.error).toEqual({ __op: 'set', value: 'timeout' });
+    expect(update.workerId).toEqual({ __op: 'remove' });
+    expect(update.leaseToken).toEqual({ __op: 'remove' });
+    expect(update.leaseExpiresAt).toEqual({ __op: 'remove' });
   });
 
-  it('empty patch: generates empty update', () => {
+  it('empty patch: produces empty update', () => {
     const patch = {};
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toBeUndefined();
-    expect(update.$unset).toBeUndefined();
+    const update = buildUpdateFromPatch(patch, cmd);
     expect(Object.keys(update).length).toBe(0);
   });
 
-  it('cancelJob pattern: status=cancelled + unset lease fields', () => {
+  it('cancelJob pattern: status=cancelled + remove lease fields', () => {
     const patch = {
       status: 'cancelled' as const,
       workerId: null,
       leaseToken: null,
       leaseExpiresAt: null,
     };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toEqual({ status: 'cancelled' });
-    expect(update.$unset).toEqual({
-      workerId: '',
-      leaseToken: '',
-      leaseExpiresAt: '',
-    });
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.status).toEqual({ __op: 'set', value: 'cancelled' });
+    expect(update.workerId).toEqual({ __op: 'remove' });
+    expect(update.leaseToken).toEqual({ __op: 'remove' });
+    expect(update.leaseExpiresAt).toEqual({ __op: 'remove' });
   });
 
-  it('succeeded pattern: status + resultVersionId + error=null', () => {
+  it('succeeded pattern: status + resultVersionId + remove error fields', () => {
     const patch = {
       status: 'succeeded' as const,
       resultVersionId: 'ver-abc',
       error: null,
       errorCode: null,
     };
-    const update = buildUpdateFromPatch(patch);
-    expect(update.$set).toEqual({ status: 'succeeded', resultVersionId: 'ver-abc' });
-    expect(update.$unset).toEqual({ error: '', errorCode: '' });
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.status).toEqual({ __op: 'set', value: 'succeeded' });
+    expect(update.resultVersionId).toEqual({ __op: 'set', value: 'ver-abc' });
+    expect(update.error).toEqual({ __op: 'remove' });
+    expect(update.errorCode).toEqual({ __op: 'remove' });
+  });
+
+  it('does NOT emit raw $set or $unset keys (NOSQL-R2-02 regression)', () => {
+    const patch = {
+      status: 'failed' as const,
+      workerId: null,
+    };
+    const update = buildUpdateFromPatch(patch, cmd);
+    expect(update.$set).toBeUndefined();
+    expect(update.$unset).toBeUndefined();
   });
 });
 
-describe('CloudBase NoSQL adapter - Config validation', () => {
+describe('NOSQL-R2-03: idempotencyDocId is projectId-scoped', () => {
+  it('produces projectId__key format', () => {
+    expect(idempotencyDocId('proj-1', 'retry-001')).toBe('proj-1__retry-001');
+  });
+
+  it('different projectId with same key produces different _id', () => {
+    const a = idempotencyDocId('proj-1', 'retry-001');
+    const b = idempotencyDocId('proj-2', 'retry-001');
+    expect(a).not.toBe(b);
+  });
+
+  it('same projectId with different key produces different _id', () => {
+    const a = idempotencyDocId('proj-1', 'retry-001');
+    const b = idempotencyDocId('proj-1', 'retry-002');
+    expect(a).not.toBe(b);
+  });
+
+  it('FIX-R1 regression: scope is NOT just { key }', () => {
+    // FIX-R1 used { key } only, which let proj-1/retry-001 collide with
+    // proj-2/retry-001. R2 namespaces by projectId.
+    const crossProject = idempotencyDocId('proj-1', 'shared-key') !== idempotencyDocId('proj-2', 'shared-key');
+    expect(crossProject).toBe(true);
+  });
+});
+
+describe('NOSQL-R2-06: config validation requires namespace + storagePrefix', () => {
+  const validBase: CloudBaseNoSqlOptions = {
+    envId: 'test-env-id',
+    apiKey: 'test-api-key',
+    dataNamespace: 'prod',
+    storagePrefix: 'prod',
+  };
+
   it('valid config passes validation', () => {
-    const options: CloudBaseNoSqlOptions = {
-      envId: 'test-env-id',
-      apiKey: 'test-api-key',
-    };
-    expect(() => validateCloudBaseNoSqlConfig(options)).not.toThrow();
+    expect(() => validateCloudBaseNoSqlConfig(validBase)).not.toThrow();
   });
 
   it('missing envId throws CLOUDBASE_CONFIG_REQUIRED', () => {
-    const options = { apiKey: 'test-api-key' } as Partial<CloudBaseNoSqlOptions>;
+    const options = { ...validBase, envId: undefined } as Partial<CloudBaseNoSqlOptions>;
     expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
       /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_ENV_ID/
     );
   });
 
   it('missing apiKey throws CLOUDBASE_CONFIG_REQUIRED', () => {
-    const options = { envId: 'test-env-id' } as Partial<CloudBaseNoSqlOptions>;
+    const options = { ...validBase, apiKey: undefined } as Partial<CloudBaseNoSqlOptions>;
     expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
       /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_API_KEY/
     );
   });
 
-  it('missing both throws with both names', () => {
-    const options = {} as Partial<CloudBaseNoSqlOptions>;
+  it('missing dataNamespace throws CLOUDBASE_CONFIG_REQUIRED', () => {
+    const options = { ...validBase, dataNamespace: undefined } as Partial<CloudBaseNoSqlOptions>;
     expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
-      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_ENV_ID.*CLOUDBASE_API_KEY/
+      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_DATA_NAMESPACE/
     );
   });
 
-  it('empty string envId throws', () => {
-    const options = { envId: '', apiKey: 'test' } as Partial<CloudBaseNoSqlOptions>;
+  it('missing storagePrefix throws CLOUDBASE_CONFIG_REQUIRED', () => {
+    const options = { ...validBase, storagePrefix: undefined } as Partial<CloudBaseNoSqlOptions>;
     expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
-      /CLOUDBASE_CONFIG_REQUIRED/
+      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_STORAGE_PREFIX/
+    );
+  });
+
+  it('empty string dataNamespace throws', () => {
+    const options = { ...validBase, dataNamespace: '' } as Partial<CloudBaseNoSqlOptions>;
+    expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
+      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_DATA_NAMESPACE/
+    );
+  });
+
+  it('empty string storagePrefix throws', () => {
+    const options = { ...validBase, storagePrefix: '' } as Partial<CloudBaseNoSqlOptions>;
+    expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
+      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_STORAGE_PREFIX/
+    );
+  });
+
+  it('missing all required fields throws with all names', () => {
+    const options = {} as Partial<CloudBaseNoSqlOptions>;
+    expect(() => validateCloudBaseNoSqlConfig(options)).toThrow(
+      /CLOUDBASE_CONFIG_REQUIRED.*CLOUDBASE_ENV_ID.*CLOUDBASE_API_KEY.*CLOUDBASE_DATA_NAMESPACE.*CLOUDBASE_STORAGE_PREFIX/
     );
   });
 });
 
 describe('CloudBase NoSQL adapter - Factory', () => {
+  const validOptions: CloudBaseNoSqlOptions = {
+    envId: 'test-env',
+    apiKey: 'test-key',
+    dataNamespace: 'prod',
+    storagePrefix: 'prod',
+  };
+
   it('creates adapter with cloudbase_nosql brand', () => {
-    const deps = createCloudBaseNoSqlPersistence({
-      envId: 'test-env',
-      apiKey: 'test-key',
-    });
+    const deps = createCloudBaseNoSqlPersistence(validOptions);
     expect((deps as { __brand: string }).__brand).toBe('cloudbase_nosql');
   });
 
   it('adapter has all required PersistenceDependencies fields', () => {
-    const deps = createCloudBaseNoSqlPersistence({
-      envId: 'test-env',
-      apiKey: 'test-key',
-    });
+    const deps = createCloudBaseNoSqlPersistence(validOptions);
     expect(deps.projects).toBeDefined();
     expect(deps.assets).toBeDefined();
     expect(deps.versions).toBeDefined();
@@ -184,46 +229,52 @@ describe('CloudBase NoSQL adapter - Factory', () => {
   });
 
   it('adapter methods throw CLOUDBASE_NOT_READY before ensureReady', async () => {
-    const deps = createCloudBaseNoSqlPersistence({
-      envId: 'test-env',
-      apiKey: 'test-key',
-    });
+    const deps = createCloudBaseNoSqlPersistence(validOptions);
     await expect(deps.projects.get('any-id')).rejects.toThrow(/CLOUDBASE_NOT_READY/);
   });
 
   it('ensureReady is a function', () => {
-    const deps = createCloudBaseNoSqlPersistence({
-      envId: 'test-env',
-      apiKey: 'test-key',
-    });
+    const deps = createCloudBaseNoSqlPersistence(validOptions);
     expect(typeof (deps as { ensureReady: unknown }).ensureReady).toBe('function');
   });
 
   it('close is a function', () => {
-    const deps = createCloudBaseNoSqlPersistence({
-      envId: 'test-env',
-      apiKey: 'test-key',
-    });
+    const deps = createCloudBaseNoSqlPersistence(validOptions);
     expect(typeof (deps as { close: unknown }).close).toBe('function');
   });
 });
 
-describe('CloudBase NoSQL adapter - Selector integration', () => {
-  it('selects NoSQL adapter when CLOUDBASE_API_KEY is present in deployed mode', () => {
+describe('NOSQL-R2-07: selector honors explicit PERSISTENCE_BACKEND', () => {
+  it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + full config → NoSQL adapter', () => {
     const env = {
       VERCEL: '1',
+      PERSISTENCE_BACKEND: 'cloudbase-nosql',
       CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_API_KEY: 'test-key',
+      CLOUDBASE_DATA_NAMESPACE: 'prod',
+      CLOUDBASE_STORAGE_PREFIX: 'prod',
     };
     const deps = selectPersistenceByEnv(env);
     expect((deps as unknown as { __brand: string }).__brand).toBe('cloudbase_nosql');
   });
 
-  it('falls back to PostgreSQL adapter when only CLOUDBASE_POSTGRES_URL is present', () => {
+  it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + missing namespace → fail closed', () => {
     const env = {
       VERCEL: '1',
+      PERSISTENCE_BACKEND: 'cloudbase-nosql',
       CLOUDBASE_ENV_ID: 'test-env',
+      CLOUDBASE_API_KEY: 'test-key',
+      // CLOUDBASE_DATA_NAMESPACE + CLOUDBASE_STORAGE_PREFIX missing
+    };
+    expect(() => selectPersistenceByEnv(env)).toThrow(/CLOUDBASE_DATA_NAMESPACE/);
+  });
+
+  it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-postgres → Postgres adapter', () => {
+    const env = {
+      VERCEL: '1',
+      PERSISTENCE_BACKEND: 'cloudbase-postgres',
       CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+      CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_STORAGE_BUCKET: 'bucket',
       CLOUDBASE_STORAGE_TOKEN: 'token',
     };
@@ -231,29 +282,31 @@ describe('CloudBase NoSQL adapter - Selector integration', () => {
     expect((deps as unknown as { __brand: string }).__brand).toBe('cloudbase');
   });
 
-  it('prefers NoSQL over PostgreSQL when both are configured', () => {
+  it('VERCEL=1 + unset PERSISTENCE_BACKEND → fail closed', () => {
     const env = {
       VERCEL: '1',
       CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_API_KEY: 'test-key',
-      CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
-      CLOUDBASE_STORAGE_BUCKET: 'bucket',
-      CLOUDBASE_STORAGE_TOKEN: 'token',
     };
-    const deps = selectPersistenceByEnv(env);
-    expect((deps as unknown as { __brand: string }).__brand).toBe('cloudbase_nosql');
+    expect(() => selectPersistenceByEnv(env)).toThrow(/PERSISTENCE_BACKEND_REQUIRED/);
   });
 
-  it('throws CLOUDBASE_CONFIG_REQUIRED when no CloudBase config in deployed mode', () => {
-    const env = { VERCEL: '1' };
-    expect(() => selectPersistenceByEnv(env)).toThrow(/CLOUDBASE_CONFIG_REQUIRED/);
-  });
-
-  it('uses local adapter in non-deployed mode', () => {
-    const env = {};
-    const deps = selectPersistenceByEnv(env, { localRootDir: '/tmp/test-local' });
+  it('No VERCEL + unset PERSISTENCE_BACKEND → local adapter (default)', () => {
+    const deps = selectPersistenceByEnv({}, { localRootDir: '/tmp/test-local' });
     expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(deps.projects).toBeDefined();
-    expect(deps.unitOfWork).toBeDefined();
+  });
+
+  it('FIX-R1 regression: no implicit NoSQL via CLOUDBASE_API_KEY presence', () => {
+    // FIX-R1 implicitly chose NoSQL when CLOUDBASE_API_KEY was set, even
+    // without PERSISTENCE_BACKEND. R2 requires explicit PERSISTENCE_BACKEND.
+    const env = {
+      VERCEL: '1',
+      CLOUDBASE_ENV_ID: 'test-env',
+      CLOUDBASE_API_KEY: 'test-key',
+      CLOUDBASE_DATA_NAMESPACE: 'prod',
+      CLOUDBASE_STORAGE_PREFIX: 'prod',
+      // PERSISTENCE_BACKEND intentionally unset
+    };
+    expect(() => selectPersistenceByEnv(env)).toThrow(/PERSISTENCE_BACKEND_REQUIRED/);
   });
 });
