@@ -1,6 +1,57 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，HARDEN-001B GPT 证据审查通过，等待合并后进入 HARDEN-001C）
+## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01 调查完成，等待 GPT 审议）
+
+- 日期：2026-07-21
+- **新增调查任务**：`LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01`（只读调查，无代码改动）
+- **状态**：`READY_FOR_GPT_REVIEW`（不进入正式 GPT 验收流程，仅作调查结论）
+- **Risk Level**：MEDIUM
+- **调查报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-FEASIBILITY-01-TRAE-REPORT.md)
+- **Codex 必要性**：NOT_REQUIRED
+
+### 调查核心结论
+
+1. **可行**：当前 `PersistenceDependencies` 接口可在 CloudBase 文档数据库上等价实现，未触发任何 Stop Condition。
+2. **推荐方案 A**：Vercel 直连 + CloudBase Node SDK + 现有 PG Storage HTTP API（保持 ObjectStore 不变）。
+3. **关键前提**：CloudBase 文档数据库的多文档事务能力必须可用（实施前必须 PoC 验证）。
+4. **改动范围**：1 adapter 文件 + 1 测试文件 + 1 依赖 + `select.ts`/`index.ts` 微调；领域层无感知。
+5. **实施任务卡**：已设计 `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`，待用户授权启动。
+
+### AC 覆盖矩阵
+
+| AC | 描述 | 结论 |
+|----|------|------|
+| AC-01 | PersistenceDependencies 接口方法清单 | 完成（7 接口 / 29 方法 + JobExecutor 2 方法） |
+| AC-02 | 每个方法在文档数据库中的实现方式 | 完成（含 ObjectStore 保持原 HTTP fetch） |
+| AC-03 | 5 个业务不变量如何保证 | 完成（多文档事务 + 唯一索引 + 条件 update + 补偿删除） |
+| AC-04 | 集合/主键/唯一索引/普通索引 | 完成（7 集合 + 2 唯一索引 + 多个普通索引） |
+| AC-05 | CloudBase Node SDK 依赖状态 | 完成（**未安装**，需新增 `@cloudbase/node-sdk`） |
+| AC-06 | Vercel 直连 vs CloudBase HTTP 云函数对比 | 完成（方案 A 推荐；方案 B 受 CloudBase Workflow 60s 限制 fatal blocker） |
+| AC-07 | 推荐方案 + 实施任务卡 | 完成（方案 A + `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` 任务卡） |
+| AC-08 | 不使用 Vercel 本地文件系统 | 合规（ObjectStore 保持 PG Storage HTTP API） |
+| AC-09 | 不创建 PostgreSQL / 不升级套餐 | 合规（仅设计文档数据库集合，未创建云资源） |
+
+### Stop Conditions 评估
+
+| Stop Condition | 触发 | 评估 |
+|----|------|------|
+| #1：SQL join 或 SQL-specific transaction | ❌ | 接口无 SQL 类型；adapter 内部 SQL 特性均有 NoSQL 等价物 |
+| #2：腾讯云主账号永久密钥 | ❌ | 子账号 + 环境变量 |
+| #3：破坏现有 API 合同 | ❌ | PersistenceDependencies 接口签名不变 |
+| #4：改动跨多个核心领域模块 | ❌ | 仅在 `src/server/infrastructure/persistence/` 内 |
+| #5：幂等和恢复租约原子性 | ⚠️ | 需 CloudBase 多文档事务支持；实施前必须 PoC 验证 |
+
+### GPT 下一步建议
+
+1. 审查本调查报告，确认推荐方案 A 是否符合用户裁决。
+2. 若 GPT 同意，建议用户启动 `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` 实施任务。
+3. 实施前建议先在 CloudBase 控制台执行 5 分钟 PoC，验证多文档事务能力；若失败则回退到方案 B 或继续推进 Track B 收口。
+4. `storage-options.md` 需更新决策记录，新增 D-050「持久化方案从 PostgreSQL 切换到 CloudBase 文档数据库」。
+5. 完成包已输出到 `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`。
+
+---
+
+## 历史状态（2026-07-21，HARDEN-001B GPT 证据审查通过，等待合并后进入 HARDEN-001C）
 
 - 日期：2026-07-21
 - **项目主任务（currentTask）**：`HARDEN-001`，当前批次：`HARDEN-001B`（GPT 审查通过，待合并）
