@@ -1,6 +1,78 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 实施完成，等待 GPT 审计）
+## 当前状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2 实施完成，等待 GPT 审计）
+
+- 日期：2026-07-21
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` FIX-R2
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Base SHA**：`f73c937`（R1 实施提交）
+- **Result SHA**：`63bd445`（full: `63bd4456ac6959e47faa667d521ebf6d26ee2399`）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r2`
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R2-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R2-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r2-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r2-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **Codex**：REQUIRED_AFTER_R2（GPT 通过 R2 后执行限定只读审查）
+- **readyForPreview**：`false`（保持，禁止配置 Preview / Production）
+
+### R2 实施核心结论
+
+GPT FIX-R1 审查发现 8 项缺陷（P0-01~P0-05, P1-01, P1-02, FIX-08）。R2 全部修复：
+
+1. **NOSQL-R2-01**：`git diff f73c937..63bd445` 包含真实代码修改（7 files, +1840/-309），blob SHA 已变化。
+2. **NOSQL-R2-02**：所有查询/更新操作符使用 `db.command`（`_.nin`, `_.in`, `_.lte`, `_.or`, `_.and`, `_.set`, `_.remove`），不再使用 raw Mongo 操作符。
+3. **NOSQL-R2-03**：`jobs.createIdempotent()` 使用 `runTransaction` + 确定性 `_id=projectId__key` 保证 Job+幂等记录原子创建；并发测试证明仅产生 1 个 Job。
+4. **NOSQL-R2-04**：`objects.put()` 保存 `uploadFile()` 返回的 `fileID` 到 `object_metadata` 集合；`get/getSignedUrl/delete/exists` 通过 `resolveFileId()` 解析。
+5. **NOSQL-R2-05**：`projects.deleteCascade()` 只删除数据库实体元数据，不调用 `deleteFile`；`object_metadata` 由 `ProjectService.deleteProject()` 在事务提交后清理。
+6. **NOSQL-R2-06**：`CLOUDBASE_DATA_NAMESPACE` 前缀所有集合名；`CLOUDBASE_STORAGE_PREFIX` 前缀所有 cloudPath；缺失时 fail closed。
+7. **NOSQL-R2-07**：`PERSISTENCE_BACKEND=local|cloudbase-postgres|cloudbase-nosql` 显式选择后端；不再通过 API Key 存在性隐式决定。
+8. **NOSQL-R2-08**：14 个行为测试覆盖 GPT 要求的 10 项测试矩阵（事务提交/回滚、并发幂等、并发 claim、终态更新、JobPatch null、Storage 生命周期、deleteCascade 边界、真实 buildUpdateFromPatch、Preview namespace 隔离）。
+
+### 8 门禁结果
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc | PASS | 0 errors |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 317 tests / 29 files |
+| 6 | Root tests | PASS | 511 combined |
+| 7 | Build | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+
+### 文件变更
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.ts` | 修改（完整重写） | ~948 行，所有 R2 修复 |
+| `select.ts` | 修改（完整重写） | 194 行，显式 PERSISTENCE_BACKEND |
+| `cloudbase.nosql.mock.ts` | 新增 | ~570 行，内存 mock CloudBase SDK |
+| `cloudbase.nosql.r2.behavior.test.ts` | 新增 | ~500 行，14 个行为测试 |
+| `cloudbase.nosql.contract.test.ts` | 修改（重写） | 313 行，使用真实生产函数 |
+| `select.test.ts` | 修改 | 126 行，更新 PERSISTENCE_BACKEND 测试 |
+| `package-lock.json` | 修改 | 项目重命名 gemini-image-editor → lumen-ink |
+
+### Stop Conditions（保持）
+
+- `readyForPreview` 保持 `false`
+- 禁止合并到 main
+- 禁止配置 Vercel Preview / Production
+- 禁止使用 Production API Key
+- Codex 审查在 GPT 通过 R2 后执行
+
+### GPT 下一步
+
+1. 读取完成包 `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`。
+2. 核验 `git diff f73c937..63bd445` 包含真实代码修改（NOSQL-R2-01）。
+3. 审查 7 个变更文件对照 NOSQL-R2-02 ~ NOSQL-R2-07。
+4. 审查 14 个行为测试对照 NOSQL-R2-08 测试矩阵。
+5. 若通过，授权 Codex 限定只读审查（范围：`cloudbase.nosql.ts`, `select.ts`, NoSQL 测试, `ProjectService`/`GenerationService` 调用边界, `f73c937..63bd445` diff）。
+6. Codex 不得修改代码，除非 R2 仍有阻塞缺陷且用户另行授权。
+
+---
+
+## 历史状态（2026-07-21，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 实施完成，等待 GPT 审计）
 
 - 日期：2026-07-21
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`
@@ -21,38 +93,19 @@
 6. **8 门禁全绿**：194 client + 291 server = 485 root tests PASS；typecheck + build + check-lumen-collab PASS。
 7. **AC-15~AC-17 待 Vercel Preview 验证**：用户需在 Vercel Dashboard 配置 `CLOUDBASE_ENV_ID` 和 `CLOUDBASE_API_KEY` 后触发 Preview 部署。
 
-### AC 覆盖矩阵
+### GPT FIX-R1 审查结论
 
-| AC | 描述 | 状态 |
-|----|------|------|
-| AC-01 | 领域持久化接口签名零变化 | ✅ PASS |
-| AC-02 | Project + Asset + V0 同一事务创建 | ✅ PASS |
-| AC-03 | Generation 结果 + Version + pointer + Job 同事务更新 | ✅ PASS |
-| AC-04 | 并发相同 Project + Version Idempotency Key 只产生一个 Version | ✅ PASS |
-| AC-05 | 并发相同 Job Idempotency Key 只产生一个 Job | ✅ PASS |
-| AC-06 | 两个 worker 同时 claim 只有一个成功 | ✅ PASS |
-| AC-07 | Job 状态不得从终态回退 | ✅ PASS |
-| AC-08 | 失去 claim 的 worker 不得更新 Job | ✅ PASS |
-| AC-09 | heartbeat 只允许当前 lease owner 更新 | ✅ PASS |
-| AC-10 | 删除 Project 后不存在关联 Asset/Version/Job/幂等记录 | ✅ PASS |
-| AC-11 | ObjectStore 补偿删除有失败测试和可观察日志 | ✅ PASS |
-| AC-12 | 旧 PostgreSQL contract tests 不得被修改为虚假通过 | ✅ PASS |
-| AC-13 | 新增 NoSQL contract tests、并发测试和事务失败测试 | ✅ PASS |
-| AC-14 | 客户端/服务端测试/typecheck/build/协作检查全部通过 | ✅ PASS |
-| AC-15 | Vercel Preview `/api/health` 返回 200 | ⏳ PENDING |
-| AC-16 | Preview 可创建/刷新恢复/重启恢复/删除 Project | ⏳ PENDING |
-| AC-17 | Preview 重复 Idempotency-Key 不产生重复 Job | ⏳ PENDING |
-| AC-18 | Preview 通过前不得变更 Production | ✅ PASS |
-| AC-19 | Production 部署后重新执行 AC-15~AC-17 | ⏳ PENDING |
-| AC-20 | storage-options.md 新增 D-050 | ✅ PASS |
+GPT 于 2026-07-21 给出 `FIX_REQUIRED` 裁决，发现 8 项缺陷：
+- P0-01: FIX-R1 实际没有修改适配器代码（blob SHA 未变化）
+- P0-02: 使用 raw Mongo 操作符而非 `db.command`
+- P0-03: ObjectStore 丢弃 `uploadFile()` 返回的 `fileID`
+- P0-04: Job 并发幂等可产生孤儿 Job
+- P0-05: `deleteCascade` 双重删除对象 + 破坏责任边界
+- P1-01: Preview/Production 隔离未实现
+- P1-02: 显式后端选择未实现
+- FIX-08: 证据区间不包含所声称的代码修复
 
-### GPT 下一步
-
-1. 读取完成包 `C:\Users\Catcher\Desktop\协作文件夹\lumen-cloudbase-nosql-completion.md`。
-2. 审查 Gate P0 证据、NoSQL adapter 源码、select.ts fallback 逻辑。
-3. 决定裁决：通过（待 Preview 验证）/ 驳回 / 先交 Codex 审查。
-4. 若通过，用户执行 Vercel Preview 配置和验证（AC-15~AC-17）。
-5. Preview 通过后配置 Production 环境变量并部署，验证 AC-19。
+R2 已全部修复，详见上方 R2 章节。
 
 ---
 
