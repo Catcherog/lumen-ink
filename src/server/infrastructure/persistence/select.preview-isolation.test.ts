@@ -115,6 +115,44 @@ describe('FIX-R4 validatePreviewIsolation (pure function)', () => {
     ).toThrowError(/PRODUCTION_NAMESPACE_REQUIRED/);
   });
 
+  // FIX-R8 AC-04: Production storage prefix must be present so the gate can
+  // verify Preview storage prefix != Production storage prefix. Without this
+  // check, a missing productionStoragePrefix would cause the equality
+  // comparison to silently pass (empty string != non-empty Preview prefix),
+  // allowing a misconfigured Preview deployment to share Production storage.
+  it('FIX-R8 AC-04: throws PRODUCTION_STORAGE_PREFIX_REQUIRED when productionStoragePrefix is empty', () => {
+    expect(() =>
+      validatePreviewIsolation({
+        dataNamespace: 'preview',
+        storagePrefix: 'preview',
+        productionNamespace: 'production',
+        productionStoragePrefix: '',
+      })
+    ).toThrowError(/PRODUCTION_STORAGE_PREFIX_REQUIRED/);
+  });
+
+  it('FIX-R8 AC-04: throws PRODUCTION_STORAGE_PREFIX_REQUIRED when productionStoragePrefix is whitespace-only', () => {
+    expect(() =>
+      validatePreviewIsolation({
+        dataNamespace: 'preview',
+        storagePrefix: 'preview',
+        productionNamespace: 'production',
+        productionStoragePrefix: '   ',
+      })
+    ).toThrowError(/PRODUCTION_STORAGE_PREFIX_REQUIRED/);
+  });
+
+  it('FIX-R8 AC-04: throws PRODUCTION_STORAGE_PREFIX_REQUIRED when productionStoragePrefix is undefined', () => {
+    expect(() =>
+      validatePreviewIsolation({
+        dataNamespace: 'preview',
+        storagePrefix: 'preview',
+        productionNamespace: 'production',
+        productionStoragePrefix: undefined as unknown as string,
+      })
+    ).toThrowError(/PRODUCTION_STORAGE_PREFIX_REQUIRED/);
+  });
+
   it('throws PREVIEW_PRODUCTION_NAMESPACE_EQUAL when namespaces match exactly', () => {
     expect(() =>
       validatePreviewIsolation({
@@ -300,6 +338,27 @@ describe('FIX-R5 selectPersistenceByEnv — Preview isolation gate (AC-22 … AC
       /PRODUCTION_NAMESPACE_REQUIRED/
     );
     // Gate must block BEFORE SDK init
+    expect(mockCreateNoSql).not.toHaveBeenCalled();
+  });
+
+  // --- FIX-R8 AC-04: Preview production storage prefix missing --------------
+  it('FIX-R8 AC-04: Preview with missing CLOUDBASE_PRODUCTION_STORAGE_PREFIX → PRODUCTION_STORAGE_PREFIX_REQUIRED', () => {
+    const env = validPreviewEnv();
+    delete env.CLOUDBASE_PRODUCTION_STORAGE_PREFIX;
+    expect(() => selectPersistenceByEnv(env)).toThrowError(
+      /PRODUCTION_STORAGE_PREFIX_REQUIRED/
+    );
+    // Gate must block BEFORE SDK init
+    expect(mockCreateNoSql).not.toHaveBeenCalled();
+  });
+
+  // --- FIX-R8 AC-04: Preview production storage prefix empty string ----------
+  it('FIX-R8 AC-04: Preview with empty CLOUDBASE_PRODUCTION_STORAGE_PREFIX → PRODUCTION_STORAGE_PREFIX_REQUIRED', () => {
+    const env = validPreviewEnv();
+    env.CLOUDBASE_PRODUCTION_STORAGE_PREFIX = '';
+    expect(() => selectPersistenceByEnv(env)).toThrowError(
+      /PRODUCTION_STORAGE_PREFIX_REQUIRED/
+    );
     expect(mockCreateNoSql).not.toHaveBeenCalled();
   });
 

@@ -113,11 +113,12 @@ export interface PreviewIsolationOptions {
  * no network — safe to call from tests and the Smoke Harness.
  *
  * Error codes (AC-23 … AC-26):
- *  - PRODUCTION_NAMESPACE_REQUIRED        — productionNamespace is empty/missing
- *  - PREVIEW_PRODUCTION_NAMESPACE_EQUAL   — namespaces match (case-insensitive, trimmed)
- *  - PREVIEW_STORAGE_PREFIX_EQUAL         — prefixes match (case-insensitive, trimmed)
- *  - PREVIEW_NAMESPACE_CONTAINS_PROD      — Preview namespace contains "prod"
- *  - PREVIEW_STORAGE_PREFIX_CONTAINS_PROD — Preview prefix contains "prod"
+ *  - PRODUCTION_NAMESPACE_REQUIRED         — productionNamespace is empty/missing
+ *  - PRODUCTION_STORAGE_PREFIX_REQUIRED    — productionStoragePrefix is empty/missing (FIX-R8 AC-04)
+ *  - PREVIEW_PRODUCTION_NAMESPACE_EQUAL    — namespaces match (case-insensitive, trimmed)
+ *  - PREVIEW_STORAGE_PREFIX_EQUAL          — prefixes match (case-insensitive, trimmed)
+ *  - PREVIEW_NAMESPACE_CONTAINS_PROD       — Preview namespace contains "prod"
+ *  - PREVIEW_STORAGE_PREFIX_CONTAINS_PROD  — Preview prefix contains "prod"
  */
 export function validatePreviewIsolation(opts: PreviewIsolationOptions): void {
   const {
@@ -131,6 +132,17 @@ export function validatePreviewIsolation(opts: PreviewIsolationOptions): void {
   if (!productionNamespace || productionNamespace.trim() === '') {
     throw new Error(
       'PRODUCTION_NAMESPACE_REQUIRED: CLOUDBASE_PRODUCTION_DATA_NAMESPACE must be set in Preview environments so the isolation gate can verify Preview != Production'
+    );
+  }
+
+  // FIX-R8 AC-04: Production storage prefix must also be present so the gate
+  // can verify Preview storage prefix != Production storage prefix. Without
+  // this check, a missing productionStoragePrefix would cause the equality
+  // comparison to silently pass (empty string != non-empty Preview prefix),
+  // allowing a misconfigured Preview deployment to share Production storage.
+  if (!productionStoragePrefix || productionStoragePrefix.trim() === '') {
+    throw new Error(
+      'PRODUCTION_STORAGE_PREFIX_REQUIRED: CLOUDBASE_PRODUCTION_STORAGE_PREFIX must be set in Preview environments so the isolation gate can verify Preview storage prefix != Production storage prefix'
     );
   }
 

@@ -353,6 +353,12 @@ export class ProjectService {
     // removed from the ledger afterward. "Object already gone"
     // (OBJECT_NOT_FOUND) is treated as idempotent success so a crash
     // between object-delete and ledger-update is safe to retry.
+    //
+    // FIX-R8 AC-03: METADATA_MISSING is treated as probable success for
+    // crash-window recovery (metadata was likely deleted by a previous
+    // successful objects.delete() call), but is explicitly logged as
+    // "remote deletion NOT confirmed" to distinguish it from OBJECT_NOT_FOUND
+    // (which IS confirmed remote deletion via SDK status code).
     const cleanupFailures: string[] = [];
     const completedKeys: string[] = [];
     for (const key of storageKeys) {
@@ -366,6 +372,19 @@ export class ProjectService {
         // delete attempt cleaned the object but crashed before updating
         // the ledger.
         if (msg.includes('OBJECT_NOT_FOUND')) {
+          completedKeys.push(key);
+          continue;
+        }
+        // FIX-R8 AC-03: METADATA_MISSING — metadata is gone, cannot confirm
+        // remote deletion. In the cleanup ledger context, this most likely
+        // means a previous objects.delete() succeeded (crash-window). We
+        // add to completedKeys for ledger cleanup, but explicitly warn that
+        // remote deletion is NOT confirmed. This distinguishes the semantic
+        // from OBJECT_NOT_FOUND (which IS confirmed).
+        if (msg.includes('METADATA_MISSING')) {
+          console.warn(
+            `[ProjectService.deleteProject] METADATA_MISSING key=${key}: remote deletion NOT confirmed, treating as probable success for crash-window recovery`
+          );
           completedKeys.push(key);
           continue;
         }

@@ -682,12 +682,31 @@ export function createCloudBaseNoSqlPersistence(
 
         // Write cleanup keys doc (survives the transaction for
         // post-commit Storage cleanup and sweeper recovery).
-        const now = new Date().toISOString();
-        await collection(COLLECTIONS.projectCleanupKeys).doc(id).set({
-          _id: id,
-          keys: storageKeys,
-          createdAt: now,
-        });
+        //
+        // FIX-R8 AC-01: Check if the ledger already exists before writing.
+        // Two concurrent deleteCascade calls can both reach Phase B (both
+        // see the tombstone from Phase A as idempotent). The first call's
+        // Phase B commits the ledger with the stable snapshot. The second
+        // call's Phase B must NOT overwrite it — the first call's snapshot
+        // is authoritative because it was taken from the same tombstone-
+        // barrier-protected state. If we overwrite with an empty/stale
+        // snapshot, already-deleted Storage keys could be lost from the
+        // ledger, breaking crash-window recovery.
+        const existingLedgerRes = await collection(COLLECTIONS.projectCleanupKeys).doc(id).get();
+        const existingLedger = unwrapDocumentData<{ keys: string[] }>(existingLedgerRes.data);
+        if (!existingLedger) {
+          const now = new Date().toISOString();
+          await collection(COLLECTIONS.projectCleanupKeys).doc(id).set({
+            _id: id,
+            keys: storageKeys,
+            createdAt: now,
+          });
+        }
+        // If existingLedger exists, it was written by a previous/concurrent
+        // Phase B commit. The transaction's OCC retry ensures we see the
+        // committed state. We preserve the existing ledger and proceed with
+        // child/project/tombstone removal (which are idempotent no-ops if
+        // the first call already deleted them).
 
         // 100-op limit check.
         // Phase B total ops = cleanup keys set (1) + child removes (N)
@@ -769,29 +788,46 @@ export function createCloudBaseNoSqlPersistence(
      *    the worst case is the ledger still contains already-deleted keys.
      *    The sweeper will re-attempt them and treat OBJECT_NOT_FOUND as
      *    success — no permanent failure.
+     *
+     * FIX-R8 AC-02: This method now uses runTransaction() for atomic
+     * read-modify-write. Concurrent calls cannot resurrect completed keys
+     * because CloudBase's OCC retries on conflict, re-reading the ledger
+     * to see the latest committed state.
      */
     async removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]> {
       assertReady();
       const removedSet = new Set(removedKeys);
-      const res = await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).get();
-      const doc = unwrapDocumentData<{ keys: string[] }>(res.data);
-      if (!doc) {
-        // Ledger already deleted — nothing to remove, already fully clean.
-        return [];
-      }
-      const remaining = (doc.keys ?? []).filter((k) => !removedSet.has(k));
-      if (remaining.length === 0) {
-        // All keys cleaned — delete the ledger doc.
-        await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).remove();
-        return [];
-      }
-      // Persist remaining keys for sweeper recovery.
-      const cmd = getCommand();
-      await getDb()
-        .collection(COLLECTIONS.projectCleanupKeys)
-        .doc(id)
-        .update({ keys: cmd.set(remaining) });
-      return remaining;
+      // FIX-R8 AC-02: Use runTransaction for atomic read-modify-write.
+      // Previously this was a non-atomic read → compute → update/remove
+      // sequence. Two concurrent workers could both read the same ledger
+      // snapshot, compute different "remaining" sets, and the second write
+      // would resurrect keys that the first worker already cleaned.
+      //
+      // With runTransaction, CloudBase's OCC (optimistic concurrency control)
+      // detects the conflict when the second worker tries to commit. It
+      // retries the callback, which re-reads the ledger and sees the first
+      // worker's changes. This prevents resurrection of completed keys.
+      return getDb().runTransaction(async (tx) => {
+        const res = await tx.collection(COLLECTIONS.projectCleanupKeys).doc(id).get();
+        const doc = res.data as { keys: string[] } | null;
+        if (!doc) {
+          // Ledger already deleted — nothing to remove, already fully clean.
+          return [];
+        }
+        const remaining = (doc.keys ?? []).filter((k) => !removedSet.has(k));
+        if (remaining.length === 0) {
+          // All keys cleaned — delete the ledger doc.
+          await tx.collection(COLLECTIONS.projectCleanupKeys).doc(id).remove();
+          return [];
+        }
+        // Persist remaining keys for sweeper recovery.
+        const cmd = getCommand();
+        await tx
+          .collection(COLLECTIONS.projectCleanupKeys)
+          .doc(id)
+          .update({ keys: cmd.set(remaining) });
+        return remaining;
+      });
     },
   };
 
@@ -1395,10 +1431,36 @@ export function createCloudBaseNoSqlPersistence(
      * delete metadata if the remote delete succeeded (or the object was
      * already gone). This preserves metadata for retry if the remote
      * delete fails — a sweeper can re-attempt using the stored fileID.
+     *
+     * FIX-R8 AC-03: When metadata is missing (resolveFileId throws
+     * OBJECT_NOT_FOUND), we CANNOT confirm the remote object is deleted.
+     * The metadata might be missing because:
+     *  (a) A previous successful delete() cleaned both remote + metadata
+     *      (crash-window — remote IS gone, but we can't confirm)
+     *  (b) Metadata was never written (remote might still exist)
+     *  (c) Metadata was lost/corrupted (remote state unknown)
+     * We re-throw as METADATA_MISSING so the caller can distinguish
+     * "metadata missing, remote unconfirmed" from "SDK confirmed remote
+     * object not found." The caller (ProjectService) treats METADATA_MISSING
+     * as probable success for crash-window recovery, but explicitly logs
+     * that remote deletion is NOT confirmed.
      */
     async delete(key: string): Promise<void> {
       assertReady();
-      const fileID = await resolveFileId(key);
+      let fileID: string;
+      try {
+        fileID = await resolveFileId(key);
+      } catch (e) {
+        const msg = (e as Error).message ?? '';
+        if (msg.includes('OBJECT_NOT_FOUND')) {
+          // AC-03: Metadata missing — cannot confirm remote deletion.
+          // Re-throw as METADATA_MISSING so the caller can distinguish.
+          throw new Error(
+            `METADATA_MISSING: ${key}: cannot confirm remote deletion (metadata not found)`
+          );
+        }
+        throw e;
+      }
       const res = await getApp().deleteFile({ fileList: [fileID] });
       // Check SDK status codes. code 0 = SUCCESS; non-zero = failure.
       const item = res.fileList[0];
@@ -1424,14 +1486,27 @@ export function createCloudBaseNoSqlPersistence(
      *  - metadata missing → false (don't check remote; no fileID to check)
      *  - metadata exists, remote object exists → true
      *  - metadata exists, remote object missing → false (log diagnostic)
+     *
+     * FIX-R8 AC-03: When metadata is missing, we log a distinct diagnostic
+     * (METADATA_MISSING) to make it clear that the false return is NOT a
+     * confirmed remote deletion — it means we cannot determine the remote
+     * object's state because we have no fileID to check.
      */
     async exists(key: string): Promise<boolean> {
       assertReady();
       let fileID: string;
       try {
         fileID = await resolveFileId(key);
-      } catch {
-        // metadata doesn't exist — return false, don't check remote
+      } catch (e) {
+        // AC-03: Metadata missing — cannot confirm remote object state.
+        // Return false but log distinctly so callers understand this is
+        // NOT "confirmed remote deletion" — it's "unknown, no metadata."
+        const msg = (e as Error).message ?? '';
+        if (msg.includes('OBJECT_NOT_FOUND')) {
+          console.warn(
+            `[objects.exists] METADATA_MISSING: key=${key}: cannot determine remote object state (metadata not found, remote NOT confirmed deleted)`
+          );
+        }
         return false;
       }
       // metadata exists — verify remote object actually exists

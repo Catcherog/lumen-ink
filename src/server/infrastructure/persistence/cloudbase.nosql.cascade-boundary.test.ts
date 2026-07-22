@@ -823,16 +823,25 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
 
   // ADAPTER-LEVEL CRASH FIXTURE (NOT a service-path test):
   // This test uses direct deleteCascade() + manual ledger operations to
-  // verify the OBJECT_NOT_FOUND idempotency contract at the adapter level.
-  // It does NOT go through ProjectService.deleteProject(). The service-path
-  // crash-window test that officially closes AC-R6-04 is
+  // verify the OBJECT_NOT_FOUND / METADATA_MISSING idempotency contract at
+  // the adapter level. It does NOT go through ProjectService.deleteProject().
+  // The service-path crash-window test that officially closes AC-R6-04 is
   // "AC-R6-04 crash-window: removeCleanupKeys fails after Storage delete"
   // added in FIX-R7.
   //
-  // AC-R6-03: Idempotent replay — "object already gone" (OBJECT_NOT_FOUND)
-  // treated as success. Simulates: previous delete cleaned the object but
-  // crashed before updating the ledger. On retry, OBJECT_NOT_FOUND is success.
-  it('AC-R6-03: crash window → OBJECT_NOT_FOUND treated as idempotent success on retry (adapter-level fixture)', async () => {
+  // AC-R6-03 (original): Idempotent replay — "object already gone" treated
+  // as success. Simulates: previous delete cleaned the object but crashed
+  // before updating the ledger. On retry, the missing-metadata case is
+  // treated as probable success for crash-window recovery.
+  //
+  // FIX-R8 AC-03 refinement: Missing metadata is now reported as
+  // METADATA_MISSING (distinct from SDK-confirmed OBJECT_NOT_FOUND).
+  // METADATA_MISSING means "metadata gone, remote deletion NOT confirmed" —
+  // it is treated as probable success for ledger cleanup (most likely a
+  // previous delete succeeded) but is explicitly NOT "confirmed remote
+  // deletion". OBJECT_NOT_FOUND (SDK status code) IS confirmed remote
+  // deletion. This test verifies both paths.
+  it('AC-R6-03: crash window → METADATA_MISSING/OBJECT_NOT_FOUND treated as idempotent success on retry (adapter-level fixture)', async () => {
     const { deps, state } = setup;
     const service = new ProjectService(deps, dummyExecutor);
     await deps.projects.create(makeProject('p1'));
@@ -864,16 +873,29 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
 
     // Now retry via the sweeper path (simulating what a cleanup worker
     // would do): read keys, delete objects, update ledger.
-    // The key-0 object is already gone → OBJECT_NOT_FOUND → success.
+    // FIX-R8 AC-03: key-0's metadata is gone → objects.delete() throws
+    // METADATA_MISSING (NOT OBJECT_NOT_FOUND). The sweeper treats this as
+    // probable success for crash-window recovery (remote deletion NOT
+    // confirmed, but most likely a previous delete succeeded). key-1
+    // still has metadata → normal delete succeeds.
     const completedKeys: string[] = [];
+    const metadataMissingKeys: string[] = [];
     for (const key of ledgerKeys) {
       try {
         await deps.objects.delete(key);
         completedKeys.push(key);
       } catch (err) {
         const msg = (err as Error).message ?? '';
-        // AC-R6-03: OBJECT_NOT_FOUND is idempotent success
-        if (msg.includes('OBJECT_NOT_FOUND')) {
+        // AC-R6-03 + FIX-R8 AC-03: METADATA_MISSING — metadata gone,
+        // remote deletion NOT confirmed. Treat as probable success for
+        // crash-window recovery (ledger cleanup proceeds), but record
+        // distinctly so the sweeper can optionally re-verify via exists()
+        // or a deeper Storage audit if required.
+        if (msg.includes('METADATA_MISSING')) {
+          completedKeys.push(key);
+          metadataMissingKeys.push(key);
+        } else if (msg.includes('OBJECT_NOT_FOUND')) {
+          // SDK-confirmed remote deletion — idempotent success.
           completedKeys.push(key);
         } else {
           throw err;
@@ -881,6 +903,10 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
       }
     }
     expect(completedKeys.sort()).toEqual(['key-0', 'key-1']);
+    // AC-03 semantic check: key-0 was METADATA_MISSING (NOT confirmed),
+    // key-1 was a normal delete (confirmed). Only key-0 is in the
+    // metadata-missing bucket.
+    expect(metadataMissingKeys).toEqual(['key-0']);
 
     // Update ledger — all keys removed → doc deleted
     const remaining = await repo.removeCleanupKeys('p1', completedKeys);
@@ -1087,6 +1113,334 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
       expect(state.database.collections.get('prod_object_metadata')?.docs.has(key)).toBe(false);
     }
 
+    await deps.close();
+  });
+});
+
+// ===========================================================================
+// FIX-R8 AC-01 / AC-02 / AC-03: Concurrency hardening + semantic distinction
+//
+// These tests verify the FIX-R8 fixes for Codex READ_ONLY audit findings:
+//  - AC-01: Two concurrent deleteCascade calls cannot overwrite the cleanup
+//    ledger (the second call's Phase B preserves the first call's ledger).
+//  - AC-02: removeCleanupKeys concurrent execution cannot resurrect
+//    completed keys (OCC retry re-reads the ledger on conflict).
+//  - AC-03: Missing metadata throws METADATA_MISSING (distinct from SDK-
+//    confirmed OBJECT_NOT_FOUND) so callers cannot treat "metadata gone"
+//    as "confirmed remote deletion".
+//
+// The concurrency tests use the mock's occReadTracking + preCommitHook
+// features to simulate deterministic concurrent interleaving without real
+// threads.
+// ===========================================================================
+
+describe('FIX-R8 AC-01: deleteCascade concurrent ledger ownership', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // AC-01: Two concurrent deleteCascade calls both reach Phase B. The first
+  // call's Phase B commits the ledger with the stable snapshot. The second
+  // call's Phase B must NOT overwrite it.
+  //
+  // Simulation: enable OCC read tracking. Set preCommitHook to insert a
+  // ledger (simulating the first call's Phase B commit) just before the
+  // second call's Phase B commit applies its txLog. OCC detects the ledger
+  // doc changed (null → doc) and retries the callback. On retry, the
+  // callback re-reads the ledger (now non-null) and skips the write.
+  it('concurrent Phase B: second call preserves first call’s ledger (no overwrite)', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+    const originalKeys = ['key-0', 'key-1', 'key-2'];
+    for (let i = 0; i < originalKeys.length; i++) {
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', originalKeys[i]));
+    }
+
+    // Enable OCC so the ledger read is tracked and conflict-detected.
+    state.occReadTracking = true;
+
+    // preCommitHook: simulate the first concurrent call's Phase B having
+    // already committed the ledger with the authoritative snapshot. This
+    // runs INSIDE the second call's commit(), just before txLog application.
+    state.preCommitHook = async () => {
+      const ledgerColl = ensureCollection(state, 'prod_project_cleanup_keys');
+      ledgerColl.docs.set('p1', {
+        _id: 'p1',
+        keys: [...originalKeys], // authoritative snapshot from first call
+        createdAt: new Date().toISOString(),
+      });
+    };
+
+    // This deleteCascade represents the "second" concurrent call. On the
+    // first commit attempt, OCC detects the ledger changed and retries.
+    // On retry, the callback sees the existing ledger and skips the write.
+    await deps.projects.deleteCascade('p1');
+
+    // The ledger must contain the FIRST call's authoritative snapshot,
+    // NOT an empty/stale overwrite from the second call.
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const ledgerDoc = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(ledgerDoc.keys.sort()).toEqual([...originalKeys].sort());
+
+    // Project + children are deleted (idempotent removal proceeded).
+    expect(state.database.collections.get('prod_projects')?.docs.has('p1')).toBe(false);
+    expect(state.database.collections.get('prod_assets')?.docs.size).toBe(0);
+
+    await deps.close();
+  });
+
+  // AC-01 regression guard: without the fix, the second call would overwrite
+  // the ledger with its own snapshot (which might be empty/stale). This test
+  // verifies the fix is in place by checking the ledger keys match the
+  // first call's snapshot, not a potentially-different second snapshot.
+  it('ledger is NOT overwritten when already present from a prior Phase B commit', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+    await deps.assets.create(makeAsset('a0', 'p1', 'key-0'));
+    await deps.assets.create(makeAsset('a1', 'p1', 'key-1'));
+
+    // Pre-populate the ledger as if a first Phase B already committed it.
+    const ledgerColl = ensureCollection(state, 'prod_project_cleanup_keys');
+    const firstCallKeys = ['key-0', 'key-1'];
+    ledgerColl.docs.set('p1', {
+      _id: 'p1',
+      keys: firstCallKeys,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Now run deleteCascade (simulating the second concurrent call).
+    // It should see the existing ledger and NOT overwrite it.
+    await deps.projects.deleteCascade('p1');
+
+    // Ledger keys must be the first call's snapshot.
+    const ledgerDoc = ledgerColl.docs.get('p1') as unknown as { keys: string[] };
+    expect(ledgerDoc.keys.sort()).toEqual(firstCallKeys.sort());
+
+    await deps.close();
+  });
+});
+
+describe('FIX-R8 AC-02: removeCleanupKeys atomicity (no key resurrection)', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // AC-02: Two concurrent removeCleanupKeys calls must not resurrect keys.
+  //
+  // Scenario:
+  //  - Ledger starts with [k0, k1, k2]
+  //  - Worker A removes k0 → should leave [k1, k2]
+  //  - Worker B removes k1 → reads stale [k0, k1, k2], would write [k0, k2]
+  //    (resurrecting k0!) without atomicity.
+  //
+  // With runTransaction + OCC:
+  //  - Worker A commits first → ledger becomes [k1, k2]
+  //  - Worker B's commit detects conflict → retries → re-reads [k1, k2]
+  //  - Worker B removes k1 → writes [k2] (k0 NOT resurrected)
+  //
+  // Simulation: preCommitHook simulates Worker A's commit (ledger → [k1,k2])
+  // just before Worker B's commit. OCC retry makes Worker B re-read and
+  // recompute correctly.
+  it('concurrent removeCleanupKeys: second worker does NOT resurrect keys removed by first', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+
+    // Pre-populate the ledger with 3 keys.
+    const ledgerColl = ensureCollection(state, 'prod_project_cleanup_keys');
+    const initialKeys = ['k0', 'k1', 'k2'];
+    ledgerColl.docs.set('p1', {
+      _id: 'p1',
+      keys: [...initialKeys],
+      createdAt: new Date().toISOString(),
+    });
+
+    // Enable OCC so the ledger read is tracked and conflict-detected.
+    state.occReadTracking = true;
+
+    // preCommitHook: simulate Worker A having committed [k1, k2] (removed
+    // k0) just before Worker B commits. Worker B read [k0, k1, k2] (stale),
+    // computed remaining = [k0, k2] (removing k1), but OCC will detect the
+    // conflict and retry.
+    state.preCommitHook = async () => {
+      ledgerColl.docs.set('p1', {
+        _id: 'p1',
+        keys: ['k1', 'k2'], // Worker A removed k0
+        createdAt: new Date().toISOString(),
+      });
+    };
+
+    const repo = deps.projects as typeof deps.projects & {
+      removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
+    };
+
+    // Worker B removes k1. On first commit: OCC conflict → retry. On retry:
+    // re-reads [k1, k2], removes k1 → remaining [k2].
+    const remaining = await repo.removeCleanupKeys('p1', ['k1']);
+
+    // k0 must NOT be resurrected. Remaining should be [k2] only.
+    expect(remaining.sort()).toEqual(['k2']);
+    const ledgerDoc = ledgerColl.docs.get('p1') as unknown as { keys: string[] };
+    expect(ledgerDoc.keys.sort()).toEqual(['k2']);
+
+    await deps.close();
+  });
+
+  // AC-02: When the ledger is already deleted by a concurrent worker,
+  // removeCleanupKeys returns [] (no-op) instead of trying to write.
+  it('concurrent removeCleanupKeys: returns [] when ledger already deleted by another worker', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+
+    const ledgerColl = ensureCollection(state, 'prod_project_cleanup_keys');
+    ledgerColl.docs.set('p1', {
+      _id: 'p1',
+      keys: ['k0', 'k1'],
+      createdAt: new Date().toISOString(),
+    });
+
+    state.occReadTracking = true;
+    // Simulate another worker having deleted the entire ledger doc.
+    state.preCommitHook = async () => {
+      ledgerColl.docs.delete('p1');
+    };
+
+    const repo = deps.projects as typeof deps.projects & {
+      removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
+    };
+
+    const remaining = await repo.removeCleanupKeys('p1', ['k0']);
+    expect(remaining).toEqual([]);
+    // Ledger is gone.
+    expect(ledgerColl.docs.has('p1')).toBe(false);
+
+    await deps.close();
+  });
+
+  // AC-02: Sequential (non-concurrent) removeCleanupKeys still works
+  // correctly — the atomic path must not break the normal flow.
+  it('sequential removeCleanupKeys: removes keys one batch at a time', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+
+    const ledgerColl = ensureCollection(state, 'prod_project_cleanup_keys');
+    ledgerColl.docs.set('p1', {
+      _id: 'p1',
+      keys: ['k0', 'k1', 'k2'],
+      createdAt: new Date().toISOString(),
+    });
+
+    const repo = deps.projects as typeof deps.projects & {
+      removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
+    };
+
+    // First batch: remove k0, k1
+    const remaining1 = await repo.removeCleanupKeys('p1', ['k0', 'k1']);
+    expect(remaining1.sort()).toEqual(['k2']);
+    let ledgerDoc = ledgerColl.docs.get('p1') as unknown as { keys: string[] };
+    expect(ledgerDoc.keys.sort()).toEqual(['k2']);
+
+    // Second batch: remove k2 → ledger deleted
+    const remaining2 = await repo.removeCleanupKeys('p1', ['k2']);
+    expect(remaining2).toEqual([]);
+    expect(ledgerColl.docs.has('p1')).toBe(false);
+
+    await deps.close();
+  });
+});
+
+describe('FIX-R8 AC-03: METADATA_MISSING semantic distinction', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // AC-03: objects.delete() throws METADATA_MISSING (not OBJECT_NOT_FOUND)
+  // when the metadata doc is missing. This distinguishes "metadata gone,
+  // remote deletion NOT confirmed" from "SDK confirmed remote object not
+  // found" (OBJECT_NOT_FOUND from SDK status code).
+  it('objects.delete() throws METADATA_MISSING when metadata is missing (not OBJECT_NOT_FOUND)', async () => {
+    const { deps } = setup;
+
+    // No metadata doc for 'missing-key' → resolveFileId throws
+    // OBJECT_NOT_FOUND, which objects.delete re-throws as METADATA_MISSING.
+    await expect(deps.objects.delete('missing-key')).rejects.toThrow(
+      /METADATA_MISSING: missing-key/
+    );
+    // Crucially, it must NOT throw a bare OBJECT_NOT_FOUND for the
+    // missing-metadata case (that code is reserved for SDK-confirmed
+    // remote deletion).
+    await expect(deps.objects.delete('missing-key')).rejects.not.toThrow(
+      /^OBJECT_NOT_FOUND:/
+    );
+
+    await deps.close();
+  });
+
+  // AC-03: objects.exists() returns false but logs METADATA_MISSING distinctly
+  // when metadata is missing. It does NOT throw.
+  it('objects.exists() returns false (no throw) when metadata is missing, logs METADATA_MISSING', async () => {
+    const { deps } = setup;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const exists = await deps.objects.exists('missing-key');
+    expect(exists).toBe(false);
+    // The warn log must mention METADATA_MISSING so operators can distinguish
+    // "unknown state" from "confirmed absent".
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('METADATA_MISSING')
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('remote NOT confirmed deleted')
+    );
+
+    warnSpy.mockRestore();
+    await deps.close();
+  });
+
+  // AC-03: ProjectService.deleteProject() treats METADATA_MISSING as
+  // probable success for crash-window recovery (adds to completedKeys) but
+  // logs a warning that remote deletion is NOT confirmed.
+  it('ProjectService.deleteProject() treats METADATA_MISSING as probable success, logs warning', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await deps.projects.create(makeProject('p1'));
+    // Put the object + metadata, then manually delete the metadata to
+    // simulate a crash-window state where a previous delete cleaned the
+    // metadata but the ledger still has the key.
+    await deps.objects.put('key-0', new Uint8Array([0]), 'image/png');
+    await deps.assets.create(makeAsset('a0', 'p1', 'key-0'));
+
+    // Run deleteCascade to write the ledger, then manually delete metadata.
+    await deps.projects.deleteCascade('p1');
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    metaColl?.docs.delete('key-0');
+
+    // Now call service.deleteProject() — it reads the ledger, tries
+    // objects.delete('key-0'), gets METADATA_MISSING, treats as probable
+    // success, logs warning, removes from ledger.
+    const result = await service.deleteProject('p1');
+    expect(result.deleted).toBe(true);
+    expect(result.cleanupFailures).toHaveLength(0);
+
+    // Warning logged with METADATA_MISSING + "remote deletion NOT confirmed".
+    const metadataMissingCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes('METADATA_MISSING')
+    );
+    expect(metadataMissingCalls.length).toBeGreaterThan(0);
+    const notConfirmedCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes('remote deletion NOT confirmed')
+    );
+    expect(notConfirmedCalls.length).toBeGreaterThan(0);
+
+    // Ledger is cleaned (key-0 treated as completed).
+    expect(state.database.collections.get('prod_project_cleanup_keys')?.docs.has('p1')).toBe(false);
+
+    warnSpy.mockRestore();
     await deps.close();
   });
 });
