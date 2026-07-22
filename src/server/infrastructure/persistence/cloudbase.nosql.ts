@@ -144,8 +144,8 @@ interface CloudBaseApp {
   database(): CloudBaseDatabase;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: unknown[] }>;
-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; tempFileURL: string }> }>;
+  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code?: number; statusMessage?: string }> }>;
+  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code?: number; tempFileURL: string; statusMessage?: string }> }>;
 }
 
 interface CloudBaseDatabase {
@@ -273,6 +273,16 @@ function makeCollections(namespace: string): Record<string, string> {
     jobIdempotency: `${prefix}job_idempotency`,
     authThrottle: `${prefix}auth_throttle`,
     objectMetadata: `${prefix}object_metadata`,
+    // FIX-R4 Workstream E: Tombstone barrier for safe project deletion.
+    // A tombstone doc { _id: projectId, status: 'deleting', startedAt } is
+    // written inside the delete transaction so concurrent child creates
+    // (assets/versions/jobs) see it and fail with PROJECT_DELETING.
+    projectTombstones: `${prefix}project_tombstones`,
+    // FIX-R4 Workstream E: Cleanup keys record for post-commit Storage
+    // cleanup. deleteCascade writes { _id: projectId, keys: [...] } inside
+    // the transaction so a future sweeper can retry orphaned bytes if the
+    // process crashes between metadata commit and object deletion.
+    projectCleanupKeys: `${prefix}project_cleanup_keys`,
   };
 }
 
@@ -412,6 +422,33 @@ export function createCloudBaseNoSqlPersistence(
   }
 
   /**
+   * FIX-R4 Workstream A: Transaction-aware helper.
+   *
+   * If the caller is already inside a unitOfWork.run() (AsyncLocalStorage
+   * has an active transaction), reuse that transaction — the raw
+   * runTransaction() counter does NOT increase. This fixes P0-02: nested
+   * runTransaction() calls created independent transactions that escaped
+   * the outer context.
+   *
+   * If there is no active transaction, open exactly one runTransaction()
+   * and propagate it via AsyncLocalStorage so nested repo calls join it.
+   */
+  async function withCurrentOrNewTransaction<T>(
+    fn: (tx: CloudBaseTransaction) => Promise<T>
+  ): Promise<T> {
+    const ctx = transactionStorage.getStore();
+    if (ctx) {
+      // AC-01: Reuse current transaction. raw runTransaction() count does
+      // not increase.
+      return fn(ctx.tx);
+    }
+    // AC-02: No current transaction — open exactly one.
+    return getDb().runTransaction(async (tx) => {
+      return transactionStorage.run({ tx }, () => fn(tx));
+    });
+  }
+
+  /**
    * NOSQL-R2-06: Apply storage prefix to a cloudPath. All ObjectStore
    * operations route through this helper so Preview and Production cannot
    * read or overwrite each other's files even on the same CloudBase env.
@@ -468,6 +505,26 @@ export function createCloudBaseNoSqlPersistence(
     await collection(COLLECTIONS.objectMetadata).doc(storageKey).remove();
   }
 
+  // --- FIX-R4 Workstream E: Tombstone barrier ---------------------------
+  //
+  // assertProjectNotDeleting checks the project_tombstones collection for
+  // an active tombstone. If one exists, the project is being deleted and
+  // child creates must fail closed with PROJECT_DELETING.
+  //
+  // This helper is transaction-aware: collection() returns the transaction
+  // collection when inside unitOfWork.run(), so a tombstone written earlier
+  // in the SAME transaction is visible to the check. This prevents a
+  // programmatic bug where child creates are issued inside the delete
+  // transaction itself.
+
+  async function assertProjectNotDeleting(projectId: string): Promise<void> {
+    const res = await collection(COLLECTIONS.projectTombstones).doc(projectId).get();
+    const tombstone = unwrapDocumentData<{ status?: string }>(res.data);
+    if (tombstone) {
+      throw new Error(`PROJECT_DELETING: ${projectId}`);
+    }
+  }
+
   // --- ProjectRepository (NOSQL-R2-05: deleteCascade only deletes DB) ----
 
   const projects: ProjectRepository = {
@@ -510,70 +567,111 @@ export function createCloudBaseNoSqlPersistence(
     },
 
     /**
-     * NOSQL-R2-05 + FIX-R3 AC-04/AC-05: Only delete database entity metadata.
-     * Storage object cleanup is the responsibility of ProjectService.
-     * deleteProject() AFTER the metadata transaction commits.
+     * FIX-R4 Workstream E (P1-01): Tombstone-based cascade deletion.
      *
-     * FIX-R3 AC-04: No where() calls inside the transaction. Real CloudBase
-     * transactions only support doc(id) operations. We pre-fetch all child
-     * doc IDs OUTSIDE the transaction (using the non-transaction db), then
-     * remove each doc by ID INSIDE the transaction.
+     * Steps (all inside the caller's unitOfWork.run() transaction):
+     *  1. Idempotent re-delete check: if the project doc doesn't exist,
+     *     return immediately (no-op).
+     *  2. Write a tombstone doc { _id: id, status: 'deleting', startedAt }
+     *     to project_tombstones. Concurrent child creates that call
+     *     assertProjectNotDeleting inside the SAME transaction will see
+     *     this tombstone and fail with PROJECT_DELETING.
+     *  3. Pre-fetch child doc IDs using getDb() (non-transaction reads
+     *     see committed state — the stable snapshot).
+     *  4. Write a project_cleanup_keys doc { _id: id, keys: [...storageKeys] }
+     *     so a future sweeper can retry orphaned Storage bytes if the
+     *     process crashes between metadata commit and object deletion.
+     *  5. 100-op limit check: total ops = tombstone add (1) + cleanup keys
+     *     add (1) + child removes (N) + project remove (1) + tombstone
+     *     remove (1) = N + 4. If > 100, throw CLOUDBASE_TX_LIMIT_EXCEEDED
+     *     and delete NOTHING. Fail closed.
+     *  6. Remove each child doc by ID, then the project doc, then the
+     *     tombstone doc LAST. The cleanup keys doc survives for
+     *     ProjectService post-commit Storage cleanup.
      *
-     * FIX-R3 AC-05: Enforce CloudBase's 100-operation-per-transaction limit.
-     * If the total number of doc operations (all child docs + project doc)
-     * exceeds 100, throw CLOUDBASE_TX_LIMIT_EXCEEDED and delete NOTHING.
-     * Partial deletion is forbidden — fail closed.
-     *
-     * `object_metadata` records are NOT deleted here (tightly coupled to
-     * Storage objects; ProjectService cleans them up post-commit).
+     * Recovery: if the transaction fails, the tombstone is rolled back
+     * (it was written inside the transaction). The Project returns to its
+     * pre-deletion state — no half-deleted state.
      */
     async deleteCascade(id: string): Promise<void> {
       assertReady();
 
-      // AC-04: Pre-fetch doc IDs using the NON-transaction db.
-      // getDb().collection() bypasses the transaction context, reading
-      // from the committed state. This is safe because:
-      //  - If a pre-fetched doc is already gone at commit time, remove()
-      //    returns { deleted: 0 } — harmless no-op.
-      //  - If a new doc is added after pre-fetch, it's not in our list,
-      //    but the project doc is deleted so the orphan is harmless.
-      const childCollections = [
-        COLLECTIONS.versionIdempotency,
-        COLLECTIONS.jobs,
-        COLLECTIONS.jobIdempotency,
-        COLLECTIONS.versions,
-        COLLECTIONS.assets,
-      ];
-
-      const idsByCollection: { collection: string; ids: string[] }[] = [];
-      for (const collName of childCollections) {
-        const res = await getDb().collection(collName).where({ projectId: id }).get();
-        const ids = res.data.map((doc) => (doc as { _id: string })._id);
-        idsByCollection.push({ collection: collName, ids });
+      // Step 1: Idempotent re-delete — if project doesn't exist, no-op.
+      // Use getDb() (non-transaction) so this works even outside a tx.
+      const projectDoc = await getDb().collection(COLLECTIONS.projects).doc(id).get();
+      if (!unwrapDocumentData(projectDoc.data)) {
+        return;
       }
 
-      // AC-05: Count total doc operations. +1 for the project doc itself.
-      const totalOps =
-        idsByCollection.reduce((sum, { ids }) => sum + ids.length, 0) + 1;
-      if (totalOps > CLOUDBASE_TX_OP_LIMIT) {
-        throw new Error(
-          `CLOUDBASE_TX_LIMIT_EXCEEDED: project ${id} requires ${totalOps} ` +
-          `doc operations, limit is ${CLOUDBASE_TX_OP_LIMIT}. ` +
-          `Refusing partial deletion — fail closed.`
-        );
-      }
+      // Step 2-6: All writes MUST be inside a transaction so the tombstone
+      // is rolled back if the 100-op check fails. withCurrentOrNewTransaction
+      // reuses the caller's transaction if one exists, or opens a new one.
+      await withCurrentOrNewTransaction(async () => {
+        // Write tombstone FIRST so child creates inside the same
+        // transaction see it and fail with PROJECT_DELETING.
+        const now = new Date().toISOString();
+        await collection(COLLECTIONS.projectTombstones).doc(id).set({
+          _id: id,
+          status: 'deleting',
+          startedAt: now,
+        });
 
-      // AC-04: Inside the transaction, remove each doc by ID.
-      // collection() returns the transaction collection when inside
-      // unitOfWork.run(). Transaction collections only support doc(id)
-      // operations — no where().
-      for (const { collection: collName, ids } of idsByCollection) {
-        for (const docId of ids) {
-          await collection(collName).doc(docId).remove();
+        // Pre-fetch child doc IDs using getDb() (non-transaction reads
+        // see committed state — the stable snapshot). Collect storageKeys
+        // from assets for the cleanup keys record.
+        const childCollections = [
+          COLLECTIONS.versionIdempotency,
+          COLLECTIONS.jobs,
+          COLLECTIONS.jobIdempotency,
+          COLLECTIONS.versions,
+          COLLECTIONS.assets,
+        ];
+
+        const idsByCollection: { collection: string; ids: string[] }[] = [];
+        const storageKeys: string[] = [];
+        for (const collName of childCollections) {
+          const res = await getDb().collection(collName).where({ projectId: id }).get();
+          const docs = res.data as { _id: string; storageKey?: string }[];
+          const ids = docs.map((doc) => doc._id);
+          idsByCollection.push({ collection: collName, ids });
+          if (collName === COLLECTIONS.assets) {
+            for (const doc of docs) {
+              if (doc.storageKey) storageKeys.push(doc.storageKey);
+            }
+          }
         }
-      }
-      // Finally remove the project doc itself.
-      await collection(COLLECTIONS.projects).doc(id).remove();
+
+        // Write cleanup keys doc (survives the transaction for
+        // post-commit Storage cleanup and sweeper recovery).
+        await collection(COLLECTIONS.projectCleanupKeys).doc(id).set({
+          _id: id,
+          keys: storageKeys,
+          createdAt: now,
+        });
+
+        // 100-op limit check.
+        // Total ops = tombstone add (1) + cleanup keys add (1) + child
+        // removes (N) + project remove (1) + tombstone remove (1) = N + 4.
+        const totalChildOps = idsByCollection.reduce((sum, { ids }) => sum + ids.length, 0);
+        const totalOps = totalChildOps + 4;
+        if (totalOps > CLOUDBASE_TX_OP_LIMIT) {
+          throw new Error(
+            `CLOUDBASE_TX_LIMIT_EXCEEDED: project ${id} requires ${totalOps} ` +
+            `doc operations, limit is ${CLOUDBASE_TX_OP_LIMIT}. ` +
+            `Refusing partial deletion — fail closed.`
+          );
+        }
+
+        // Remove each child doc by ID, then project, then tombstone.
+        for (const { collection: collName, ids } of idsByCollection) {
+          for (const docId of ids) {
+            await collection(collName).doc(docId).remove();
+          }
+        }
+        await collection(COLLECTIONS.projects).doc(id).remove();
+        // Tombstone removed LAST — after this, the project is fully deleted.
+        await collection(COLLECTIONS.projectTombstones).doc(id).remove();
+      });
     },
   };
 
@@ -582,6 +680,7 @@ export function createCloudBaseNoSqlPersistence(
   const assets: AssetRepository = {
     async create(input: Asset): Promise<Asset> {
       assertReady();
+      await assertProjectNotDeleting(input.projectId);
       await collection(COLLECTIONS.assets).add(toDoc(input));
       return input;
     },
@@ -604,6 +703,7 @@ export function createCloudBaseNoSqlPersistence(
   const versions: VersionRepository = {
     async create(input: Version): Promise<Version> {
       assertReady();
+      await assertProjectNotDeleting(input.projectId);
       await collection(COLLECTIONS.versions).add(toDoc(input));
       return input;
     },
@@ -614,6 +714,7 @@ export function createCloudBaseNoSqlPersistence(
       version: Version
     ): Promise<Version> {
       assertReady();
+      await assertProjectNotDeleting(projectId);
       const idemId = idempotencyDocId(projectId, idempotencyKey);
       // Fast path: check if idempotency record already exists.
       // AC-01: unwrapDocumentData handles both array (non-tx) and single-doc
@@ -627,15 +728,24 @@ export function createCloudBaseNoSqlPersistence(
         const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
         if (v) return v;
       }
-      // Atomic creation via runTransaction. CloudBase transaction supports
-      // doc(id).get() / add() / doc(id).set() inside the callback.
+      // FIX-R4 Workstream C: Use withCurrentOrNewTransaction instead of
+      // unconditional getDb().runTransaction(). This fixes P0-02: when called
+      // inside unitOfWork.run(), the inner transaction now joins the outer
+      // transaction instead of creating an independent nested one.
       try {
-        await getDb().runTransaction(async (tx) => {
+        const result = await withCurrentOrNewTransaction(async (tx) => {
           // AC-02: Transaction doc().get() returns { data: T | null }.
           // Re-check inside transaction to guard against concurrent inserts.
           const recheck = await tx.collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
           if (recheck.data) {
-            return; // Another caller won; we will fall through to the retry below.
+            // Another caller won; return the existing version.
+            const recheckDoc = recheck.data as { versionId: string };
+            const existingVersion = await tx.collection(COLLECTIONS.versions)
+              .doc(recheckDoc.versionId)
+              .get();
+            const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
+            if (v) return v;
+            return version; // fallback: should not happen
           }
           await tx.collection(COLLECTIONS.versions).add(toDoc(version));
           await tx.collection(COLLECTIONS.versionIdempotency).add({
@@ -645,20 +755,27 @@ export function createCloudBaseNoSqlPersistence(
             versionId: version.id,
             createdAt: new Date().toISOString(),
           });
+          return version;
         });
-        return version;
+        return result;
       } catch (e) {
         const msg = (e as Error).message || '';
         if (msg.includes('E11000') || msg.includes('duplicate key')) {
-          // Concurrent insert won; return the existing version.
-          const retry = await collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
-          const retryDoc = unwrapDocumentData<{ versionId: string }>(retry.data);
-          if (retryDoc) {
-            const existingVersion = await collection(COLLECTIONS.versions)
-              .doc(retryDoc.versionId)
-              .get();
-            const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
-            if (v) return v;
+          // FIX-R4 Workstream C: Re-read only in the non-transaction path.
+          // In the transaction path, let the outer transaction fail so it
+          // can be retried as a unit — re-reading here would escape the
+          // failing transaction's context.
+          const ctx = transactionStorage.getStore();
+          if (!ctx) {
+            const retry = await collection(COLLECTIONS.versionIdempotency).doc(idemId).get();
+            const retryDoc = unwrapDocumentData<{ versionId: string }>(retry.data);
+            if (retryDoc) {
+              const existingVersion = await collection(COLLECTIONS.versions)
+                .doc(retryDoc.versionId)
+                .get();
+              const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
+              if (v) return v;
+            }
           }
         }
         throw e;
@@ -686,19 +803,17 @@ export function createCloudBaseNoSqlPersistence(
   const jobs: JobRepository = {
     async create(input: GenerationJob): Promise<GenerationJob> {
       assertReady();
-      // `create` is non-idempotent: caller is responsible for not calling it
-      // twice. If an idempotencyKey is present, prefer `createIdempotent`.
-      await collection(COLLECTIONS.jobs).add(toDoc(input));
+      await assertProjectNotDeleting(input.projectId);
+      // FIX-R4 Workstream D (P2-02): When idempotencyKey is present, delegate
+      // to createIdempotent() so Job + idempotency record are created
+      // atomically in a single transaction. The old code did two separate
+      // non-transactional writes — if the second failed, the first Job was
+      // orphaned.
       if (input.idempotencyKey) {
-        const idemId = idempotencyDocId(input.projectId, input.idempotencyKey);
-        await collection(COLLECTIONS.jobIdempotency).add({
-          _id: idemId,
-          projectId: input.projectId,
-          key: input.idempotencyKey,
-          jobId: input.id,
-          createdAt: new Date().toISOString(),
-        });
+        const result = await jobs.createIdempotent(input);
+        return result.job;
       }
+      await collection(COLLECTIONS.jobs).add(toDoc(input));
       return input;
     },
 
@@ -715,9 +830,15 @@ export function createCloudBaseNoSqlPersistence(
      *
      * Query scope is now `(projectId, key)` (FIX-R1 used `{ key }` only,
      * which let different projects collide on the same key).
+     *
+     * FIX-R4 Workstream C: Uses withCurrentOrNewTransaction instead of
+     * unconditional getDb().runTransaction(). This fixes P0-02: when called
+     * inside unitOfWork.run(), the inner transaction now joins the outer
+     * transaction instead of creating an independent nested one.
      */
     async createIdempotent(input: GenerationJob): Promise<{ job: GenerationJob; created: boolean }> {
       assertReady();
+      await assertProjectNotDeleting(input.projectId);
       if (!input.idempotencyKey) {
         await collection(COLLECTIONS.jobs).add(toDoc(input));
         return { job: input, created: true };
@@ -737,9 +858,9 @@ export function createCloudBaseNoSqlPersistence(
         if (j) return { job: j, created: false };
       }
 
-      // Atomic creation via runTransaction.
+      // FIX-R4 Workstream C: Atomic creation via withCurrentOrNewTransaction.
       try {
-        const result = await getDb().runTransaction(async (tx) => {
+        const result = await withCurrentOrNewTransaction(async (tx) => {
           // AC-02: Transaction doc().get() returns { data: T | null }.
           // Re-check inside transaction to guard against concurrent inserts.
           const recheck = await tx.collection(COLLECTIONS.jobIdempotency).doc(idemId).get();
@@ -764,13 +885,18 @@ export function createCloudBaseNoSqlPersistence(
           return { job: input, created: true };
         });
         if (result) return result;
+        // result is null -> another caller won; fall through to re-read
       } catch (e) {
         const msg = (e as Error).message || '';
-        if (!msg.includes('E11000') && !msg.includes('duplicate key')) {
-          throw e;
-        }
+        const isDupKey = msg.includes('E11000') || msg.includes('duplicate key');
+        if (!isDupKey) throw e;
+        // FIX-R4 Workstream C: In the transaction path, let the outer
+        // transaction fail so it can be retried as a unit. In the non-tx
+        // path, fall through to re-read the winner.
+        if (transactionStorage.getStore()) throw e;
+        // Non-tx path: fall through to re-read below
       }
-      // E11000 or transaction returned null -> another caller won.
+      // E11000 (non-tx) or transaction returned null -> another caller won.
       const retry = await collection(COLLECTIONS.jobIdempotency).doc(idemId).get();
       const retryDoc = unwrapDocumentData<{ jobId: string }>(retry.data);
       if (retryDoc) {
@@ -807,11 +933,32 @@ export function createCloudBaseNoSqlPersistence(
      * NOSQL-R2-02: Conditional update using db.command. Uses the db-level
      * collection (not transaction) so the conditional update itself is the
      * atomic unit — the where().update() call is a single CloudBase op.
+     *
+     * FIX-R4 Workstream B: When inside a transaction, where().update() is
+     * NOT available (transaction collections only support doc(id) ops).
+     * Instead, read the doc, check conditions in memory, then update via
+     * doc(id).update(). This fixes P0-01: the old where().update() escaped
+     * the AsyncLocalStorage transaction context.
      */
     async updateIfClaimed(id: string, leaseToken: string, patch: JobPatch): Promise<GenerationJob | null> {
       assertReady();
       const cmd = getCommand();
       const update = buildUpdateFromPatch(patch, cmd);
+      const ctx = transactionStorage.getStore();
+      if (ctx) {
+        // Transaction-aware path: read, check in memory, write via doc(id).
+        const res = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(res.data));
+        if (!j) return null;
+        if (j.leaseToken !== leaseToken || isTerminalStatus(j.status)) return null;
+        if (Object.keys(update).length > 0) {
+          await ctx.tx.collection(COLLECTIONS.jobs).doc(id).update(update);
+          const updated = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+          return fromDoc<GenerationJob>(unwrapDocumentData(updated.data));
+        }
+        return j;
+      }
+      // Non-transaction path: atomic conditional update via where().update()
       if (Object.keys(update).length === 0) {
         const doc = await collection(COLLECTIONS.jobs).doc(id).get();
         const j = fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
@@ -832,11 +979,28 @@ export function createCloudBaseNoSqlPersistence(
 
     /**
      * NOSQL-R2-02: Conditional update using db.command.
+     *
+     * FIX-R4 Workstream B: Transaction-aware path added (see updateIfClaimed).
      */
     async updateIfActive(id: string, patch: JobPatch): Promise<GenerationJob | null> {
       assertReady();
       const cmd = getCommand();
       const update = buildUpdateFromPatch(patch, cmd);
+      const ctx = transactionStorage.getStore();
+      if (ctx) {
+        // Transaction-aware path: read, check in memory, write via doc(id).
+        const res = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(res.data));
+        if (!j) return null;
+        if (isTerminalStatus(j.status)) return null;
+        if (Object.keys(update).length > 0) {
+          await ctx.tx.collection(COLLECTIONS.jobs).doc(id).update(update);
+          const updated = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+          return fromDoc<GenerationJob>(unwrapDocumentData(updated.data));
+        }
+        return j;
+      }
+      // Non-transaction path: atomic conditional update via where().update()
       if (Object.keys(update).length === 0) {
         const doc = await collection(COLLECTIONS.jobs).doc(id).get();
         const j = fromDoc<GenerationJob>(unwrapDocumentData(doc.data));
@@ -863,6 +1027,10 @@ export function createCloudBaseNoSqlPersistence(
      *
      * `cmd.or` builds the disjunction; `cmd.and` combines with the status
      * guard. A single where().update() is the atomic claim unit.
+     *
+     * FIX-R4 Workstream B: Transaction-aware path added. Inside a tx,
+     * where().update() is unavailable, so we read the doc, evaluate the
+     * claim conditions in memory, and update via doc(id).update().
      */
     async claim(
       id: string,
@@ -870,6 +1038,31 @@ export function createCloudBaseNoSqlPersistence(
     ): Promise<boolean> {
       assertReady();
       const cmd = getCommand();
+      const ctx = transactionStorage.getStore();
+      if (ctx) {
+        // Transaction-aware path
+        const res = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(res.data));
+        if (!j) throw new Error(`JOB_NOT_FOUND: ${id}`);
+        if (isTerminalStatus(j.status)) return false;
+        // Replicate cmd.or([eq(null), eq(input.leaseToken), lte(now)]) in memory.
+        // cmd.eq(null) matches value === null (not undefined).
+        // cmd.lte(now) on leaseExpiresAt: undefined/null -> expired (compareValues returns -1).
+        const tokenAvailable = j.leaseToken === null;
+        const tokenMatches = j.leaseToken === input.leaseToken;
+        const leaseExpired = j.leaseExpiresAt === null || j.leaseExpiresAt === undefined
+          || j.leaseExpiresAt <= input.now;
+        if (!tokenAvailable && !tokenMatches && !leaseExpired) return false;
+        const update = {
+          workerId: cmd.set(input.workerId),
+          leaseToken: cmd.set(input.leaseToken),
+          leaseExpiresAt: cmd.set(input.leaseExpiresAt),
+          updatedAt: cmd.set(new Date().toISOString()),
+        };
+        await ctx.tx.collection(COLLECTIONS.jobs).doc(id).update(update);
+        return true;
+      }
+      // Non-transaction path: atomic conditional update via where().update()
       const query = cmd.and([
         { _id: id },
         { status: cmd.nin(TERMINAL_JOB_STATUSES) },
@@ -895,6 +1088,8 @@ export function createCloudBaseNoSqlPersistence(
 
     /**
      * NOSQL-R2-02: Lease heartbeat using db.command.
+     *
+     * FIX-R4 Workstream B: Transaction-aware path added.
      */
     async heartbeat(
       id: string,
@@ -902,6 +1097,22 @@ export function createCloudBaseNoSqlPersistence(
     ): Promise<boolean> {
       assertReady();
       const cmd = getCommand();
+      const ctx = transactionStorage.getStore();
+      if (ctx) {
+        // Transaction-aware path
+        const res = await ctx.tx.collection(COLLECTIONS.jobs).doc(id).get();
+        const j = fromDoc<GenerationJob>(unwrapDocumentData(res.data));
+        if (!j) return false;
+        if (isTerminalStatus(j.status)) return false;
+        if (j.leaseToken !== input.leaseToken) return false;
+        const update = {
+          leaseExpiresAt: cmd.set(input.leaseExpiresAt),
+          updatedAt: cmd.set(new Date().toISOString()),
+        };
+        await ctx.tx.collection(COLLECTIONS.jobs).doc(id).update(update);
+        return true;
+      }
+      // Non-transaction path: atomic conditional update via where().update()
       const query = cmd.and([
         { _id: id },
         { leaseToken: cmd.eq(input.leaseToken) },
@@ -955,21 +1166,66 @@ export function createCloudBaseNoSqlPersistence(
 
   const objects: ObjectStore = {
     /**
-     * NOSQL-R2-04: Upload to CloudBase Storage and persist the returned
-     * fileID to `object_metadata`. Subsequent get/getSignedUrl/delete/exists
-     * resolve storageKey -> fileID via that collection.
+     * FIX-R4 Workstream G (P1-02): Upload to CloudBase Storage and persist
+     * the returned fileID to `object_metadata`. If the metadata write fails,
+     * attempt a compensating delete of the uploaded object to avoid
+     * orphaned bytes.
      *
-     * NOSQL-R2-06: cloudPath is prefixed with `storagePrefix` so Preview
-     * and Production cannot overwrite each other's files.
+     * Error codes:
+     *  - OBJECT_UPLOAD_FAILED: upload threw; no metadata written.
+     *  - OBJECT_METADATA_FAILED_CLEANED: metadata failed, compensation
+     *    succeeded (orphaned object deleted). Re-throw the original error.
+     *  - OBJECT_METADATA_AND_COMPENSATION_FAILED: both metadata and
+     *    compensation failed. The fileID is included for retry.
      */
     async put(key: string, bytes: Uint8Array, mimeType: string): Promise<void> {
       assertReady();
       const cloudPath = prefixCloudPath(key);
-      const uploadRes = await getApp().uploadFile({
-        cloudPath,
-        fileContent: Buffer.from(bytes),
-      });
-      await saveFileMetadata(key, uploadRes.fileID, mimeType, bytes.byteLength);
+      let fileID: string;
+      try {
+        const uploadRes = await getApp().uploadFile({
+          cloudPath,
+          fileContent: Buffer.from(bytes),
+        });
+        fileID = uploadRes.fileID;
+      } catch (e) {
+        throw new Error(`OBJECT_UPLOAD_FAILED: ${key}: ${(e as Error).message}`);
+      }
+      // Metadata write — if it fails, try to compensate by deleting the
+      // uploaded object so no orphaned bytes remain.
+      try {
+        await saveFileMetadata(key, fileID, mimeType, bytes.byteLength);
+      } catch (metaErr) {
+        // Compensating delete: try to remove the orphaned object.
+        try {
+          const compRes = await getApp().deleteFile({ fileList: [fileID] });
+          // FIX-R4 Workstream G: Check per-fileID status code. The SDK
+          // returns { fileList: [{ fileID, code, statusMessage }] } without
+          // throwing; a non-zero code means the object was NOT deleted.
+          const compItem = compRes.fileList[0];
+          if (compItem && (compItem.code ?? 0) !== 0) {
+            throw new Error(
+              `COMPENSATION_DELETE_FAILED: code=${compItem.code} msg=${compItem.statusMessage ?? ''}`
+            );
+          }
+          // Compensation succeeded — throw the original metadata error.
+          throw new Error(
+            `OBJECT_METADATA_FAILED_CLEANED: ${key}: fileID=${fileID}: ${(metaErr as Error).message}`
+          );
+        } catch (compensateErr) {
+          // If compensation itself threw OBJECT_METADATA_FAILED_CLEANED,
+          // re-throw that (it was our own throw above).
+          if (compensateErr instanceof Error && compensateErr.message.startsWith('OBJECT_METADATA_FAILED_CLEANED')) {
+            throw compensateErr;
+          }
+          // Compensation ALSO failed — throw with both contexts and the
+          // fileID so it can be retried by a sweeper.
+          throw new Error(
+            `OBJECT_METADATA_AND_COMPENSATION_FAILED: ${key}: fileID=${fileID}: ` +
+            `metaError=${(metaErr as Error).message}; compensateError=${(compensateErr as Error).message}`
+          );
+        }
+      }
     },
 
     async get(key: string): Promise<Uint8Array> {
@@ -979,6 +1235,11 @@ export function createCloudBaseNoSqlPersistence(
       return new Uint8Array(res.fileContent);
     },
 
+    /**
+     * FIX-R4 Workstream G (P1-02): Fetch a signed URL. Checks SDK status
+     * codes and throws SIGNED_URL_FAILED / SIGNED_URL_EMPTY on error.
+     * Does NOT persist signed URLs — they are short-lived.
+     */
     async getSignedUrl(key: string): Promise<string> {
       assertReady();
       const fileID = await resolveFileId(key);
@@ -986,22 +1247,84 @@ export function createCloudBaseNoSqlPersistence(
         fileList: [fileID],
       });
       if (res.fileList.length === 0) throw new Error(`OBJECT_NOT_FOUND: ${key}`);
-      return res.fileList[0].tempFileURL;
+      const item = res.fileList[0];
+      const code = item.code ?? 0;
+      if (code !== 0) {
+        throw new Error(`SIGNED_URL_FAILED: ${key}: fileID=${fileID}: code=${code}`);
+      }
+      if (!item.tempFileURL) {
+        throw new Error(`SIGNED_URL_EMPTY: ${key}: fileID=${fileID}`);
+      }
+      return item.tempFileURL;
     },
 
+    /**
+     * FIX-R4 Workstream G (P1-02): Delete the remote object first. Only
+     * delete metadata if the remote delete succeeded (or the object was
+     * already gone). This preserves metadata for retry if the remote
+     * delete fails — a sweeper can re-attempt using the stored fileID.
+     */
     async delete(key: string): Promise<void> {
       assertReady();
       const fileID = await resolveFileId(key);
-      await getApp().deleteFile({ fileList: [fileID] });
+      const res = await getApp().deleteFile({ fileList: [fileID] });
+      // Check SDK status codes. code 0 = SUCCESS; non-zero = failure.
+      const item = res.fileList[0];
+      if (item) {
+        const code = item.code ?? 0;
+        if (code !== 0) {
+          const msg = item.statusMessage ?? '';
+          // "not found" / "no such file" = already deleted, acceptable.
+          const lower = msg.toLowerCase();
+          if (!lower.includes('not found') && !lower.includes('no such file')) {
+            throw new Error(
+              `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: code=${code} msg=${msg}`
+            );
+          }
+        }
+      }
+      // Remote delete succeeded — now delete metadata.
       await deleteFileMetadata(key);
     },
 
+    /**
+     * FIX-R4 Workstream G (P1-02): Distinguish three states:
+     *  - metadata missing → false (don't check remote; no fileID to check)
+     *  - metadata exists, remote object exists → true
+     *  - metadata exists, remote object missing → false (log diagnostic)
+     */
     async exists(key: string): Promise<boolean> {
       assertReady();
+      let fileID: string;
       try {
-        await resolveFileId(key);
-        return true;
+        fileID = await resolveFileId(key);
       } catch {
+        // metadata doesn't exist — return false, don't check remote
+        return false;
+      }
+      // metadata exists — verify remote object actually exists
+      try {
+        const res = await getApp().getTempFileURL({ fileList: [fileID] });
+        if (res.fileList.length === 0) return false;
+        const item = res.fileList[0];
+        const code = item.code ?? 0;
+        if (code !== 0) {
+          console.warn(
+            `[objects.exists] metadata exists but remote object missing: key=${key} fileID=${fileID} code=${code}`
+          );
+          return false;
+        }
+        if (!item.tempFileURL) {
+          console.warn(
+            `[objects.exists] metadata exists but remote URL empty: key=${key} fileID=${fileID}`
+          );
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn(
+          `[objects.exists] remote check failed: key=${key} fileID=${fileID}: ${(e as Error).message}`
+        );
         return false;
       }
     },

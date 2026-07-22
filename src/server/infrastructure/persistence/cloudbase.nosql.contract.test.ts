@@ -246,19 +246,28 @@ describe('CloudBase NoSQL adapter - Factory', () => {
 
 describe('NOSQL-R2-07: selector honors explicit PERSISTENCE_BACKEND', () => {
   it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + full config → NoSQL adapter', () => {
+    // FIX-R4: Preview isolation gate requires CLOUDBASE_PRODUCTION_DATA_NAMESPACE
+    // and CLOUDBASE_PRODUCTION_STORAGE_PREFIX in Preview environments (VERCEL=1
+    // without NODE_ENV=production). Preview namespace must not equal Production
+    // namespace and must not contain 'prod' substring.
     const env = {
       VERCEL: '1',
       PERSISTENCE_BACKEND: 'cloudbase-nosql',
       CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_API_KEY: 'test-key',
-      CLOUDBASE_DATA_NAMESPACE: 'prod',
-      CLOUDBASE_STORAGE_PREFIX: 'prod',
+      CLOUDBASE_DATA_NAMESPACE: 'preview',
+      CLOUDBASE_STORAGE_PREFIX: 'preview',
+      CLOUDBASE_PRODUCTION_DATA_NAMESPACE: 'prod',
+      CLOUDBASE_PRODUCTION_STORAGE_PREFIX: 'prod',
     };
     const deps = selectPersistenceByEnv(env);
     expect((deps as unknown as { __brand: string }).__brand).toBe('cloudbase_nosql');
   });
 
   it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + missing namespace → fail closed', () => {
+    // FIX-R4: In Preview env, the isolation gate runs first and requires
+    // CLOUDBASE_PRODUCTION_DATA_NAMESPACE. Without it, the gate throws
+    // PRODUCTION_NAMESPACE_REQUIRED before config validation runs.
     const env = {
       VERCEL: '1',
       PERSISTENCE_BACKEND: 'cloudbase-nosql',
@@ -266,7 +275,7 @@ describe('NOSQL-R2-07: selector honors explicit PERSISTENCE_BACKEND', () => {
       CLOUDBASE_API_KEY: 'test-key',
       // CLOUDBASE_DATA_NAMESPACE + CLOUDBASE_STORAGE_PREFIX missing
     };
-    expect(() => selectPersistenceByEnv(env)).toThrow(/CLOUDBASE_DATA_NAMESPACE/);
+    expect(() => selectPersistenceByEnv(env)).toThrow(/PRODUCTION_NAMESPACE_REQUIRED|CLOUDBASE_DATA_NAMESPACE/);
   });
 
   it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-postgres → Postgres adapter', () => {

@@ -293,18 +293,28 @@ export class ProjectService {
   /**
    * Delete a project and all its child entities + object bytes.
    *
-   * Metadata deletion is transactional. Object deletion is best-effort:
-   * any failure is recorded in `cleanupFailures` but does NOT roll back
-   * the metadata deletion. A future sweeper can retry the orphaned bytes.
+   * FIX-R4 Workstream E (P1-01): The entire metadata deletion runs inside
+   * a single unitOfWork.run() transaction. The storage keys are collected
+   * INSIDE the transaction (after the tombstone is set by deleteCascade)
+   * so the stable snapshot matches the deletion set. Storage cleanup happens
+   * AFTER the transaction commits — any failure is recorded in
+   * `cleanupFailures` but does NOT roll back the metadata deletion.
+   *
+   * The tombstone barrier (assertProjectNotDeleting) prevents concurrent
+   * child creates from producing orphans during the delete transaction.
    */
   async deleteProject(projectId: string): Promise<DeleteProjectResult> {
-    // Collect asset storage keys BEFORE deleting metadata.
-    const assets = await this.deps.assets.listByProject(projectId);
-    const storageKeys = assets.map((a) => a.storageKey);
+    // Collect asset storage keys INSIDE the transaction — this is the
+    // stable snapshot after the tombstone is set. deleteCascade also
+    // writes a project_cleanup_keys doc for sweeper recovery.
+    let storageKeys: string[] = [];
 
-    // Delete metadata transactionally (ProjectRepository.deleteCascade
-    // already removes project + assets + versions + jobs atomically).
     await this.deps.unitOfWork.run(async () => {
+      // Read assets inside the transaction (getDb reads committed state,
+      // which is the stable snapshot before any deletion occurs).
+      const assets = await this.deps.assets.listByProject(projectId);
+      storageKeys = assets.map((a) => a.storageKey);
+      // deleteCascade handles tombstone + child deletion atomically.
       await this.deps.projects.deleteCascade(projectId);
     });
 

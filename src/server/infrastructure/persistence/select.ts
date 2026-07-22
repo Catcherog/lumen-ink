@@ -74,6 +74,126 @@ function parseBackend(value: string | undefined): PersistenceBackend {
   );
 }
 
+// ---------------------------------------------------------------------------
+// LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 (P1-03): Preview production
+// isolation gate.
+//
+// In Preview deployments (VERCEL=1 but NODE_ENV != production, or
+// CLOUDBASE_PREVIEW_MODE=1), the selector must verify that the Preview data
+// namespace and storage prefix are isolated from Production BEFORE the
+// CloudBase SDK is initialised. This prevents a misconfigured Preview
+// deployment from accidentally reading or writing Production data.
+//
+// The gate is a PURE function — no SDK imports, no network, no side effects.
+// It runs BEFORE createCloudBaseNoSqlPersistence() so the SDK is never
+// initialised against Production data when Preview == Production.
+//
+// Production runtime (NODE_ENV=production) is NEVER blocked by this gate.
+// ---------------------------------------------------------------------------
+
+export interface PreviewIsolationOptions {
+  /** Preview data namespace (CLOUDBASE_DATA_NAMESPACE). */
+  dataNamespace: string;
+  /** Preview storage prefix (CLOUDBASE_STORAGE_PREFIX). */
+  storagePrefix: string;
+  /** Production data namespace (CLOUDBASE_PRODUCTION_DATA_NAMESPACE). */
+  productionNamespace: string;
+  /** Production storage prefix (CLOUDBASE_PRODUCTION_STORAGE_PREFIX). */
+  productionStoragePrefix: string;
+}
+
+/**
+ * PURE: Validate that Preview namespace/prefix are isolated from Production.
+ * Throws stable error codes on violation. No side effects, no SDK imports,
+ * no network — safe to call from tests and the Smoke Harness.
+ *
+ * Error codes (AC-23 … AC-26):
+ *  - PRODUCTION_NAMESPACE_REQUIRED        — productionNamespace is empty/missing
+ *  - PREVIEW_PRODUCTION_NAMESPACE_EQUAL   — namespaces match (case-insensitive, trimmed)
+ *  - PREVIEW_STORAGE_PREFIX_EQUAL         — prefixes match (case-insensitive, trimmed)
+ *  - PREVIEW_NAMESPACE_CONTAINS_PROD      — Preview namespace contains "prod"
+ *  - PREVIEW_STORAGE_PREFIX_CONTAINS_PROD — Preview prefix contains "prod"
+ */
+export function validatePreviewIsolation(opts: PreviewIsolationOptions): void {
+  const {
+    dataNamespace,
+    storagePrefix,
+    productionNamespace,
+    productionStoragePrefix,
+  } = opts;
+
+  // Production namespace must be present so the gate can compare (AC-26).
+  if (!productionNamespace || productionNamespace.trim() === '') {
+    throw new Error(
+      'PRODUCTION_NAMESPACE_REQUIRED: CLOUDBASE_PRODUCTION_DATA_NAMESPACE must be set in Preview environments so the isolation gate can verify Preview != Production'
+    );
+  }
+
+  const previewNs = dataNamespace.trim().toLowerCase();
+  const prodNs = productionNamespace.trim().toLowerCase();
+  const previewPrefix = storagePrefix.trim().toLowerCase();
+  const prodPrefix = productionStoragePrefix.trim().toLowerCase();
+
+  if (previewNs === prodNs) {
+    throw new Error(
+      `PREVIEW_PRODUCTION_NAMESPACE_EQUAL: Preview data namespace "${dataNamespace}" must not equal Production namespace "${productionNamespace}" (case-insensitive, trimmed)`
+    );
+  }
+
+  if (previewPrefix === prodPrefix) {
+    throw new Error(
+      `PREVIEW_STORAGE_PREFIX_EQUAL: Preview storage prefix "${storagePrefix}" must not equal Production prefix "${productionStoragePrefix}" (case-insensitive, trimmed)`
+    );
+  }
+
+  if (previewNs.includes('prod')) {
+    throw new Error(
+      `PREVIEW_NAMESPACE_CONTAINS_PROD: Preview data namespace "${dataNamespace}" must not contain "prod" (case-insensitive) to avoid accidental Production namespace use`
+    );
+  }
+
+  if (previewPrefix.includes('prod')) {
+    throw new Error(
+      `PREVIEW_STORAGE_PREFIX_CONTAINS_PROD: Preview storage prefix "${storagePrefix}" must not contain "prod" (case-insensitive) to avoid accidental Production prefix use`
+    );
+  }
+}
+
+/**
+ * PURE: Returns true when the environment is a Preview deployment (not
+ * Production). Preview is distinguished by:
+ *   - VERCEL=1 AND NODE_ENV != 'production'  (Vercel Preview deployment)
+ *   - OR CLOUDBASE_PREVIEW_MODE=1            (explicit opt-in for local tests)
+ *
+ * Production (NODE_ENV=production) always returns false — the gate must
+ * never block Production runtime (AC-28).
+ */
+export function isPreviewEnvironment(env: EnvSource): boolean {
+  if (env.CLOUDBASE_PREVIEW_MODE === '1') return true;
+  return env.VERCEL === '1' && env.NODE_ENV !== 'production';
+}
+
+/**
+ * Run the Preview isolation gate if the environment is a Preview deployment.
+ * Called BEFORE validateCloudBaseNoSqlConfig() and
+ * createCloudBaseNoSqlPersistence() so the SDK is never initialised against
+ * Production data when Preview == Production (AC-22, AC-27).
+ *
+ * Production runtime (NODE_ENV=production) is never blocked.
+ */
+function runPreviewIsolationGateIfPreview(
+  env: EnvSource,
+  noSqlOptions: { dataNamespace?: string; storagePrefix?: string }
+): void {
+  if (!isPreviewEnvironment(env)) return;
+  validatePreviewIsolation({
+    dataNamespace: noSqlOptions.dataNamespace ?? '',
+    storagePrefix: noSqlOptions.storagePrefix ?? '',
+    productionNamespace: env.CLOUDBASE_PRODUCTION_DATA_NAMESPACE ?? '',
+    productionStoragePrefix: env.CLOUDBASE_PRODUCTION_STORAGE_PREFIX ?? '',
+  });
+}
+
 export interface SelectPersistenceOptions {
   /**
    * Optional override for the local adapter root directory. Defaults to
@@ -92,6 +212,15 @@ export interface SelectPersistenceOptions {
  * Throws `PERSISTENCE_BACKEND_INVALID` when the value is not one of the
  * allowed literals.
  * Throws `CLOUDBASE_CONFIG_REQUIRED` when CloudBase env vars are missing.
+ *
+ * FIX-R4 Preview isolation gate (AC-22 … AC-29): in Preview environments
+ * (VERCEL=1 without NODE_ENV=production, or CLOUDBASE_PREVIEW_MODE=1),
+ * BEFORE the CloudBase NoSQL SDK is initialised, the selector verifies that
+ * the Preview data namespace and storage prefix are isolated from
+ * Production. Throws `PRODUCTION_NAMESPACE_REQUIRED`,
+ * `PREVIEW_PRODUCTION_NAMESPACE_EQUAL`, `PREVIEW_STORAGE_PREFIX_EQUAL`,
+ * `PREVIEW_NAMESPACE_CONTAINS_PROD`, or `PREVIEW_STORAGE_PREFIX_CONTAINS_PROD`.
+ * Production runtime (NODE_ENV=production) is never blocked by this gate.
  */
 export function selectPersistenceByEnv(
   env: EnvSource = process.env,
@@ -117,6 +246,9 @@ export function selectPersistenceByEnv(
           ? Number(env.CLOUDBASE_SIGNED_URL_TTL_SECONDS)
           : undefined,
       };
+      // FIX-R4: Preview isolation gate runs BEFORE SDK init and BEFORE
+      // config validation so isolation is verified first (AC-22, AC-27).
+      runPreviewIsolationGateIfPreview(env, noSqlOptions);
       validateCloudBaseNoSqlConfig(noSqlOptions);
       return createCloudBaseNoSqlPersistence(
         noSqlOptions as CloudBaseNoSqlOptions
@@ -151,6 +283,9 @@ export function selectPersistenceByEnv(
         ? Number(env.CLOUDBASE_SIGNED_URL_TTL_SECONDS)
         : undefined,
     };
+    // FIX-R4: Preview gate also applies in local mode when
+    // CLOUDBASE_PREVIEW_MODE=1 is explicitly set (AC-22, AC-27).
+    runPreviewIsolationGateIfPreview(env, noSqlOptions);
     validateCloudBaseNoSqlConfig(noSqlOptions);
     return createCloudBaseNoSqlPersistence(noSqlOptions as CloudBaseNoSqlOptions);
   }

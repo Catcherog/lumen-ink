@@ -624,9 +624,10 @@ describe('FIX-R3 AC-05: deleteCascade 100-op limit fail closed', () => {
   it('project with exactly 100 child docs -> succeeds (at the limit)', async () => {
     const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
 
-    // 99 assets + 1 project = 100 ops (exactly at the limit).
+    // FIX-R4: op count is now N + 4 (tombstone add + cleanup keys add +
+    // project remove + tombstone remove). 96 assets + 4 = 100 ops exactly.
     await deps.projects.create(makeProject('p-limit'));
-    for (let i = 0; i < 99; i++) {
+    for (let i = 0; i < 96; i++) {
       await deps.assets.create(makeAsset(`a${i}`, 'p-limit', `key-${i}`));
     }
 

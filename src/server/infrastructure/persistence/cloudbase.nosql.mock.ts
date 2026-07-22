@@ -45,8 +45,8 @@ export interface MockCloudBaseApp {
   database(): MockDatabaseHandle;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: unknown[] }>;
-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; tempFileURL: string }> }>;
+  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; statusMessage?: string }> }>;
+  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; tempFileURL: string; statusMessage?: string }> }>;
 }
 
 export interface MockDatabaseHandle {
@@ -274,6 +274,56 @@ export interface MockCloudBaseState {
   database: MockDatabase;
   storage: MockStorage;
   envId: string;
+  /**
+   * FIX-R4: Incremented every time runTransaction() is called. Tests use this
+   * to verify that withCurrentOrNewTransaction reuses the outer transaction
+   * instead of opening a nested one (P0-02 regression guard).
+   */
+  runTransactionCount: number;
+  /**
+   * FIX-R4: When true, commit() throws COMMIT_FAILED. Tests use this to
+   * verify that a commit failure rolls back all buffered writes.
+   */
+  commitShouldFail: boolean;
+  /**
+   * FIX-R4: When true, the first commit attempt throws a
+   * DATABASE_TRANSACTION_CONFLICT error and runTransaction retries the
+   * callback. The second attempt succeeds. Tests use this to verify retry
+   * behavior on conflict.
+   */
+  retryOnConflict: boolean;
+  /**
+   * FIX-R4: Storage fault injection — when true, uploadFile() throws.
+   */
+  uploadShouldFail: boolean;
+  /**
+   * FIX-R4: When true, set() on object_metadata collections throws. Tests
+   * use this to verify that a metadata write failure does not leave an
+   * orphaned Storage object.
+   */
+  saveMetadataShouldFail: boolean;
+  /**
+   * FIX-R4 Workstream G: When true, remove() on object_metadata collections
+   * throws. Tests use this to verify that a metadata delete failure (after
+   * remote object was already deleted) preserves metadata for retry/sweeper.
+   */
+  deleteMetadataShouldFail: boolean;
+  /**
+   * FIX-R4: Per-fileID status codes for deleteFile(). Non-zero = failure
+   * (the mock throws for that fileID).
+   */
+  deleteFileStatuses: Record<string, number>;
+  /**
+   * FIX-R4: Per-fileID status codes for getTempFileURL(). Non-zero = failure
+   * (the mock throws for that fileID).
+   */
+  getTempFileURLStatuses: Record<string, number>;
+  /**
+   * FIX-R4: fileIDs that don't exist in remote Storage. downloadFile()
+   * throws FILE_NOT_FOUND for these; getTempFileURL() returns an empty URL.
+   * Used for exists() and error-path testing.
+   */
+  remoteObjectMissing: Set<string>;
 }
 
 export function createMockCloudBaseState(envId: string): MockCloudBaseState {
@@ -281,6 +331,15 @@ export function createMockCloudBaseState(envId: string): MockCloudBaseState {
     database: { collections: new Map() },
     storage: { files: new Map() },
     envId,
+    runTransactionCount: 0,
+    commitShouldFail: false,
+    retryOnConflict: false,
+    uploadShouldFail: false,
+    saveMetadataShouldFail: false,
+    deleteMetadataShouldFail: false,
+    deleteFileStatuses: {},
+    getTempFileURLStatuses: {},
+    remoteObjectMissing: new Set(),
   };
 }
 
@@ -291,6 +350,14 @@ function getCollection(state: MockCloudBaseState, name: string): MockCollection 
     state.database.collections.set(name, c);
   }
   return c;
+}
+
+/**
+ * FIX-R4: Check if a collection name corresponds to object_metadata.
+ * Collection names are namespace-prefixed (e.g. `prod_object_metadata`).
+ */
+function isMetadataCollection(collectionName: string): boolean {
+  return collectionName.includes('object_metadata');
 }
 
 // --- Transaction write log ------------------------------------------------
@@ -387,6 +454,10 @@ function createCollectionHandle(
           return { updated: 1 };
         },
         async set(data: Record<string, unknown>) {
+          // FIX-R4: saveMetadataShouldFail fault injection
+          if (state.saveMetadataShouldFail && isMetadataCollection(collectionName)) {
+            throw new Error('SAVE_METADATA_FAILED: injected by mock');
+          }
           if (txLog) {
             txLog.push({ collectionName, type: 'set', id, data: { ...data, _id: id } });
             return { updated: 1, upserted: [id] };
@@ -397,6 +468,10 @@ function createCollectionHandle(
           return { updated: existed ? 1 : 0, upserted: existed ? [] : [id] };
         },
         async remove() {
+          // FIX-R4 Workstream G: deleteMetadataShouldFail fault injection
+          if (state.deleteMetadataShouldFail && isMetadataCollection(collectionName)) {
+            throw new Error('DELETE_METADATA_FAILED: injected by mock');
+          }
           if (txLog) {
             const existing = ensureDoc(state, collectionName, id, txLog);
             if (!existing) return { deleted: 0 };
@@ -576,10 +651,18 @@ function createTransactionCollectionHandle(
           return { updated: 1 };
         },
         async set(data: Record<string, unknown>) {
+          // FIX-R4: saveMetadataShouldFail fault injection (transaction path)
+          if (state.saveMetadataShouldFail && isMetadataCollection(collectionName)) {
+            throw new Error('SAVE_METADATA_FAILED: injected by mock (tx)');
+          }
           txLog.push({ collectionName, type: 'set', id, data: { ...data, _id: id } });
           return { updated: 1, upserted: [id] };
         },
         async remove() {
+          // FIX-R4 Workstream G: deleteMetadataShouldFail fault injection (tx path)
+          if (state.deleteMetadataShouldFail && isMetadataCollection(collectionName)) {
+            throw new Error('DELETE_METADATA_FAILED: injected by mock (tx)');
+          }
           const existing = ensureDoc(state, collectionName, id, txLog);
           if (!existing) return { deleted: 0 };
           txLog.push({ collectionName, type: 'remove', id });
@@ -604,62 +687,102 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
       return createCollectionHandle(state, name);
     },
     async runTransaction<T>(callback: (tx: MockTransactionHandle) => Promise<T>): Promise<T> {
-      const txLog: TransactionOp[] = [];
-      const txHandle: MockTransactionHandle = {
-        collection(name: string) {
-          return createTransactionCollectionHandle(state, name, txLog);
-        },
-        async commit() {
-          // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
-          // operations. Fail closed — do NOT partially apply a txLog that
-          // exceeds the limit.
-          const CLOUDBASE_TX_OP_LIMIT = 100;
-          if (txLog.length > CLOUDBASE_TX_OP_LIMIT) {
-            throw new Error(
-              `CLOUDBASE_TX_LIMIT_EXCEEDED: transaction has ${txLog.length} operations, ` +
-              `limit is ${CLOUDBASE_TX_OP_LIMIT}. Project deletion must fail closed.`
-            );
-          }
-          // NOSQL-R2-08 scenario 3: Optimistic concurrency control.
-          // Before applying the txLog, check if any 'add' operation's _id
-          // already exists in the committed state (meaning another
-          // transaction committed the same key first). If so, throw E11000
-          // so the caller's catch block can retry and fetch the winner.
-          for (const op of txLog) {
-            if (op.type === 'add') {
+      // FIX-R4: Increment the call counter so tests can assert that
+      // withCurrentOrNewTransaction reuses the outer transaction instead
+      // of opening a nested one (P0-02 regression guard).
+      state.runTransactionCount++;
+      // FIX-R4: Simulate the real SDK's internal retry on conflict.
+      // When retryOnConflict is true, the first commit throws a
+      // DATABASE_TRANSACTION_CONFLICT error; the mock retries the
+      // callback internally and the second attempt succeeds. The flag
+      // is consumed after the first attempt so subsequent transactions
+      // are unaffected.
+      const MAX_TX_ATTEMPTS = 3;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
+        const txLog: TransactionOp[] = [];
+        const txHandle: MockTransactionHandle = {
+          collection(name: string) {
+            return createTransactionCollectionHandle(state, name, txLog);
+          },
+          async commit() {
+            // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
+            // operations. Fail closed — do NOT partially apply a txLog that
+            // exceeds the limit.
+            const CLOUDBASE_TX_OP_LIMIT = 100;
+            if (txLog.length > CLOUDBASE_TX_OP_LIMIT) {
+              throw new Error(
+                `CLOUDBASE_TX_LIMIT_EXCEEDED: transaction has ${txLog.length} operations, ` +
+                `limit is ${CLOUDBASE_TX_OP_LIMIT}. Project deletion must fail closed.`
+              );
+            }
+            // NOSQL-R2-08 scenario 3: Optimistic concurrency control.
+            // Before applying the txLog, check if any 'add' operation's _id
+            // already exists in the committed state (meaning another
+            // transaction committed the same key first). If so, throw E11000
+            // so the caller's catch block can retry and fetch the winner.
+            for (const op of txLog) {
+              if (op.type === 'add') {
+                const coll = getCollection(state, op.collectionName);
+                if (coll.docs.has(op.id!)) {
+                  throw new Error('E11000 duplicate key error');
+                }
+              }
+            }
+            // FIX-R4: commitShouldFail — always throw, no retry. Tests use
+            // this to verify that a commit failure rolls back all buffered
+            // writes without partially applying them.
+            if (state.commitShouldFail) {
+              throw new Error('COMMIT_FAILED: injected by mock');
+            }
+            // FIX-R4: retryOnConflict — first commit attempt throws a
+            // conflict error. The flag is consumed so the retry succeeds.
+            if (state.retryOnConflict) {
+              state.retryOnConflict = false;
+              throw new Error('DATABASE_TRANSACTION_CONFLICT: injected by mock');
+            }
+            // Apply txLog to committed state
+            for (const op of txLog) {
               const coll = getCollection(state, op.collectionName);
-              if (coll.docs.has(op.id!)) {
-                throw new Error('E11000 duplicate key error');
+              if (op.type === 'add' || op.type === 'set') {
+                coll.docs.set(op.id!, { ...(op.data as MockDocument), _id: op.id! });
+              } else if (op.type === 'update') {
+                const existing = coll.docs.get(op.id!);
+                if (existing) {
+                  coll.docs.set(op.id!, applyUpdate(existing, op.data as Record<string, unknown>));
+                }
+              } else if (op.type === 'remove') {
+                coll.docs.delete(op.id!);
               }
             }
+          },
+          async rollback() {
+            txLog.length = 0;
+          },
+        };
+        try {
+          const result = await callback(txHandle);
+          await txHandle.commit();
+          return result;
+        } catch (e) {
+          await txHandle.rollback();
+          // Only retry on DATABASE_TRANSACTION_CONFLICT; re-throw all
+          // other errors (E11000, COMMIT_FAILED, CLOUDBASE_TX_LIMIT_EXCEEDED,
+          // SAVE_METADATA_FAILED, etc.) immediately.
+          if (
+            e instanceof Error &&
+            e.message.includes('DATABASE_TRANSACTION_CONFLICT') &&
+            attempt < MAX_TX_ATTEMPTS
+          ) {
+            lastError = e;
+            continue;
           }
-          // Apply txLog to committed state
-          for (const op of txLog) {
-            const coll = getCollection(state, op.collectionName);
-            if (op.type === 'add' || op.type === 'set') {
-              coll.docs.set(op.id!, { ...(op.data as MockDocument), _id: op.id! });
-            } else if (op.type === 'update') {
-              const existing = coll.docs.get(op.id!);
-              if (existing) {
-                coll.docs.set(op.id!, applyUpdate(existing, op.data as Record<string, unknown>));
-              }
-            } else if (op.type === 'remove') {
-              coll.docs.delete(op.id!);
-            }
-          }
-        },
-        async rollback() {
-          txLog.length = 0;
-        },
-      };
-      try {
-        const result = await callback(txHandle);
-        await txHandle.commit();
-        return result;
-      } catch (e) {
-        await txHandle.rollback();
-        throw e;
+          throw e;
+        }
       }
+      // Unreachable — the loop either returns a result or throws on the
+      // first non-retryable error. Guard for type safety.
+      throw lastError ?? new Error('RUN_TRANSACTION_EXHAUSTED: unreachable');
     },
     command,
   };
@@ -669,30 +792,65 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
       return databaseHandle;
     },
     async uploadFile(opts: { cloudPath: string; fileContent: Buffer }) {
+      // FIX-R4: uploadShouldFail fault injection — tests use this to verify
+      // that a failed upload does not leave an orphaned metadata record.
+      if (state.uploadShouldFail) {
+        throw new Error('UPLOAD_FAILED: injected by mock');
+      }
       const fileID = `cloud://${state.envId}/${opts.cloudPath}`;
       state.storage.files.set(fileID, { content: opts.fileContent, cloudPath: opts.cloudPath });
       return { fileID };
     },
     async downloadFile(opts: { fileID: string }) {
+      // FIX-R4: remoteObjectMissing — fileIDs flagged as missing throw
+      // FILE_NOT_FOUND even if they exist in the local mock map. Used for
+      // exists() and error-path testing.
+      if (state.remoteObjectMissing.has(opts.fileID)) {
+        throw new Error(`FILE_NOT_FOUND: ${opts.fileID}`);
+      }
       const file = state.storage.files.get(opts.fileID);
       if (!file) throw new Error(`FILE_NOT_FOUND: ${opts.fileID}`);
       return { fileContent: file.content };
     },
     async deleteFile(opts: { fileList: string[] }) {
-      for (const fileID of opts.fileList) {
-        state.storage.files.delete(fileID);
-      }
-      return { fileList: opts.fileList.map(() => ({})) };
+      // FIX-R4 Workstream G: Return per-fileID status codes instead of
+      // throwing. Real CloudBase deleteFile returns { fileList: [{ fileID,
+      // code, statusMessage }] } where code 0 = SUCCESS. Non-zero codes
+      // indicate failure; the object is NOT deleted in that case.
+      const fileList = opts.fileList.map((fileID) => {
+        const code = state.deleteFileStatuses[fileID] ?? 0;
+        if (code === 0) {
+          state.storage.files.delete(fileID);
+          return { fileID, code: 0, statusMessage: 'SUCCESS' };
+        }
+        return { fileID, code, statusMessage: 'DELETE_FAILED' };
+      });
+      return { fileList };
     },
     async getTempFileURL(opts: { fileList: string[] }) {
-      return {
-        fileList: opts.fileList.map((fileID) => ({
-          fileID,
-          tempFileURL: state.storage.files.has(fileID)
-            ? `https://mock-temp-url/${fileID}`
-            : '',
-        })),
-      };
+      // FIX-R4 Workstream G: Return per-fileID status codes instead of
+      // throwing. Real CloudBase getTempFileURL returns { fileList: [{
+      // fileID, code, tempFileURL, statusMessage }] }.
+      const fileList = opts.fileList.map((fileID) => {
+        const code = state.getTempFileURLStatuses[fileID] ?? 0;
+        if (code !== 0) {
+          return {
+            fileID,
+            code,
+            tempFileURL: '',
+            statusMessage: 'GET_URL_FAILED',
+          };
+        }
+        // remoteObjectMissing returns an empty URL (simulating a missing
+        // remote object) with code 0 — the URL fetch "succeeded" but the
+        // object is gone.
+        const tempFileURL =
+          state.remoteObjectMissing.has(fileID) || !state.storage.files.has(fileID)
+            ? ''
+            : `https://mock-temp-url/${fileID}`;
+        return { fileID, code: 0, tempFileURL, statusMessage: 'SUCCESS' };
+      });
+      return { fileList };
     },
   };
 }
