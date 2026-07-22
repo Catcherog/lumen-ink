@@ -1,14 +1,160 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R6 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R7 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+
+- 日期：2026-07-22
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R7-SERVICE-CRASH-TEST-CORRECTION`（子任务，GPT FIX-R6 FIX_REQUIRED 后 Trae 实施）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：MEDIUM
+- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R7 → GPT 证据复审 → Codex READ_ONLY 限域审计）
+- **Base SHA**：`5d28b32`（FIX-R6 docs commit，FIX-R7 worktree 创建时的分支 HEAD）
+- **Implementation SHA**：`2e5df25`
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r7`
+- **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r6`（复用 R6 worktree，分支已切到 R7）
+- **GPT FIX-R6 裁决**：FIX_REQUIRED（changes_requested）— 见下方 FIX-R6 历史段落
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R7-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R7-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r7-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r7-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
+- **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT 通过 R7 后必须进行一次 Codex READ_ONLY 限域审计）
+
+### GPT FIX-R6 裁决摘要（FIX_REQUIRED → changes_requested）
+
+GPT 审查 FIX-R6 远端代码后给出 `FIX_REQUIRED`，核心结论：
+
+| AC | Status | 说明 |
+|----|--------|------|
+| AC-R6-01 | PASS | Ledger 不再在 Storage cleanup 前删除 |
+| AC-R6-02 | PASS | 部分失败时失败 keys 保留 |
+| AC-R6-03 | PASS_CODE/TEST_GAP | 生产代码正确，但测试走 `deleteCascade()` 非服务层 |
+| AC-R6-04 | **FAIL** | 名为 AC-R6-04 的测试实际只覆盖 partial-failure retry，没有模拟 crash window |
+| AC-R6-05/06 | PASS | Smoke Harness 真实可执行 |
+| AC-R6-07 | PASS | SHA 链正确 |
+| AC-R6-08 | PASS | 部署声明已修正 |
+| AC-R6-09 | PASS_WITH_LIMITATION | 门禁全过 ≠ AC-R6-04 被覆盖（测试设计缺口） |
+| AC-R6-10 | PASS | readyForPreview=false 不变 |
+
+**关键缺陷**：FIX-R6 证据不准确声称 5 个测试全部走服务层，实际只有 3 个真实服务路径 + 2 个 adapter-level crash fixture，0 个真实服务路径 crash-window 测试。
+
+### FIX-R7 实施核心结论（3 Required Fixes）
+
+1. **RF-R7-01 — 新增真实服务路径 crash-window 测试（AC-R6-04 官方闭合）**：
+   - 1 个新测试通过真实 `ProjectService.deleteProject()` 路径
+   - 一次性故障注入 `removeCleanupKeys()`：第一次调用在 Storage 对象删除后失败
+   - 验证 crash-window 状态：对象已删除，ledger 仍包含两个 keys
+   - 第二次 `service.deleteProject()` 调用：`OBJECT_NOT_FOUND` 被服务层识别为幂等成功
+   - ledger 最终被清空并删除
+   - **此测试正式闭合 AC-R6-04**
+
+2. **RF-R7-02 — 修正测试和证据陈述**：
+   - 测试文件顶部注释：准确分类 4 个 REAL SERVICE-PATH vs 2 个 ADAPTER-LEVEL crash fixture
+   - ADAPTER-LEVEL fixture 前言注释添加到 AC-R6-03 和 AC-R6-01 regression 测试
+   - Trae Report、gate evidence、STATE.json、SESSION-HANDOFF、完成包同步修正
+   - 不再声称"5 个测试全部走服务层"
+
+3. **RF-R7-03 — 重新运行门禁**：
+   - 9/9 PASS（610 root tests：194 client + 416 server，+1 vs R6）
+   - `readyForPreview=false` 保持不变
+   - 不合并 main、不使用真实 CloudBase 凭据、不进行真实数据写入
+   - **无生产代码变更**（仅测试 + 证据修正）
+
+### 测试分类修正（RF-R7-02）
+
+| 类型 | 数量 | 测试 |
+|------|------|------|
+| REAL SERVICE-PATH（通过 `ProjectService.deleteProject()`） | 4 | AC-R6-01 full success、AC-R6-02 partial failure、AC-R6-04 partial-failure retry、**AC-R6-04 crash-window (FIX-R7 NEW)** |
+| ADAPTER-LEVEL crash fixture（直接 `deleteCascade()` + 手动 ledger 操作） | 2 | AC-R6-03 crash window、AC-R6-01 regression mid-crash |
+
+### 9 门禁结果（FIX-R7）
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc (build) | PASS | built successfully (1859 modules) |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 416 tests / 34 files |
+| 6 | Root tests | PASS | 610 combined (194 client + 416 server, +1 vs R6) |
+| 7 | Build (client + server) | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+| 9 | Smoke Harness | PASS | exit 0; 9 self-tests pass |
+
+### 文件变更（1 modified + 2 new + 2 state files modified）
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.cascade-boundary.test.ts` | 修改 | +1 NEW AC-R6-04 crash-window test；header 注释重写分类测试；adapter-level fixture 前言添加 |
+| `LUMEN-...-FIX-R7-TRAE-REPORT.md` | 新增 | FIX-R7 Trae Report（含测试分类表） |
+| `fix-r7-gate-results.md` | 新增 | FIX-R7 门禁证据（含修正后 AC 覆盖） |
+| `STATE.json` | 修改 | fixR6 status → changes_requested；AC-R6-04 claim 修正；fixR7 字段添加 |
+| `SESSION-HANDOFF.md` | 修改 | FIX-R7 段落添加 |
+
+**无生产代码变更。**
+
+### AC 覆盖矩阵（AC-R6-01 ~ AC-R6-10，修正后）
+
+| AC | Status | 证据 |
+|----|--------|------|
+| AC-R6-01 | PASS | Ledger 在 Storage cleanup 全部完成前不被删除（1 service-path + 1 adapter-level regression） |
+| AC-R6-02 | PASS | 失败 keys 持久化并可通过 removeCleanupKeys 重放（1 service-path） |
+| AC-R6-03 | PASS_WITH_LIMITATION | OBJECT_NOT_FOUND 幂等成功（adapter-level fixture，非 service-path；生产代码正确；AC-R6-04 FIX-R7 间接覆盖） |
+| AC-R6-04 | **PASS (FIX-R7)** | **NEW 真实服务路径 crash-window 测试**：removeCleanupKeys 故障注入 → 第二次 service.deleteProject() 幂等成功清空 ledger |
+| AC-R6-05 | PASS | Smoke Harness 导入生产 selector 函数 |
+| AC-R6-06 | PASS | Smoke Harness 非法 Preview 配置 exit 1（已验证） |
+| AC-R6-07 | PASS | SHA 链：`98764ad → ff6d33d → 5d28b32 → <R7-impl>`；ancestor 已验证 |
+| AC-R6-08 | PASS | 部署声明：无手动部署；Vercel auto-build 已确认 |
+| AC-R6-09 | PASS | 9 门禁 PASS（610 root tests，+1 vs R6） |
+| AC-R6-10 | PASS | `readyForPreview=false` 不变 |
+
+### 遗留风险（Codex 审计范围）
+
+- `removeCleanupKeys()` 注释称"atomically"但实现是普通 read → compute → update/remove，无事务
+- 并发 stale write 可能导致：两个 cleanup worker 同时重放同一 ledger；一个 worker 删除 ledger、另一个基于旧快照 update
+- 这些风险保留在 Codex READ_ONLY 审计范围内
+
+### Stop Conditions（持续生效）
+
+- ❌ `readyForPreview` 保持 `false`
+- ❌ 禁止合并到 main
+- ❌ 禁止真实 CloudBase 写入
+- ❌ 禁止生产代码变更（本轮仅测试 + 证据修正）
+- ❌ Trae 不得自行标记任务完成
+
+### GPT 下一步（FIX-R7 证据复审）
+
+1. 读取本文件 + Trae 报告 + 门禁证据
+2. 审查 `5d28b32` → `<R7-impl>` diff（1 test file + 2 new evidence + 2 state files）
+3. 核查 9 门禁真实输出（610 root tests）
+4. 核查 RF-R7-01：NEW 真实服务路径 crash-window 测试是否正式闭合 AC-R6-04
+5. 核查 RF-R7-02：测试分类修正是否准确（4 service-path + 2 adapter-level）
+6. 核查 RF-R7-03：门禁重新运行 + 无生产代码变更
+7. 给出验收结论：
+   - 通过 → 授权 Codex READ_ONLY 限域审计
+   - 驳回 → 生成 FIX-R8 修复包
+
+### Codex 审计范围（GPT 通过后必须执行）
+
+Codex READ_ONLY 限域审计，只检查：
+1. cleanup ledger 的 crash-window 与 partial-failure 语义
+2. cleanup worker 并发和 read-modify-write 语义（removeCleanupKeys 非真正原子）
+3. 两阶段 tombstone 与 child create 的并发不变量
+4. Preview Smoke Harness 是否真正复用生产逻辑
+5. 不重新审计已闭合的其他 workstreams
+
+---
+
+## 历史状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R6 实施完成，GPT FIX_REQUIRED → changes_requested）
+
+> **注意**：FIX-R6 已被 GPT 驳回（FIX_REQUIRED），触发 FIX-R7。以下为 R6 历史记录，保留供追溯。
 
 - 日期：2026-07-22
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R6-CLEANUP-LEDGER-CLOSURE`（子任务，GPT FIX-R5 FIX_REQUIRED 后 Trae 实施）
-- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **状态**：`changes_requested / nextActor=trae`（GPT 驳回后触发 FIX-R7）
 - **Risk Level**：HIGH
-- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R6 → GPT 证据复审 → Codex READ_ONLY 限域审计）
+- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R6 → GPT 证据复审 → ~~Codex~~ → FIX-R7）
 - **Base SHA**：`98764ad`（FIX-R5 docs backfill，FIX-R6 worktree 创建时的分支 HEAD）
 - **Implementation SHA**：`ff6d33d`（full: `ff6d33d7f171e87a210d609f8e4a63c2e38f367b`）
+- **Evidence Closure SHA**：`5d28b32`（FIX-R6 docs commit — R7 的 base）
 - **分支**：`lumen/cloudbase-nosql-implement-01-fix-r6`
 - **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r6`
 - **GPT FIX-R5 裁决**：[docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-GPT-REVIEW.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-GPT-REVIEW.md)
@@ -16,7 +162,7 @@
 - **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r6-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r6-gate-results.md)
 - **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
 - **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
-- **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT 通过 R6 后必须进行一次 Codex READ_ONLY 限域审计）
+- **Codex**：`REQUIRED_AFTER_FIX_R7_GPT_REVIEW_PASS`（GPT 通过 R7 后必须进行一次 Codex READ_ONLY 限域审计）
 
 ### GPT FIX-R5 裁决摘要（FIX_REQUIRED → changes_requested）
 
