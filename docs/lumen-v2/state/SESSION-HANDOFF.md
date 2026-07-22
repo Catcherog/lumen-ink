@@ -1,6 +1,183 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R3 GPT 裁决 CODEX_REQUIRED，等待 Codex 只读审查）
+## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 实施完成，等待 GPT 验收）
+
+- 日期：2026-07-22
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TX-AWARE-ATOMICITY`（子任务，Codex 审计后 Trae 实施）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：CRITICAL
+- **Route**：R3（Codex 已完成 READ_ONLY 审计 → Trae 实施 FIX-R4 → GPT 验收）
+- **Base SHA**：`a858d7f`（FIX-R3 state commit）
+- **Result SHA**：`00ce304`（full: `00ce3043f3d5be4d676f0417e2bb5aaa56a1f0e9`）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r4`
+- **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r4`
+- **Codex 审计**：[docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-CODEX-AUDIT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-CODEX-AUDIT.md)
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r4-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r4-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
+
+### Codex 审计 Findings（权威缺陷清单）
+
+| ID | 严重度 | 标题 | FIX-R4 Workstream |
+|----|--------|------|-------------------|
+| CB-AUDIT-P0-01 | P0 | Job 条件更新逃逸外层 UnitOfWork | B |
+| CB-AUDIT-P0-02 | P0 | Version/idempotency 开启独立嵌套事务 | C + D |
+| CB-AUDIT-P1-01 | P1 | Cascade delete 使用事务外快照 | E |
+| CB-AUDIT-P1-02 | P1 | Object/metadata 映射不是失败原子的 | G |
+| CB-AUDIT-P1-03 | P1 | 普通 Preview 应用启动路径没有生产隔离硬门禁 | H |
+| CB-AUDIT-P2-01 | P2 | SDK contract 测试名称与证明范围过强 | I |
+| CB-AUDIT-P2-02 | P2 | jobs.create(...idempotencyKey) 不是原子入口 | D |
+
+### FIX-R4 实施核心结论（9 Workstreams A-I）
+
+1. **Workstream A — 统一事务复用**：新增私有 `withCurrentOrNewTransaction<T>(fn)` helper，复用 `transactionStorage.getStore()` 中的当前 tx，否则开启一个 `getDb().runTransaction()` 并通过 `transactionStorage.run()` 传播。所有嵌套 repository 调用不再创建独立事务。**未修改公开 persistence interface**（Codex 确认可行）。
+2. **Workstream B — 修复 Job 条件更新**：`updateIfClaimed` / `updateIfActive` / `claim` / `heartbeat` 在事务内路径使用 `tx.doc(id).get` 校验 lease/status + `tx.doc(id).update` 写入；事务外路径保持原子条件更新（非 read-then-write 竞态）。禁止 `getDb().collection().where().update()` 逃逸外层事务。
+3. **Workstream C — 修复 Version 和 idempotency**：`versions.createIdempotent` 和 `jobs.createIdempotent` 使用 `withCurrentOrNewTransaction`，确保 Version/idempotency mapping/Asset/Project activeVersion/Job 最终状态在同一提交边界。外层 commit failure 时无部分提交；conflict retry 时无重复 Version/Job；相同 idempotency key 并发只产生一组结果。`${projectId}__${key}` 编码保持无歧义。
+4. **Workstream D — 修复 jobs.create(...idempotencyKey)**：`jobs.create(idempotencyKey)` 委托 `createIdempotent()`，不再保留两次非事务写入路径。
+5. **Workstream E — Project deleting/tombstone 屏障**：新增 `project_tombstones` 集合 + `assertProjectNotDeleting()` helper，在所有 Asset/Version/Job/其他 child create 路径写入前检查。`deleteCascade` 先以原子方式标记 tombstone，再取得稳定子记录集合；tombstone 后出现的 child create 必须 fail closed。删除失败时 Project 状态可恢复（tombstone 在事务内回滚）。`project_cleanup_keys` 文档在删除事务内存储 storageKeys，确保 Storage cleanup 集合与稳定删除快照一致。
+6. **Workstream F — 100-operation 边界**：统一计算 `project document + all child document operations`。99 PASS / 100 PASS / 101 在任何删除副作用前 fail closed。
+7. **Workstream G — Storage / metadata 一致性**：
+   - **Upload**：upload 成功 + metadata 失败 → 保留真实 fileID → 尝试补偿删除 → 补偿成功抛出原 metadata 错误 + 记录已清理；补偿失败抛出包含 fileID 和双重失败上下文的错误。不静默留下对象孤儿。
+   - **Delete**：逐项检查 SDK `fileList[]` 状态码；只有远端删除成功或明确不存在时才删除 metadata；单项失败保留 metadata 并向调用方返回失败。
+   - **Signed URL**：逐项检查 SDK 状态码；单文件失败抛出明确错误；不持久化 signed URL。
+   - **Exists**：三态区分（metadata+object / metadata only / object only）；远端对象不存在返回 false；不仅凭 metadata 返回 true；对孤立对象记录明确诊断。
+8. **Workstream H — 普通 Preview 服务生产隔离**：`validatePreviewIsolation()` + `isPreviewEnvironment()` 纯函数放入 `select.ts`，在 `selectPersistenceByEnv` 的 SDK 动态 import **之前**执行。Preview 环境必须提供 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 和 Preview namespace；缺失时 fail closed（`PRODUCTION_NAMESPACE_REQUIRED`）；trim+toLowerCase 后相等时 fail closed；保留 `prod` 子串检查作为第二层保护；Storage prefix 同样执行 Production equality + `prod` 子串检查。Smoke Harness 和普通应用路径共享相同的安全判断逻辑。
+9. **Workstream I — 修正测试声明**：SDK contract 测试 describe 重命名为 "FIX-R4 API surface smoke"，所有测试名称加 "(API surface only)" 后缀；新增 8 个基于已安装 SDK 源码的 transactionId 行为测试（源码检查，无凭据无网络）。真实 CloudBase 服务端行为继续标为 `UNVERIFIED_PENDING_PREVIEW`。
+
+### 8 门禁结果（FIX-R4）
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc (build) | PASS | 0 errors |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 399 tests / 34 files |
+| 6 | Root tests | PASS | 593 combined (194 client + 399 server, +68 vs R3) |
+| 7 | Build (client + server) | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+
+### 文件变更（14 files, +3394/-198）
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.ts` | 修改 (+~340 行) | withCurrentOrNewTransaction、tx-aware Job 条件更新、createIdempotent 复用 tx、jobs.create 委托、project_tombstones + assertProjectNotDeleting、project_cleanup_keys、ObjectStore 故障补偿 + 逐项状态码 + 三态 exists |
+| `cloudbase.nosql.mock.ts` | 修改 (+~270 行) | runTransactionCount、commitShouldFail、retryOnConflict、uploadShouldFail、saveMetadataShouldFail、deleteMetadataShouldFail、deleteFileStatuses、getTempFileURLStatuses、remoteObjectMissing、project_tombstones + project_cleanup_keys 集合 |
+| `select.ts` | 修改 (+~110 行) | validatePreviewIsolation + isPreviewEnvironment 纯函数导出，gate 在 SDK 动态 import 前执行 |
+| `ProjectService.ts` | 修改 | deleteProject 将 assets.listByProject 移入 unitOfWork.run，使用 project_cleanup_keys 进行事务后 Storage cleanup |
+| `cloudbase.nosql.tx-atomicity.test.ts` | 新增 (269 行, 8 tests) | AC-01~AC-08 P0 事务原子性 |
+| `cloudbase.nosql.cascade-boundary.test.ts` | 新增 (325 行, 13 tests) | AC-09~AC-14 tombstone + 100-op 边界 + cleanup keys |
+| `cloudbase.nosql.storage-fault.test.ts` | 新增 (272 行, 10 tests) | AC-15~AC-21 Storage fault-injection 矩阵 |
+| `select.preview-isolation.test.ts` | 新增 (381 行, 29 tests) | AC-22~AC-29 Preview 隔离 gate |
+| `cloudbase.nosql.sdk-contract.test.ts` | 修改 (+130 行) | 重命名为 API surface smoke + 8 源码检查测试 |
+| `cloudbase.nosql.contract.test.ts` | 修改 | 2 个 selector 测试更新以适应 Preview 隔离 gate |
+| `cloudbase.nosql.r2.behavior.test.ts` | 修改 | 100-op 边界测试计数更新（96 children + 4 overhead = 100） |
+| `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-CODEX-AUDIT.md` | 新增 | Codex 审计 findings 权威参考 |
+| `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TRAE-REPORT.md` | 新增 | 综合 Trae 实施报告（12 节） |
+| `fix-r4-gate-results.md` | 新增 | 8 门禁证据（含命令和输出） |
+
+### AC 覆盖矩阵（40 项全部 PASS）
+
+| AC 范围 | 描述 | Status | 证据文件 |
+|---------|------|--------|---------|
+| AC-01 ~ AC-08 | Transaction Atomicity（事务原子性） | PASS | tx-atomicity.test.ts (8 tests) |
+| AC-09 ~ AC-14 | Cascade Delete（级联删除） | PASS | cascade-boundary.test.ts (13 tests) |
+| AC-15 ~ AC-21 | Storage Consistency（存储一致性） | PASS | storage-fault.test.ts (10 tests) |
+| AC-22 ~ AC-29 | Preview Isolation（预览隔离） | PASS | select.preview-isolation.test.ts (29 tests) |
+| AC-30 ~ AC-31 | TypeScript typecheck（root + server） | PASS | exit 0 |
+| AC-32 | check-lumen-collab | PASS | exit 0, no secrets |
+| AC-33 | 现有相关测试全部通过 | PASS | select.test 9 + contract tests + r2.behavior tests |
+| AC-34 | 新增 P0/P1 回归测试全部通过 | PASS | 60 new tests across 4 new test files |
+| AC-35 | 测试结果记录完整 | PASS | fix-r4-gate-results.md (command + exit code + passed/failed/skipped) |
+| AC-36 | 无真实凭据/网络/部署/CloudBase 写入 | PASS | declared |
+| AC-37 | Local Result SHA = Remote branch SHA | PASS | 00ce3043f3d5be4d676f0417e2bb5aaa56a1f0e9 |
+| AC-38 | 隔离 worktree 无未提交文件 | PASS | git status --porcelain=v1 --untracked-files=all empty |
+| AC-39 | readyForPreview 仍为 false | PASS | unchanged |
+| AC-40 | 状态 awaiting_gpt_acceptance / nextActor=gpt | PASS | not self-marked complete |
+
+### 剩余风险（GPT 审查时应注意）
+
+1. Mock-only 行为证据：tx retry/100-op/Storage fault 均基于 Mock SDK，真实 CloudBase 语义可能略有差异（但 errs fail-closed）。
+2. AC-07 并发幂等测试依赖 Mock commit-time E11000；真实 CloudBase 语义可能略有差异。
+3. 100-op 上限是 pre-check + Mock commit-check，errs fail-closed 但可能比真实 CloudBase 更严格。
+4. `validatePreviewIsolation` 是纯函数；gate 通过 `select.ts` 路径执行，未通过真实 Vercel Preview 部署验证。
+5. 真实 CloudBase transactionId 行为通过 SDK 源码检查验证，未通过运行时调用验证（无凭据）。
+
+### Stop Conditions（持续生效）
+
+- ❌ `readyForPreview` 保持 `false`（不得授权 Preview）
+- ❌ 禁止合并到 main
+- ❌ 禁止配置 Vercel Preview / Production
+- ❌ 禁止使用 Production API Key
+- ❌ 禁止运行 Production 数据迁移或写入
+- ❌ 禁止升级 `@cloudbase/node-sdk`
+- ❌ 禁止用 Mock 行为替代真实 SDK 源码契约
+- ❌ 禁止修改公开 persistence interface（Codex 已确认无需修改）
+- ❌ Trae 不得自行标记任务完成
+
+### 最短收尾顺序（更新）
+
+1. Trae 执行 FIX-R3 ✅
+2. GPT 增量审查 R3 ✅ → 裁决 `CODEX_REQUIRED`
+3. Trae 落盘 GPT 裁决、状态转为 `changes_requested / nextActor=codex` ✅
+4. Codex 限定只读事务审查 ✅ → 输出 7 项 Findings（2 P0 + 3 P1 + 2 P2）
+5. Trae 实施 FIX-R4 ✅（本轮，9 Workstreams A-I，14 files +3394/-198，8/8 gates PASS）
+6. **GPT 验收 FIX-R4** ⏳（下一步）
+7. 配置独立 Preview namespace/prefix，执行真实 CloudBase 冒烟测试 ⏳
+8. Preview 通过后解除 `readyForPreview=false` ⏳
+9. 合并 main，恢复 Production Cron 与持久化验证 ⏳
+10. 关闭 PERSIST-001、PROD-CRON-VERIFY、ROUTING-001，完成项目归档 ⏳
+
+### 范围遵守（本轮 state-only 落盘）
+
+- ✅ 仅落盘 STATE.json + SESSION-HANDOFF.md + 完成包
+- ✅ 不修改任何生产代码（生产代码已在 00ce304 提交）
+- ✅ 不创建 PR
+- ✅ 不授权 Preview 或 Production
+- ✅ 不推进任务到 `completed`
+- ✅ 不激活下一任务
+- ✅ 不自行降低 Codex P0/P1 严重度
+- ✅ `readyForPreview` 保持 `false`
+
+### GPT 下一步（FIX-R4 验收）
+
+GPT 在新窗口启动后，按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板加载状态，然后：
+
+1. 读取本文件 + `docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TRAE-REPORT.md` + `docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r4-gate-results.md`
+2. 审查 `a858d7f` → `00ce304` diff（14 files, +3394/-198）
+3. 核查 8 门禁真实输出（client 194 + server 399 = 593 root tests passed，+68 vs R3）
+4. 核查 Codex Findings → 修改文件 → 测试用例映射表（见 Trae 报告 §10）
+5. 核查 AC-01 ~ AC-40 全部 PASS（40 项）
+6. 核查范围遵守：
+   - 公开 persistence interface 未修改（Codex 确认）
+   - `@cloudbase/node-sdk` 未升级
+   - 无真实凭据/网络/部署/CloudBase 写入
+   - `readyForPreview` 保持 false
+   - 未合并 main
+7. 核查 Workstream A-I 实现质量（tx helper、Job 条件更新、Version/idempotency、jobs.create、tombstone 屏障、100-op 边界、Storage 故障补偿、Preview 隔离、测试声明修正）
+8. 给出验收结论：
+   - 通过 → 状态推进为 `gpt_evidence_review_pass`，授权配置 Preview namespace/prefix
+   - 驳回 → 生成 FIX-R5 修复包，状态改为 `changes_requested / nextActor=trae`
+
+### Codex 升级条件（来自任务卡）
+
+实施过程中遇到以下任意情况，立即停止扩大修改并报告：
+
+1. 必须修改公开 persistence interface → **未触发**（Codex 确认可行）
+2. 真实 SDK 对 transaction document update 的行为无法通过本地源码确认 → **未触发**（8 个源码检查测试通过）
+3. 删除 tombstone 需要数据迁移或破坏兼容性 → **未触发**（使用 `project_tombstones` 独立集合，无数据迁移）
+4. Storage 补偿需要新的外部服务 → **未触发**（使用现有 `deleteFile` API）
+5. 无法在不联网情况下建立关键测试 → **未触发**（Mock SDK + SDK 源码检查）
+6. 修复涉及超过两个额外核心模块 → **未触发**（仅 cloudbase.nosql.ts + select.ts + ProjectService.ts）
+7. 外层 transaction retry 语义与当前 service architecture 根本冲突 → **未触发**（Mock retryOnConflict 测试通过）
+8. Trae 连续两轮无法通过同一项 P0 测试 → **未触发**（首轮全部通过）
+
+无 Codex 升级条件触发。
+
+---
+
+## 历史状态（2026-07-22 早些时候，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R3 GPT 裁决 CODEX_REQUIRED，等待 Codex 只读审查）
 
 - 日期：2026-07-22
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`（主任务），子任务 `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-SDK-CONTRACT` 已被驳回
