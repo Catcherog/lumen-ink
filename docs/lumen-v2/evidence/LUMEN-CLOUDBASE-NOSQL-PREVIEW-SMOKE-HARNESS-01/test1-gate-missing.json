@@ -1,0 +1,19 @@
+﻿{
+  "smokeRunId": null,
+  "namespace": null,
+  "storagePrefix": null,
+  "envIdMasked": null,
+  "startedAt": "2026-07-22T05:38:23.630Z",
+  "finishedAt": "2026-07-22T05:38:23.631Z",
+  "overall": "skipped",
+  "blockReason": "ALLOW_CLOUDBASE_PREVIEW_SMOKE is not \"true\"; smoke harness defaults to no-write.",
+  "steps": [
+    {
+      "step": 1,
+      "name": "config-fail-closed",
+      "status": "skip"
+    }
+  ],
+  "cleanupFailures": [],
+  "redacted": true
+}

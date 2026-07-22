@@ -1,0 +1,20 @@
+﻿{
+  "smokeRunId": null,
+  "namespace": null,
+  "storagePrefix": null,
+  "envIdMasked": null,
+  "startedAt": "2026-07-22T05:38:26.571Z",
+  "finishedAt": "2026-07-22T05:38:26.572Z",
+  "overall": "blocked",
+  "blockReason": "CLOUDBASE_DATA_NAMESPACE \"prod-preview\" contains \"prod\"; refusing to target production.",
+  "steps": [
+    {
+      "step": 1,
+      "name": "config-fail-closed",
+      "status": "fail",
+      "error": "CLOUDBASE_DATA_NAMESPACE \"prod-preview\" contains \"prod\"; refusing to target production."
+    }
+  ],
+  "cleanupFailures": [],
+  "redacted": true
+}
