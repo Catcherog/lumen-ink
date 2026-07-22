@@ -305,7 +305,7 @@
     "fixR5NextActor": "gpt",
     "fixR5TaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TWO-PHASE-DELETE-PREVIEW-ENV",
     "fixR5BaseSha": "342541d",
-    "fixR5ResultSha": "TODO: fill after commit",
+    "fixR5ResultSha": "6b4b379",
     "fixR5Branch": "lumen/cloudbase-nosql-implement-01-fix-r5",
     "fixR5GateResult": "8/8 PASS (client 194 + server 410 = 604 root tests, +11 vs R4: 6 cascade-boundary interleaving + 5 preview-isolation VERCEL_ENV)",
     "fixR5TraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TRAE-REPORT.md",
@@ -344,10 +344,10 @@
       "AC-30_through_AC-34": "PASS (gates + regression)",
       "AC-35": "PASS (R5 gate evidence + R4 evidence corrected)",
       "AC-36": "PASS (Mock-only, check-lumen-collab clean)",
-      "AC-37": "PENDING (TODO: fill after commit and push)",
-      "AC-38": "PENDING (TODO: fill after commit)",
+      "AC-37": "PASS (Local HEAD = Remote HEAD = 6b4b379d8e280edd023c9242ba577073ff96b12b, verified via git rev-parse)",
+      "AC-38": "PASS (git status --short empty after commit, worktree clean)",
       "AC-39": "PASS (readyForPreview remains false)",
-      "AC-40": "PENDING (state update after commit)"
+      "AC-40": "PASS (fixR5Status=awaiting_gpt_acceptance, fixR5NextActor=gpt)"
     },
     "fixR5RemainingRisks": [
       "Mock-only behavioral evidence: two-phase delete + OCC interleaving tests run against in-memory Mock; real CloudBase semantics may differ",

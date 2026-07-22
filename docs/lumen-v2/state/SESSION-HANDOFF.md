@@ -8,7 +8,7 @@
 - **Risk Level**：HIGH
 - **Route**：GPT FIX_REQUIRED → Trae FIX-R5 → GPT 增量审查 → (可能) Codex READ_ONLY 限域审计
 - **Base SHA**：`342541d`（FIX-R4 state commit，GPT changes_requested 裁决后）
-- **Result SHA**：`TODO: fill after commit`
+- **Result SHA**：`6b4b379`（full: `6b4b379d8e280edd023c9242ba577073ff96b12b`）
 - **分支**：`lumen/cloudbase-nosql-implement-01-fix-r5`
 - **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r4`
 - **GPT FIX-R4 裁决**：[docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-GPT-REVIEW.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-GPT-REVIEW.md)
@@ -115,10 +115,10 @@ GPT 接受为证据通过的 AC：AC-01～AC-08, AC-11, AC-13, AC-15～AC-21, AC
 | AC-30 ~ AC-34 | Regression | PASS | PASS | gates + tests |
 | AC-35 | Test results recorded | ❌ FAIL | ✅ PASS | R5 evidence + R4 corrected |
 | AC-36 | No real credentials | PASS | PASS | Mock-only |
-| AC-37 | Local SHA = Remote SHA | ❌ FAIL | ⏳ PENDING | TODO: after commit |
-| AC-38 | Worktree clean | PENDING | ⏳ PENDING | TODO: after commit |
+| AC-37 | Local SHA = Remote SHA | ❌ FAIL | ✅ PASS | Local HEAD = Remote HEAD = `6b4b379` |
+| AC-38 | Worktree clean | PENDING | ✅ PASS | `git status --short` empty after commit |
 | AC-39 | readyForPreview false | PASS | PASS | unchanged |
-| AC-40 | Status awaiting_gpt_acceptance | PENDING | ⏳ PENDING | TODO: after commit |
+| AC-40 | Status awaiting_gpt_acceptance | PENDING | ✅ PASS | STATE.json: fixR5Status=awaiting_gpt_acceptance |
 
 ### 剩余风险
 
