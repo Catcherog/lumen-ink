@@ -540,6 +540,15 @@ export function createCloudBaseNoSqlPersistence(
   const projects: ProjectRepository & {
     getCleanupKeys(id: string): Promise<string[]>;
     deleteCleanupKeys(id: string): Promise<void>;
+    /**
+     * FIX-R6 (AC-R6-01/02/03): Remove successfully-deleted keys from the
+     * cleanup ledger. Failed keys remain for sweeper recovery. When the
+     * ledger becomes empty, the doc is deleted entirely.
+     *
+     * Returns the remaining (un-cleaned) keys so the caller can decide
+     * whether to retry or hand off to the sweeper.
+     */
+    removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
   } = {
     async create(input: Project): Promise<Project> {
       assertReady();
@@ -726,10 +735,63 @@ export function createCloudBaseNoSqlPersistence(
     /**
      * FIX-R5: Delete the cleanup keys doc after Storage cleanup is done.
      * Infrastructure-internal method — NOT part of the frozen interface.
+     *
+     * FIX-R6: Kept for backward compatibility, but ProjectService now
+     * prefers removeCleanupKeys() which preserves failed keys. This
+     * method unconditionally deletes the ledger and should only be used
+     * when the caller is certain all Storage objects are cleaned.
      */
     async deleteCleanupKeys(id: string): Promise<void> {
       assertReady();
       await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).remove();
+    },
+
+    /**
+     * FIX-R6 (AC-R6-01/02/03): Remove successfully-deleted keys from the
+     * cleanup ledger atomically. Failed keys remain in the ledger for
+     * sweeper recovery.
+     *
+     * Lifecycle:
+     *  1. Read current ledger (keys snapshot from deleteCascade Phase B).
+     *  2. Compute remaining = currentKeys - removedKeys.
+     *  3. If remaining is empty → delete the ledger doc entirely.
+     *  4. If remaining is non-empty → update the ledger with remaining keys.
+     *  5. Return remaining keys.
+     *
+     * Crash-window safety (AC-R6-03):
+     *  - If the process crashes AFTER a Storage object is deleted but
+     *    BEFORE this method is called, the ledger still contains the key.
+     *    On retry, the sweeper calls objects.delete(key) which throws
+     *    OBJECT_NOT_FOUND (metadata already gone). ProjectService treats
+     *    OBJECT_NOT_FOUND as idempotent success and passes the key to
+     *    removeCleanupKeys, which removes it from the ledger.
+     *  - If the process crashes DURING this method's read-update-delete,
+     *    the worst case is the ledger still contains already-deleted keys.
+     *    The sweeper will re-attempt them and treat OBJECT_NOT_FOUND as
+     *    success — no permanent failure.
+     */
+    async removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]> {
+      assertReady();
+      const removedSet = new Set(removedKeys);
+      const res = await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).get();
+      const doc = unwrapDocumentData<{ keys: string[] }>(res.data);
+      if (!doc) {
+        // Ledger already deleted — nothing to remove, already fully clean.
+        return [];
+      }
+      const remaining = (doc.keys ?? []).filter((k) => !removedSet.has(k));
+      if (remaining.length === 0) {
+        // All keys cleaned — delete the ledger doc.
+        await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).remove();
+        return [];
+      }
+      // Persist remaining keys for sweeper recovery.
+      const cmd = getCommand();
+      await getDb()
+        .collection(COLLECTIONS.projectCleanupKeys)
+        .doc(id)
+        .update({ keys: cmd.set(remaining) });
+      return remaining;
     },
   };
 

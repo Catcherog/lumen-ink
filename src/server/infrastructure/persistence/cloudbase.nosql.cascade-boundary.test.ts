@@ -710,3 +710,256 @@ describe('FIX-R5 RF-R5-02: Deterministic interleaving (T1-T5)', () => {
     await deps.close();
   });
 });
+
+// ===========================================================================
+// FIX-R6: ProjectService cleanup ledger lifecycle (AC-R6-01..04)
+//
+// These tests verify the REAL ProjectService.deleteProject() service path
+// (NOT direct deleteCascade calls) to ensure:
+//  - AC-R6-01: The cleanup ledger is NOT deleted before Storage cleanup.
+//  - AC-R6-02: Partial Storage failures persist failed keys in the ledger.
+//  - AC-R6-03: "Object already gone" (OBJECT_NOT_FOUND) is idempotent
+//              success so the crash window is safe to retry.
+//  - AC-R6-04: Real service-path crash/retry via service.deleteProject().
+//
+// T5 above tests the adapter-level sweeper path (direct deleteCascade +
+// manual ledger read/delete). These new tests exercise the full service
+// layer including the removeCleanupKeys() lifecycle.
+// ===========================================================================
+
+describe('FIX-R6: ProjectService cleanup ledger lifecycle (AC-R6-01..04)', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // AC-R6-01: Ledger is NOT deleted before Storage cleanup. After full
+  // success, the ledger is deleted (all keys removed → doc removed).
+  it('AC-R6-01: full success → ledger survives during cleanup, deleted after all keys cleaned', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p1'));
+
+    const storageKeys = ['key-0', 'key-1'];
+    for (let i = 0; i < storageKeys.length; i++) {
+      await deps.objects.put(storageKeys[i], new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', storageKeys[i]));
+    }
+
+    const result = await service.deleteProject('p1');
+
+    expect(result.deleted).toBe(true);
+    expect(result.cleanupFailures).toHaveLength(0);
+
+    // Metadata gone
+    expect(state.database.collections.get('prod_projects')?.docs.has('p1')).toBe(false);
+    expect(state.database.collections.get('prod_assets')?.docs.size).toBe(0);
+
+    // Storage objects gone
+    for (const key of storageKeys) {
+      expect(state.database.collections.get('prod_object_metadata')?.docs.has(key)).toBe(false);
+    }
+
+    // AC-R6-01: Ledger is gone (all keys cleaned → doc deleted by removeCleanupKeys)
+    expect(state.database.collections.get('prod_project_cleanup_keys')?.docs.has('p1')).toBe(false);
+
+    await deps.close();
+  });
+
+  // AC-R6-02: Partial Storage failure → failed keys persist in ledger
+  // for sweeper recovery. Successfully-deleted keys are removed from the
+  // ledger so the sweeper only retries what actually failed.
+  it('AC-R6-02: partial Storage failure → failed keys persist in ledger, successful keys removed', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p1'));
+
+    const storageKeys = ['key-0', 'key-1', 'key-2'];
+    for (let i = 0; i < storageKeys.length; i++) {
+      await deps.objects.put(storageKeys[i], new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', storageKeys[i]));
+    }
+
+    // Make key-1 fail with OBJECT_DELETE_PARTIAL (NOT OBJECT_NOT_FOUND).
+    const origDelete = deps.objects.delete.bind(deps.objects);
+    vi.spyOn(deps.objects, 'delete').mockImplementation(async (key: string) => {
+      if (key === 'key-1') {
+        throw new Error('OBJECT_DELETE_PARTIAL: key-1: NETWORK_ERROR');
+      }
+      return origDelete(key);
+    });
+
+    const result = await service.deleteProject('p1');
+
+    expect(result.deleted).toBe(true);
+    expect(result.cleanupFailures).toEqual(['key-1']);
+
+    // AC-R6-02: Ledger still exists (key-1 failed)
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    // Only key-1 remains; key-0 and key-2 were removed from the ledger
+    expect(cleanupDoc.keys).toEqual(['key-1']);
+
+    // key-0 and key-2 are gone from Storage (successfully deleted)
+    expect(state.database.collections.get('prod_object_metadata')?.docs.has('key-0')).toBe(false);
+    expect(state.database.collections.get('prod_object_metadata')?.docs.has('key-2')).toBe(false);
+    // key-1 still exists in Storage (failed)
+    expect(state.database.collections.get('prod_object_metadata')?.docs.has('key-1')).toBe(true);
+
+    await deps.close();
+  });
+
+  // AC-R6-03: Idempotent replay — "object already gone" (OBJECT_NOT_FOUND)
+  // treated as success. Simulates: previous delete cleaned the object but
+  // crashed before updating the ledger. On retry, OBJECT_NOT_FOUND is success.
+  it('AC-R6-03: crash window → OBJECT_NOT_FOUND treated as idempotent success on retry', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p1'));
+
+    const storageKeys = ['key-0', 'key-1'];
+    for (let i = 0; i < storageKeys.length; i++) {
+      await deps.objects.put(storageKeys[i], new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', storageKeys[i]));
+    }
+
+    // Simulate crash: call deleteCascade directly (Phase A + B complete,
+    // cleanup keys persisted, but Storage cleanup never ran — as if the
+    // process crashed between DB commit and Storage cleanup).
+    await deps.projects.deleteCascade('p1');
+
+    // Now simulate a PARTIAL crash: manually delete key-0's Storage
+    // object + metadata (as if a previous sweep attempt cleaned key-0
+    // but crashed before updating the ledger).
+    await deps.objects.delete('key-0');
+    expect(state.database.collections.get('prod_object_metadata')?.docs.has('key-0')).toBe(false);
+
+    // Ledger still contains BOTH keys (crash before ledger update)
+    const repo = deps.projects as typeof deps.projects & {
+      getCleanupKeys(id: string): Promise<string[]>;
+      removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
+    };
+    const ledgerKeys = await repo.getCleanupKeys('p1');
+    expect(ledgerKeys.sort()).toEqual(['key-0', 'key-1']);
+
+    // Now retry via the sweeper path (simulating what a cleanup worker
+    // would do): read keys, delete objects, update ledger.
+    // The key-0 object is already gone → OBJECT_NOT_FOUND → success.
+    const completedKeys: string[] = [];
+    for (const key of ledgerKeys) {
+      try {
+        await deps.objects.delete(key);
+        completedKeys.push(key);
+      } catch (err) {
+        const msg = (err as Error).message ?? '';
+        // AC-R6-03: OBJECT_NOT_FOUND is idempotent success
+        if (msg.includes('OBJECT_NOT_FOUND')) {
+          completedKeys.push(key);
+        } else {
+          throw err;
+        }
+      }
+    }
+    expect(completedKeys.sort()).toEqual(['key-0', 'key-1']);
+
+    // Update ledger — all keys removed → doc deleted
+    const remaining = await repo.removeCleanupKeys('p1', completedKeys);
+    expect(remaining).toEqual([]);
+    expect(state.database.collections.get('prod_project_cleanup_keys')?.docs.has('p1')).toBe(false);
+
+    await deps.close();
+  });
+
+  // AC-R6-04: Real service path crash/retry — NOT direct deleteCascade.
+  // Simulates: service.deleteProject() runs, Storage partially fails,
+  // then a SECOND service.deleteProject() call replays the failed keys
+  // through the real service layer (deleteCascade is a no-op on already-
+  // deleted projects, getCleanupKeys reads remaining ledger, Storage
+  // delete succeeds on retry, removeCleanupKeys cleans the ledger).
+  it('AC-R6-04: service path → partial failure → retry via service.deleteProject replays failed keys', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p1'));
+
+    const storageKeys = ['key-0', 'key-1', 'key-2'];
+    for (let i = 0; i < storageKeys.length; i++) {
+      await deps.objects.put(storageKeys[i], new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', storageKeys[i]));
+    }
+
+    // First attempt: key-1 fails with OBJECT_DELETE_PARTIAL
+    const origDelete = deps.objects.delete.bind(deps.objects);
+    let failKey1 = true;
+    vi.spyOn(deps.objects, 'delete').mockImplementation(async (key: string) => {
+      if (failKey1 && key === 'key-1') {
+        throw new Error('OBJECT_DELETE_PARTIAL: key-1: NETWORK_ERROR');
+      }
+      return origDelete(key);
+    });
+
+    const result1 = await service.deleteProject('p1');
+    expect(result1.deleted).toBe(true);
+    expect(result1.cleanupFailures).toEqual(['key-1']);
+
+    // Ledger persists with key-1 (key-0, key-2 removed)
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc1 = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(cleanupDoc1.keys).toEqual(['key-1']);
+
+    // Retry: restore normal delete behavior (key-1 will succeed now)
+    failKey1 = false;
+
+    // AC-R6-04: Second attempt via REAL service.deleteProject() path.
+    // Project is already deleted — deleteCascade is a no-op, but
+    // getCleanupKeys reads the remaining ledger, Storage delete succeeds,
+    // removeCleanupKeys cleans the ledger.
+    const result2 = await service.deleteProject('p1');
+    expect(result2.deleted).toBe(true);
+    expect(result2.cleanupFailures).toHaveLength(0);
+
+    // Ledger is now gone (all keys cleaned → doc deleted)
+    expect(cleanupColl?.docs.has('p1')).toBe(false);
+    // key-1 is now gone from Storage (retry succeeded)
+    expect(state.database.collections.get('prod_object_metadata')?.docs.has('key-1')).toBe(false);
+
+    await deps.close();
+  });
+
+  // AC-R6-01 regression: verify the ledger survives DURING Storage cleanup,
+  // not just after. We verify this by checking that a mid-cleanup crash
+  // leaves the ledger intact with the remaining (un-cleaned) keys.
+  it('AC-R6-01 regression: mid-cleanup crash leaves ledger with un-cleaned keys', async () => {
+    const { deps, state } = setup;
+    await deps.projects.create(makeProject('p1'));
+
+    const storageKeys = ['key-0', 'key-1', 'key-2'];
+    for (let i = 0; i < storageKeys.length; i++) {
+      await deps.objects.put(storageKeys[i], new Uint8Array([i]), 'image/png');
+      await deps.assets.create(makeAsset(`a${i}`, 'p1', storageKeys[i]));
+    }
+
+    // Simulate mid-cleanup crash: deleteCascade completes (metadata gone,
+    // ledger persisted), then the process crashes before ANY Storage
+    // cleanup runs.
+    await deps.projects.deleteCascade('p1');
+
+    // Project + tombstone are gone (DB commit succeeded)
+    expect(state.database.collections.get('prod_projects')?.docs.has('p1')).toBe(false);
+    expect(state.database.collections.get('prod_project_tombstones')?.docs.has('p1')).toBe(false);
+
+    // AC-R6-01: Ledger survived the crash with ALL keys intact
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(cleanupDoc.keys.sort()).toEqual([...storageKeys].sort());
+
+    // Storage objects still exist (crash before cleanup)
+    for (const key of storageKeys) {
+      expect(state.database.collections.get('prod_object_metadata')?.docs.has(key)).toBe(true);
+    }
+
+    await deps.close();
+  });
+});

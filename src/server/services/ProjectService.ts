@@ -294,15 +294,22 @@ export class ProjectService {
   /**
    * Delete a project and all its child entities + object bytes.
    *
-   * FIX-R5: Two-phase deletion with stable storage-key snapshot.
+   * FIX-R6: Two-phase deletion with stable storage-key snapshot AND
+   * crash-safe cleanup ledger lifecycle.
    *
    * For adapters that support cleanup keys (CloudBase NoSQL):
    *   1. deleteCascade does Phase A (independent tombstone commit) +
    *      Phase B (stable snapshot, metadata deletion, cleanup keys persist).
    *   2. ProjectService reads cleanup keys from Phase B — it does NOT
    *      independently pre-fetch storage keys (P1-03 fix).
-   *   3. Storage cleanup happens AFTER metadata deletion. Failures are
-   *      recorded in cleanupFailures but do NOT roll back metadata.
+   *   3. Storage cleanup happens AFTER metadata deletion.
+   *   4. FIX-R6 (AC-R6-01): The cleanup ledger is NOT deleted until ALL
+   *      Storage objects are successfully removed. The ledger is updated
+   *      via removeCleanupKeys() after each successful delete, so failed
+   *      keys persist for sweeper recovery.
+   *   5. FIX-R6 (AC-R6-03): "Object already gone" (OBJECT_NOT_FOUND) is
+   *      treated as idempotent success so the crash window between object
+   *      delete and ledger update is safe to retry.
    *
    * For legacy adapters (PostgreSQL, etc.) without cleanup keys:
    *   Falls back to the old behavior: read assets before deletion inside
@@ -316,6 +323,7 @@ export class ProjectService {
     // the frozen PersistenceDependencies interface).
     const repo = this.deps.projects as ProjectRepository & {
       getCleanupKeys?(id: string): Promise<string[]>;
+      removeCleanupKeys?(id: string, removedKeys: string[]): Promise<string[]>;
       deleteCleanupKeys?(id: string): Promise<void>;
     };
 
@@ -327,14 +335,9 @@ export class ProjectService {
       // storage-key snapshot taken AFTER the tombstone barrier commits.
       await this.deps.projects.deleteCascade(projectId);
       storageKeys = await repo.getCleanupKeys!(projectId);
-      // Delete the cleanup keys doc after reading.
-      if (typeof repo.deleteCleanupKeys === 'function') {
-        try {
-          await repo.deleteCleanupKeys!(projectId);
-        } catch {
-          // Best-effort — cleanup keys doc is not critical after reading.
-        }
-      }
+      // FIX-R6 (AC-R6-01): Do NOT delete the ledger here. It must
+      // survive until Storage cleanup completes so failed keys can be
+      // replayed by the sweeper.
     } else {
       // Legacy path (PostgreSQL or other adapters without cleanup keys):
       // Read assets before deletion, then delete inside unitOfWork.
@@ -346,17 +349,65 @@ export class ProjectService {
     }
 
     // Best-effort delete objects. Record failures with diagnostic IDs.
+    // FIX-R6 (AC-R6-02/03): Successfully-deleted keys are tracked and
+    // removed from the ledger afterward. "Object already gone"
+    // (OBJECT_NOT_FOUND) is treated as idempotent success so a crash
+    // between object-delete and ledger-update is safe to retry.
     const cleanupFailures: string[] = [];
+    const completedKeys: string[] = [];
     for (const key of storageKeys) {
       try {
         await this.deps.objects.delete(key);
+        completedKeys.push(key);
       } catch (err) {
+        const msg = (err as Error).message ?? '';
+        // Crash-window idempotency (AC-R6-03): object/metadata already
+        // gone → treat as success. This covers the case where a previous
+        // delete attempt cleaned the object but crashed before updating
+        // the ledger.
+        if (msg.includes('OBJECT_NOT_FOUND')) {
+          completedKeys.push(key);
+          continue;
+        }
         const diagnosticId = generateDiagnosticId();
         console.warn(
           `[ProjectService.deleteProject] cleanup failure diagnosticId=${diagnosticId} key=${key}`,
           err
         );
         cleanupFailures.push(key);
+      }
+    }
+
+    // FIX-R6 (AC-R6-01/02): Update the cleanup ledger AFTER Storage
+    // cleanup attempts. Successfully-deleted keys are removed; failed
+    // keys remain for sweeper recovery. When the ledger becomes empty,
+    // the adapter deletes the doc.
+    if (typeof repo.removeCleanupKeys === 'function') {
+      try {
+        await repo.removeCleanupKeys!(projectId, completedKeys);
+      } catch (err) {
+        // Ledger update failed — but Storage cleanup already happened.
+        // The ledger may still contain already-deleted keys, which the
+        // sweeper will treat as idempotent success (OBJECT_NOT_FOUND).
+        // We don't fail the deleteProject call — metadata is gone and
+        // Storage is cleaned.
+        console.warn(
+          `[ProjectService.deleteProject] removeCleanupKeys failed for ${projectId}`,
+          err
+        );
+      }
+    } else if (
+      typeof repo.deleteCleanupKeys === 'function' &&
+      cleanupFailures.length === 0
+    ) {
+      // Legacy fallback (adapters with deleteCleanupKeys but without
+      // removeCleanupKeys): only delete the ledger when ALL Storage
+      // objects were successfully cleaned. On partial failure the ledger
+      // remains for manual/sweeper recovery.
+      try {
+        await repo.deleteCleanupKeys!(projectId);
+      } catch {
+        // Best-effort.
       }
     }
 
