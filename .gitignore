@@ -43,3 +43,7 @@ src/server/data/
 # 协作包临时文件（不应提交到仓库）
 _lumen-v12-extract/
 *.zip
+
+# 桌面协作文件夹完成包在工作区产生的临时副本
+# 实际完成包应在 C:\Users\Catcher\Desktop\协作文件夹\<project>-collab-completion.md
+/*-collab-completion.md

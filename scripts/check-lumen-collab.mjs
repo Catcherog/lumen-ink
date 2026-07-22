@@ -52,12 +52,18 @@ if (state) {
 }
 
 // .env* 检查：默认阻止全部 .env*，只允许明确模板文件
-// 允许：.env.example、.env.sample、.env.template
-// 拒绝：.env、.env.local、.env.production、.env.development 及其他 .env.*
+// 允许：.env.example、.env.sample、.env.template 以及复合模板
+//       （如 .env.cloudbase-nosql.preview.example、.env.local.example）
+// 拒绝：.env、.env.local、.env.production、.env.development、.env.local.secret
+//       及其他不以 .example/.sample/.template 结尾的 .env* 真实环境文件
 const forbiddenNames = [
   (name) => {
     const isEnvFile = /^\.env(?:\..+)?$/i.test(name);
-    const isAllowedTemplate = /^\.env\.(example|sample|template)$/i.test(name);
+    // 复合模板正则：.env 后可跟零或多个 .<segment> 中间段，最后必须以
+    // .example / .sample / .template 结尾。中间段字符类 [a-z0-9_-] 不允许
+    // 点号，避免正则误匹配跨段路径。
+    const isAllowedTemplate =
+      /^\.env(?:\.[a-z0-9_-]+)*\.(example|sample|template)$/i.test(name);
     return isEnvFile && !isAllowedTemplate;
   },
   (name) => /providers\.json$/i.test(name),
@@ -107,7 +113,10 @@ function walk(dir) {
       if (committableFiles && !committableFiles.has(rel)) continue;
       if (forbiddenNames.some((check) => check(entry.name))) errors.push(`Forbidden filename: ${rel}`);
       const ext = path.extname(entry.name).toLowerCase();
-      const isEnvTemplate = /^\.env\.(example|sample|template)$/i.test(entry.name);
+      // 复合模板（如 .env.cloudbase-nosql.preview.example）也需要扫描内容，
+      // 因为 ext 取最后一段（.example），不在 textExtensions 中。
+      const isEnvTemplate =
+        /^\.env(?:\.[a-z0-9_-]+)*\.(example|sample|template)$/i.test(entry.name);
       const shouldScanContent = textExtensions.has(ext) || isEnvTemplate;
       if (shouldScanContent) {
         const text = fs.readFileSync(full, 'utf8');
