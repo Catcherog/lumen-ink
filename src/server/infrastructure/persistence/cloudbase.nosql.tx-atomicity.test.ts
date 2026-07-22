@@ -101,6 +101,8 @@ describe('FIX-R4 P0 Transaction Atomicity', () => {
   // state.runTransactionCount === 1 (not 2)
   it('AC-01: updateIfClaimed inside unitOfWork.run reuses the outer transaction', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
     // Claim the job first (outside a transaction)
@@ -145,6 +147,8 @@ describe('FIX-R4 P0 Transaction Atomicity', () => {
   // verify it uses tx (set commitShouldFail=true → update should roll back)
   it('AC-03: updateIfClaimed inside tx rolls back on commit failure', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
     await deps.jobs.claim('job-1', {

@@ -246,12 +246,10 @@ describe('CloudBase NoSQL adapter - Factory', () => {
 
 describe('NOSQL-R2-07: selector honors explicit PERSISTENCE_BACKEND', () => {
   it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + full config → NoSQL adapter', () => {
-    // FIX-R4: Preview isolation gate requires CLOUDBASE_PRODUCTION_DATA_NAMESPACE
-    // and CLOUDBASE_PRODUCTION_STORAGE_PREFIX in Preview environments (VERCEL=1
-    // without NODE_ENV=production). Preview namespace must not equal Production
-    // namespace and must not contain 'prod' substring.
+    // FIX-R5: VERCEL_ENV=production → Production runtime, Preview gate skipped.
     const env = {
       VERCEL: '1',
+      VERCEL_ENV: 'production',
       PERSISTENCE_BACKEND: 'cloudbase-nosql',
       CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_API_KEY: 'test-key',
@@ -265,11 +263,11 @@ describe('NOSQL-R2-07: selector honors explicit PERSISTENCE_BACKEND', () => {
   });
 
   it('VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-nosql + missing namespace → fail closed', () => {
-    // FIX-R4: In Preview env, the isolation gate runs first and requires
-    // CLOUDBASE_PRODUCTION_DATA_NAMESPACE. Without it, the gate throws
-    // PRODUCTION_NAMESPACE_REQUIRED before config validation runs.
+    // FIX-R5: VERCEL_ENV=production → Production runtime, Preview gate skipped.
+    // Config validation catches missing CLOUDBASE_DATA_NAMESPACE.
     const env = {
       VERCEL: '1',
+      VERCEL_ENV: 'production',
       PERSISTENCE_BACKEND: 'cloudbase-nosql',
       CLOUDBASE_ENV_ID: 'test-env',
       CLOUDBASE_API_KEY: 'test-key',

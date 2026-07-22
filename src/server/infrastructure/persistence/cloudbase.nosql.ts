@@ -505,21 +505,31 @@ export function createCloudBaseNoSqlPersistence(
     await collection(COLLECTIONS.objectMetadata).doc(storageKey).remove();
   }
 
-  // --- FIX-R4 Workstream E: Tombstone barrier ---------------------------
-  //
-  // assertProjectNotDeleting checks the project_tombstones collection for
-  // an active tombstone. If one exists, the project is being deleted and
-  // child creates must fail closed with PROJECT_DELETING.
-  //
-  // This helper is transaction-aware: collection() returns the transaction
-  // collection when inside unitOfWork.run(), so a tombstone written earlier
-  // in the SAME transaction is visible to the check. This prevents a
-  // programmatic bug where child creates are issued inside the delete
-  // transaction itself.
-
-  async function assertProjectNotDeleting(projectId: string): Promise<void> {
-    const res = await collection(COLLECTIONS.projectTombstones).doc(projectId).get();
-    const tombstone = unwrapDocumentData<{ status?: string }>(res.data);
+  /**
+   * FIX-R5: Atomic project writability check.
+   *
+   * Replaces the old assertProjectNotDeleting (which only checked the
+   * tombstone). The new check verifies BOTH:
+   *   1. The project exists (PROJECT_NOT_FOUND if not)
+   *   2. The project is not being deleted (PROJECT_DELETING if tombstone exists)
+   *
+   * This function MUST be called inside a withCurrentOrNewTransaction
+   * callback so the check and the subsequent child write are atomic.
+   * Calling it outside a transaction still works but does NOT provide
+   * TOCTOU protection.
+   *
+   * The project existence check ensures that after Phase B commits
+   * (project + tombstone deleted), child creates fail closed with
+   * PROJECT_NOT_FOUND instead of producing orphans.
+   */
+  async function assertProjectWritable(projectId: string): Promise<void> {
+    const projectRes = await collection(COLLECTIONS.projects).doc(projectId).get();
+    const project = unwrapDocumentData<Project>(projectRes.data);
+    if (!project) {
+      throw new Error(`PROJECT_NOT_FOUND: ${projectId}`);
+    }
+    const tombstoneRes = await collection(COLLECTIONS.projectTombstones).doc(projectId).get();
+    const tombstone = unwrapDocumentData<{ status?: string }>(tombstoneRes.data);
     if (tombstone) {
       throw new Error(`PROJECT_DELETING: ${projectId}`);
     }
@@ -527,7 +537,10 @@ export function createCloudBaseNoSqlPersistence(
 
   // --- ProjectRepository (NOSQL-R2-05: deleteCascade only deletes DB) ----
 
-  const projects: ProjectRepository = {
+  const projects: ProjectRepository & {
+    getCleanupKeys(id: string): Promise<string[]>;
+    deleteCleanupKeys(id: string): Promise<void>;
+  } = {
     async create(input: Project): Promise<Project> {
       assertReady();
       await collection(COLLECTIONS.projects).add(toDoc(input));
@@ -567,58 +580,75 @@ export function createCloudBaseNoSqlPersistence(
     },
 
     /**
-     * FIX-R4 Workstream E (P1-01): Tombstone-based cascade deletion.
+     * FIX-R5: Two-phase cascade deletion with visible tombstone barrier.
      *
-     * Steps (all inside the caller's unitOfWork.run() transaction):
-     *  1. Idempotent re-delete check: if the project doc doesn't exist,
-     *     return immediately (no-op).
-     *  2. Write a tombstone doc { _id: id, status: 'deleting', startedAt }
-     *     to project_tombstones. Concurrent child creates that call
-     *     assertProjectNotDeleting inside the SAME transaction will see
-     *     this tombstone and fail with PROJECT_DELETING.
-     *  3. Pre-fetch child doc IDs using getDb() (non-transaction reads
-     *     see committed state — the stable snapshot).
-     *  4. Write a project_cleanup_keys doc { _id: id, keys: [...storageKeys] }
-     *     so a future sweeper can retry orphaned Storage bytes if the
-     *     process crashes between metadata commit and object deletion.
-     *  5. 100-op limit check: total ops = tombstone add (1) + cleanup keys
-     *     add (1) + child removes (N) + project remove (1) + tombstone
-     *     remove (1) = N + 4. If > 100, throw CLOUDBASE_TX_LIMIT_EXCEEDED
-     *     and delete NOTHING. Fail closed.
-     *  6. Remove each child doc by ID, then the project doc, then the
-     *     tombstone doc LAST. The cleanup keys doc survives for
-     *     ProjectService post-commit Storage cleanup.
+     * Phase A (independent transaction — MUST commit before Phase B):
+     *  1. Write tombstone { _id: id, status: 'deleting', startedAt } to
+     *     project_tombstones. If tombstone already exists (from a previous
+     *     failed Phase B), that's OK — the tombstone is idempotent.
+     *  2. COMMIT. The tombstone is now visible to ALL concurrent
+     *     transactions. Child creates that call assertProjectWritable
+     *     will see it and fail with PROJECT_DELETING.
      *
-     * Recovery: if the transaction fails, the tombstone is rolled back
-     * (it was written inside the transaction). The Project returns to its
-     * pre-deletion state — no half-deleted state.
+     * Phase B (same transaction as caller's unitOfWork, or new one):
+     *  1. Read stable snapshot of child IDs + storage keys. The tombstone
+     *     blocks new child creates, so this snapshot is stable.
+     *  2. Write project_cleanup_keys doc with the storage-key snapshot.
+     *  3. 100-op limit check: total ops = cleanup keys set (1) + child
+     *     removes (N) + project remove (1) + tombstone remove (1) = N + 3.
+     *     If > 100, throw CLOUDBASE_TX_LIMIT_EXCEEDED. The tombstone
+     *     remains committed from Phase A — child creates stay blocked.
+     *  4. Remove each child doc by ID, then project, then tombstone LAST.
+     *
+     * Recovery semantics:
+     *  - If Phase A succeeds but Phase B fails, the tombstone remains
+     *    committed. All child creates are blocked. A retry of deleteCascade
+     *    skips Phase A (tombstone already exists) and retries Phase B.
+     *  - If Phase B succeeds, project + tombstone are deleted atomically.
+     *    Child creates that check project existence fail with
+     *    PROJECT_NOT_FOUND (no orphan possible).
+     *  - project_cleanup_keys survives Phase B for post-commit Storage
+     *    cleanup and sweeper recovery.
      */
     async deleteCascade(id: string): Promise<void> {
       assertReady();
 
-      // Step 1: Idempotent re-delete — if project doesn't exist, no-op.
-      // Use getDb() (non-transaction) so this works even outside a tx.
+      // Step 1: Idempotent re-delete — if project doesn't exist, clean
+      // up any lingering tombstone from a previous failed Phase B.
       const projectDoc = await getDb().collection(COLLECTIONS.projects).doc(id).get();
       if (!unwrapDocumentData(projectDoc.data)) {
+        // Project already deleted. Remove any stale tombstone.
+        await getDb().collection(COLLECTIONS.projectTombstones).doc(id).remove();
         return;
       }
 
-      // Step 2-6: All writes MUST be inside a transaction so the tombstone
-      // is rolled back if the 100-op check fails. withCurrentOrNewTransaction
-      // reuses the caller's transaction if one exists, or opens a new one.
-      await withCurrentOrNewTransaction(async () => {
-        // Write tombstone FIRST so child creates inside the same
-        // transaction see it and fail with PROJECT_DELETING.
+      // Phase A: Commit tombstone in an INDEPENDENT transaction.
+      // Uses getDb().runTransaction() DIRECTLY (not withCurrentOrNewTransaction)
+      // so the tombstone commits independently of the caller's unitOfWork.
+      // This is the critical fix for P1-01: the tombstone MUST be visible
+      // to concurrent transactions before Phase B starts.
+      await getDb().runTransaction(async (tx) => {
+        // Idempotent: if tombstone already exists (from a previous
+        // failed Phase B), skip the write and continue.
+        const existing = await tx.collection(COLLECTIONS.projectTombstones).doc(id).get();
+        if (existing.data) {
+          return; // Tombstone already committed from a previous attempt.
+        }
         const now = new Date().toISOString();
-        await collection(COLLECTIONS.projectTombstones).doc(id).set({
+        await tx.collection(COLLECTIONS.projectTombstones).doc(id).set({
           _id: id,
           status: 'deleting',
           startedAt: now,
         });
+      });
+      // Phase A is now committed. The tombstone is visible to all.
 
-        // Pre-fetch child doc IDs using getDb() (non-transaction reads
-        // see committed state — the stable snapshot). Collect storageKeys
-        // from assets for the cleanup keys record.
+      // Phase B: Take stable snapshot, delete children + project + tombstone.
+      // Uses withCurrentOrNewTransaction (reuses caller's tx or opens new one).
+      await withCurrentOrNewTransaction(async () => {
+        // Read stable snapshot — child IDs and storage keys.
+        // The tombstone (committed in Phase A) blocks new child creates,
+        // so this snapshot is stable: no new children can appear.
         const childCollections = [
           COLLECTIONS.versionIdempotency,
           COLLECTIONS.jobs,
@@ -643,6 +673,7 @@ export function createCloudBaseNoSqlPersistence(
 
         // Write cleanup keys doc (survives the transaction for
         // post-commit Storage cleanup and sweeper recovery).
+        const now = new Date().toISOString();
         await collection(COLLECTIONS.projectCleanupKeys).doc(id).set({
           _id: id,
           keys: storageKeys,
@@ -650,15 +681,18 @@ export function createCloudBaseNoSqlPersistence(
         });
 
         // 100-op limit check.
-        // Total ops = tombstone add (1) + cleanup keys add (1) + child
-        // removes (N) + project remove (1) + tombstone remove (1) = N + 4.
+        // Phase B total ops = cleanup keys set (1) + child removes (N)
+        // + project remove (1) + tombstone remove (1) = N + 3.
+        // Phase A's tombstone set (1 op) is in a separate transaction
+        // and does NOT count toward Phase B's limit.
         const totalChildOps = idsByCollection.reduce((sum, { ids }) => sum + ids.length, 0);
-        const totalOps = totalChildOps + 4;
+        const totalOps = totalChildOps + 3;
         if (totalOps > CLOUDBASE_TX_OP_LIMIT) {
           throw new Error(
             `CLOUDBASE_TX_LIMIT_EXCEEDED: project ${id} requires ${totalOps} ` +
-            `doc operations, limit is ${CLOUDBASE_TX_OP_LIMIT}. ` +
-            `Refusing partial deletion — fail closed.`
+            `doc operations in Phase B, limit is ${CLOUDBASE_TX_OP_LIMIT}. ` +
+            `Refusing partial deletion — fail closed. ` +
+            `Tombstone remains committed; retry after reducing children.`
           );
         }
 
@@ -670,8 +704,32 @@ export function createCloudBaseNoSqlPersistence(
         }
         await collection(COLLECTIONS.projects).doc(id).remove();
         // Tombstone removed LAST — after this, the project is fully deleted.
+        // Child creates that check project existence via
+        // assertProjectWritable will fail with PROJECT_NOT_FOUND.
         await collection(COLLECTIONS.projectTombstones).doc(id).remove();
       });
+    },
+
+    /**
+     * FIX-R5: Read the cleanup keys persisted by Phase B of deleteCascade.
+     * Infrastructure-internal method — NOT part of the frozen
+     * PersistenceDependencies interface. ProjectService uses duck-typing
+     * to check if this method exists before calling it.
+     */
+    async getCleanupKeys(id: string): Promise<string[]> {
+      assertReady();
+      const res = await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).get();
+      const doc = unwrapDocumentData<{ keys: string[] }>(res.data);
+      return doc?.keys ?? [];
+    },
+
+    /**
+     * FIX-R5: Delete the cleanup keys doc after Storage cleanup is done.
+     * Infrastructure-internal method — NOT part of the frozen interface.
+     */
+    async deleteCleanupKeys(id: string): Promise<void> {
+      assertReady();
+      await getDb().collection(COLLECTIONS.projectCleanupKeys).doc(id).remove();
     },
   };
 
@@ -680,9 +738,14 @@ export function createCloudBaseNoSqlPersistence(
   const assets: AssetRepository = {
     async create(input: Asset): Promise<Asset> {
       assertReady();
-      await assertProjectNotDeleting(input.projectId);
-      await collection(COLLECTIONS.assets).add(toDoc(input));
-      return input;
+      // FIX-R5: Atomic check + write in same transaction. The project
+      // existence + tombstone check and the asset write MUST be in the
+      // same transaction to prevent TOCTOU (check-then-write race).
+      return withCurrentOrNewTransaction(async () => {
+        await assertProjectWritable(input.projectId);
+        await collection(COLLECTIONS.assets).add(toDoc(input));
+        return input;
+      });
     },
 
     async get(id: string): Promise<Asset | null> {
@@ -703,9 +766,12 @@ export function createCloudBaseNoSqlPersistence(
   const versions: VersionRepository = {
     async create(input: Version): Promise<Version> {
       assertReady();
-      await assertProjectNotDeleting(input.projectId);
-      await collection(COLLECTIONS.versions).add(toDoc(input));
-      return input;
+      // FIX-R5: Atomic check + write in same transaction.
+      return withCurrentOrNewTransaction(async () => {
+        await assertProjectWritable(input.projectId);
+        await collection(COLLECTIONS.versions).add(toDoc(input));
+        return input;
+      });
     },
 
     async createIdempotent(
@@ -714,7 +780,6 @@ export function createCloudBaseNoSqlPersistence(
       version: Version
     ): Promise<Version> {
       assertReady();
-      await assertProjectNotDeleting(projectId);
       const idemId = idempotencyDocId(projectId, idempotencyKey);
       // Fast path: check if idempotency record already exists.
       // AC-01: unwrapDocumentData handles both array (non-tx) and single-doc
@@ -747,6 +812,9 @@ export function createCloudBaseNoSqlPersistence(
             if (v) return v;
             return version; // fallback: should not happen
           }
+          // FIX-R5: Atomic project writability check inside the
+          // transaction — prevents TOCTOU race.
+          await assertProjectWritable(projectId);
           await tx.collection(COLLECTIONS.versions).add(toDoc(version));
           await tx.collection(COLLECTIONS.versionIdempotency).add({
             _id: idemId,
@@ -803,18 +871,18 @@ export function createCloudBaseNoSqlPersistence(
   const jobs: JobRepository = {
     async create(input: GenerationJob): Promise<GenerationJob> {
       assertReady();
-      await assertProjectNotDeleting(input.projectId);
-      // FIX-R4 Workstream D (P2-02): When idempotencyKey is present, delegate
-      // to createIdempotent() so Job + idempotency record are created
-      // atomically in a single transaction. The old code did two separate
-      // non-transactional writes — if the second failed, the first Job was
-      // orphaned.
+      // FIX-R5: When idempotencyKey is present, createIdempotent
+      // handles the atomic project check inside its transaction.
       if (input.idempotencyKey) {
         const result = await jobs.createIdempotent(input);
         return result.job;
       }
-      await collection(COLLECTIONS.jobs).add(toDoc(input));
-      return input;
+      // FIX-R5: Atomic check + write for non-idempotent jobs.
+      return withCurrentOrNewTransaction(async () => {
+        await assertProjectWritable(input.projectId);
+        await collection(COLLECTIONS.jobs).add(toDoc(input));
+        return input;
+      });
     },
 
     /**
@@ -838,7 +906,6 @@ export function createCloudBaseNoSqlPersistence(
      */
     async createIdempotent(input: GenerationJob): Promise<{ job: GenerationJob; created: boolean }> {
       assertReady();
-      await assertProjectNotDeleting(input.projectId);
       if (!input.idempotencyKey) {
         await collection(COLLECTIONS.jobs).add(toDoc(input));
         return { job: input, created: true };
@@ -874,6 +941,9 @@ export function createCloudBaseNoSqlPersistence(
             return null; // fall through to retry path below
           }
           // Create Job + idempotency atomically.
+          // FIX-R5: Atomic project writability check inside the
+          // transaction — prevents TOCTOU race.
+          await assertProjectWritable(input.projectId);
           await tx.collection(COLLECTIONS.jobs).add(toDoc(input));
           await tx.collection(COLLECTIONS.jobIdempotency).add({
             _id: idemId,

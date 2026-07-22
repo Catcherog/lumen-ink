@@ -56,9 +56,13 @@ const FAKE_DEPS: any = Object.freeze({
 });
 
 // Valid Preview env vars (used by the "passes" tests)
+// FIX-R5: Uses VERCEL_ENV=preview (authoritative Vercel signal) instead of
+// NODE_ENV inference.
 function validPreviewEnv(): Record<string, string | undefined> {
   return {
     VERCEL: '1',
+    VERCEL_ENV: 'preview',
+    NODE_ENV: 'production', // FIX-R5: Preview may have NODE_ENV=production
     PERSISTENCE_BACKEND: 'cloudbase-nosql',
     CLOUDBASE_ENV_ID: 'preview-env-id',
     CLOUDBASE_API_KEY: 'preview-api-key',
@@ -70,8 +74,11 @@ function validPreviewEnv(): Record<string, string | undefined> {
 }
 
 // Valid Production env vars (gate is skipped in production)
+// FIX-R5: Uses VERCEL_ENV=production (authoritative Vercel signal).
 function validProductionEnv(): Record<string, string | undefined> {
   return {
+    VERCEL: '1',
+    VERCEL_ENV: 'production',
     NODE_ENV: 'production',
     PERSISTENCE_BACKEND: 'cloudbase-nosql',
     CLOUDBASE_ENV_ID: 'prod-env-id',
@@ -212,26 +219,58 @@ describe('FIX-R4 validatePreviewIsolation (pure function)', () => {
 
 // ===========================================================================
 // isPreviewEnvironment — pure function tests
+// FIX-R5: Rewritten to use Vercel's authoritative VERCEL_ENV variable.
 // ===========================================================================
-describe('FIX-R4 isPreviewEnvironment (pure function)', () => {
-  it('returns true for VERCEL=1 without NODE_ENV=production', () => {
-    expect(isPreviewEnvironment({ VERCEL: '1' })).toBe(true);
-    expect(isPreviewEnvironment({ VERCEL: '1', NODE_ENV: 'development' })).toBe(true);
+describe('FIX-R5 isPreviewEnvironment (pure function)', () => {
+  it('returns true for VERCEL=1 + VERCEL_ENV=preview', () => {
+    expect(isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'preview' })).toBe(true);
   });
 
-  it('returns false for VERCEL=1 WITH NODE_ENV=production (Production runtime)', () => {
-    expect(isPreviewEnvironment({ VERCEL: '1', NODE_ENV: 'production' })).toBe(false);
+  it('returns true for VERCEL=1 + VERCEL_ENV=preview + NODE_ENV=production (P1-04 fix)', () => {
+    // This is the critical P1-04 fix: a Preview deployment with
+    // NODE_ENV=production must still be identified as Preview.
+    expect(
+      isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'preview', NODE_ENV: 'production' })
+    ).toBe(true);
   });
 
-  it('returns true for CLOUDBASE_PREVIEW_MODE=1 regardless of VERCEL', () => {
+  it('returns false for VERCEL=1 + VERCEL_ENV=production (Production runtime)', () => {
+    expect(
+      isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'production', NODE_ENV: 'production' })
+    ).toBe(false);
+  });
+
+  it('throws VERCEL_ENV_REQUIRED_OR_INVALID when VERCEL=1 but VERCEL_ENV is missing', () => {
+    expect(() => isPreviewEnvironment({ VERCEL: '1' })).toThrowError(
+      /VERCEL_ENV_REQUIRED_OR_INVALID/
+    );
+    expect(() =>
+      isPreviewEnvironment({ VERCEL: '1', NODE_ENV: 'production' })
+    ).toThrowError(/VERCEL_ENV_REQUIRED_OR_INVALID/);
+  });
+
+  it('throws VERCEL_ENV_REQUIRED_OR_INVALID when VERCEL=1 but VERCEL_ENV is unknown', () => {
+    expect(() =>
+      isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'development' })
+    ).toThrowError(/VERCEL_ENV_REQUIRED_OR_INVALID/);
+    expect(() =>
+      isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'staging' })
+    ).toThrowError(/VERCEL_ENV_REQUIRED_OR_INVALID/);
+  });
+
+  it('returns true for CLOUDBASE_PREVIEW_MODE=1 regardless of VERCEL/NODE_ENV', () => {
     expect(isPreviewEnvironment({ CLOUDBASE_PREVIEW_MODE: '1' })).toBe(true);
     expect(
       isPreviewEnvironment({ CLOUDBASE_PREVIEW_MODE: '1', NODE_ENV: 'production' })
+    ).toBe(true);
+    expect(
+      isPreviewEnvironment({ CLOUDBASE_PREVIEW_MODE: '1', VERCEL: '1', VERCEL_ENV: 'production' })
     ).toBe(true);
   });
 
   it('returns false when neither VERCEL nor CLOUDBASE_PREVIEW_MODE is set', () => {
     expect(isPreviewEnvironment({})).toBe(false);
+    expect(isPreviewEnvironment({ NODE_ENV: 'production' })).toBe(false);
     expect(isPreviewEnvironment({ NODE_ENV: 'development' })).toBe(false);
   });
 
@@ -243,8 +282,9 @@ describe('FIX-R4 isPreviewEnvironment (pure function)', () => {
 
 // ===========================================================================
 // selectPersistenceByEnv — Preview isolation gate integration tests
+// FIX-R5: Uses VERCEL_ENV for Preview/Production detection.
 // ===========================================================================
-describe('FIX-R4 selectPersistenceByEnv — Preview isolation gate (AC-22 … AC-29)', () => {
+describe('FIX-R5 selectPersistenceByEnv — Preview isolation gate (AC-22 … AC-29)', () => {
   beforeEach(() => {
     mockCreateNoSql.mockReset();
     mockValidateNoSql.mockReset();
@@ -345,13 +385,36 @@ describe('FIX-R4 selectPersistenceByEnv — Preview isolation gate (AC-22 … AC
   });
 
   // --- Test 9: Valid Production config passes (no gate applied) -----------
-  it('Valid Production config (NODE_ENV=production) passes — gate skipped even with "prod" namespace', () => {
+  it('Valid Production config (VERCEL_ENV=production) passes — gate skipped even with "prod" namespace', () => {
     const env = validProductionEnv();
     // In production, namespace contains "prod" but the gate is skipped.
     const deps = selectPersistenceByEnv(env);
     expect(mockCreateNoSql).toHaveBeenCalledTimes(1);
     expect(mockValidateNoSql).toHaveBeenCalledTimes(1);
     expect(deps).toBe(FAKE_DEPS);
+  });
+
+  // --- Test 9b: VERCEL=1 + VERCEL_ENV missing → fail closed (P1-04 fix) ---
+  it('VERCEL=1 with missing VERCEL_ENV → VERCEL_ENV_REQUIRED_OR_INVALID (fail closed)', () => {
+    const env = validPreviewEnv();
+    delete env.VERCEL_ENV;
+    expect(() => selectPersistenceByEnv(env)).toThrowError(
+      /VERCEL_ENV_REQUIRED_OR_INVALID/
+    );
+    // SDK must NOT be initialised when the environment is ambiguous.
+    expect(mockCreateNoSql).not.toHaveBeenCalled();
+  });
+
+  // --- Test 9c: VERCEL=1 + VERCEL_ENV=preview + NODE_ENV=production → gate runs (P1-04 fix) ---
+  it('VERCEL=1 + VERCEL_ENV=preview + NODE_ENV=production → gate runs (not bypassed as Production)', () => {
+    const env = validPreviewEnv();
+    // NODE_ENV=production is set, but VERCEL_ENV=preview takes precedence.
+    // The gate must run. Using a "prod" namespace should trigger the gate.
+    env.CLOUDBASE_DATA_NAMESPACE = 'prod';
+    expect(() => selectPersistenceByEnv(env)).toThrowError(
+      /PREVIEW_NAMESPACE_CONTAINS_PROD/
+    );
+    expect(mockCreateNoSql).not.toHaveBeenCalled();
   });
 
   // --- Test 10: Gate failure → no SDK dynamic import -----------------------
@@ -407,6 +470,7 @@ describe('FIX-R4 selectPersistenceByEnv — Preview isolation gate (AC-22 … AC
     // path should not be gated (gate only applies to cloudbase-nosql).
     const env: Record<string, string | undefined> = {
       VERCEL: '1',
+      VERCEL_ENV: 'preview',
       PERSISTENCE_BACKEND: 'cloudbase-postgres',
       CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
       CLOUDBASE_ENV_ID: 'test-env',

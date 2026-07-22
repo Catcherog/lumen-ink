@@ -23,6 +23,7 @@
 
 import type {
   PersistenceDependencies,
+  ProjectRepository,
   Project,
   Asset,
   Version,
@@ -293,30 +294,56 @@ export class ProjectService {
   /**
    * Delete a project and all its child entities + object bytes.
    *
-   * FIX-R4 Workstream E (P1-01): The entire metadata deletion runs inside
-   * a single unitOfWork.run() transaction. The storage keys are collected
-   * INSIDE the transaction (after the tombstone is set by deleteCascade)
-   * so the stable snapshot matches the deletion set. Storage cleanup happens
-   * AFTER the transaction commits — any failure is recorded in
-   * `cleanupFailures` but does NOT roll back the metadata deletion.
+   * FIX-R5: Two-phase deletion with stable storage-key snapshot.
    *
-   * The tombstone barrier (assertProjectNotDeleting) prevents concurrent
-   * child creates from producing orphans during the delete transaction.
+   * For adapters that support cleanup keys (CloudBase NoSQL):
+   *   1. deleteCascade does Phase A (independent tombstone commit) +
+   *      Phase B (stable snapshot, metadata deletion, cleanup keys persist).
+   *   2. ProjectService reads cleanup keys from Phase B — it does NOT
+   *      independently pre-fetch storage keys (P1-03 fix).
+   *   3. Storage cleanup happens AFTER metadata deletion. Failures are
+   *      recorded in cleanupFailures but do NOT roll back metadata.
+   *
+   * For legacy adapters (PostgreSQL, etc.) without cleanup keys:
+   *   Falls back to the old behavior: read assets before deletion inside
+   *   unitOfWork.run(), then delete.
+   *
+   * The tombstone barrier (assertProjectWritable) prevents concurrent
+   * child creates from producing orphans during the delete.
    */
   async deleteProject(projectId: string): Promise<DeleteProjectResult> {
-    // Collect asset storage keys INSIDE the transaction — this is the
-    // stable snapshot after the tombstone is set. deleteCascade also
-    // writes a project_cleanup_keys doc for sweeper recovery.
+    // Check if the adapter supports cleanup keys (duck-typed; not in
+    // the frozen PersistenceDependencies interface).
+    const repo = this.deps.projects as ProjectRepository & {
+      getCleanupKeys?(id: string): Promise<string[]>;
+      deleteCleanupKeys?(id: string): Promise<void>;
+    };
+
     let storageKeys: string[] = [];
 
-    await this.deps.unitOfWork.run(async () => {
-      // Read assets inside the transaction (getDb reads committed state,
-      // which is the stable snapshot before any deletion occurs).
-      const assets = await this.deps.assets.listByProject(projectId);
-      storageKeys = assets.map((a) => a.storageKey);
-      // deleteCascade handles tombstone + child deletion atomically.
+    if (typeof repo.getCleanupKeys === 'function') {
+      // FIX-R5: Two-phase deletion path (CloudBase NoSQL).
+      // deleteCascade persists project_cleanup_keys with the stable
+      // storage-key snapshot taken AFTER the tombstone barrier commits.
       await this.deps.projects.deleteCascade(projectId);
-    });
+      storageKeys = await repo.getCleanupKeys!(projectId);
+      // Delete the cleanup keys doc after reading.
+      if (typeof repo.deleteCleanupKeys === 'function') {
+        try {
+          await repo.deleteCleanupKeys!(projectId);
+        } catch {
+          // Best-effort — cleanup keys doc is not critical after reading.
+        }
+      }
+    } else {
+      // Legacy path (PostgreSQL or other adapters without cleanup keys):
+      // Read assets before deletion, then delete inside unitOfWork.
+      await this.deps.unitOfWork.run(async () => {
+        const assets = await this.deps.assets.listByProject(projectId);
+        storageKeys = assets.map((a) => a.storageKey);
+        await this.deps.projects.deleteCascade(projectId);
+      });
+    }
 
     // Best-effort delete objects. Record failures with diagnostic IDs.
     const cleanupFailures: string[] = [];

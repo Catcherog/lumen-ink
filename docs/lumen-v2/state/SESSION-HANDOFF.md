@@ -1,6 +1,212 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 实施完成，等待 GPT 验收）
+## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R5 实施完成，等待 GPT 增量审查）
+
+- 日期：2026-07-22
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TWO-PHASE-DELETE-PREVIEW-ENV`（子任务，GPT FIX_REQUIRED 后 Trae 实施）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Route**：GPT FIX_REQUIRED → Trae FIX-R5 → GPT 增量审查 → (可能) Codex READ_ONLY 限域审计
+- **Base SHA**：`342541d`（FIX-R4 state commit，GPT changes_requested 裁决后）
+- **Result SHA**：`TODO: fill after commit`
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r5`
+- **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r4`
+- **GPT FIX-R4 裁决**：[docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-GPT-REVIEW.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-GPT-REVIEW.md)
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r5-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r5-gate-results.md)
+- **R4 门禁证据（已修正）**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r4-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r4-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
+- **Codex**：`DEFERRED_UNTIL_FIX_R5_IMPLEMENTED`（GPT 通过 R5 后可能授权限域 READ_ONLY 审计）
+
+### GPT FIX-R4 裁决摘要（FIX_REQUIRED）
+
+GPT 审查 FIX-R4 完成包后给出 `FIX_REQUIRED`，识别 4 项阻断缺陷：
+
+| 缺陷 | 严重度 | RF | 描述 |
+|------|--------|-----|------|
+| P1-01 | P1 | RF-R5-01 | Tombstone 在删除事务内写入又删除，并发事务无法观察 |
+| P1-02 | P1 | RF-R5-02 | "并发"测试实际没有测试并发，只是等待删除完成 |
+| P1-03 | P1 | RF-R5-01 | ProjectService 仍使用 tombstone 之前的 storage 快照 |
+| P1-04 | P1 | RF-R5-03 | Preview 判定使用 NODE_ENV 推断，未用 VERCEL_ENV |
+| P2 | P2 | RF-R5-04 | 证据文件 Result SHA=TODO，AC-37/38/40 PENDING，10 个 AC 错误标 PASS |
+
+GPT 接受为证据通过的 AC：AC-01～AC-08, AC-11, AC-13, AC-15～AC-21, AC-30～AC-34, AC-36, AC-39
+
+### FIX-R5 实施核心结论（4 Required Fixes）
+
+1. **RF-R5-01 — 可见两阶段删除屏障**：
+   - **Phase A**（独立事务 `getDb().runTransaction()` 直接调用）：写入 tombstone `{ _id, status: 'deleting', startedAt }` → **提交** → tombstone 对所有并发事务可见
+   - **Phase B**（`withCurrentOrNewTransaction`，复用调用方事务或开启新事务）：读取稳定快照（child IDs + storage keys）→ 设置 `project_cleanup_keys` → 删除所有 children → 删除 project → 删除 tombstone（最后一步）
+   - Op 公式变更：N+4（R4 单事务）→ N+3（R5 Phase A 独立事务）
+   - `assertProjectWritable` 替换 `assertProjectNotDeleting`：检查 project 存在性（`PROJECT_NOT_FOUND`）+ tombstone（`PROJECT_DELETING`）；所有 child create 路径在 `withCurrentOrNewTransaction` 内原子 check+write
+   - ProjectService duck-type `getCleanupKeys`/`deleteCleanupKeys`：CloudBase 路径调用 `deleteCascade` 后读取 cleanup keys（无独立 prefetch），消费 Phase B 稳定快照；PostgreSQL 旧路径保持不变
+   - Phase B 失败时 Phase A tombstone 存活（正确行为：child creates 继续被阻止）
+
+2. **RF-R5-02 — 确定性交错测试**：
+   - Mock 增强：`occReadTracking` 标志 + `readSet` Map 记录文档读取 + `preCommitHook` 在 commit 检查前注入已提交状态变更 + `commit()` OCC 冲突检测
+   - 6 个新测试 T1-T5：
+     - T1：child tx 读取 project（无 tombstone），preCommitHook 注入 Phase A tombstone → OCC 冲突 → 重试 → child 看到 tombstone → PROJECT_DELETING
+     - T2：Phase A 已提交 → 所有 5 条 child create 路径返回 PROJECT_DELETING
+     - T3：完整删除完成 → child create 返回 PROJECT_NOT_FOUND（非 PROJECT_DELETING）→ 无孤儿
+     - T4：ProjectService.deleteProject → cleanup keys 匹配原始 storage keys → 成功后删除 cleanup keys doc
+     - T4b：tombstone 阻止新 asset → cleanup keys 仅含 tombstone 之前的 keys
+     - T5：模拟崩溃（deleteCascade 无 ProjectService）→ cleanup keys 存活 → sweeper 读取并恢复
+
+3. **RF-R5-03 — Vercel 权威环境变量**：
+   - `isPreviewEnvironment` 改为使用 `VERCEL_ENV`（preview/production）
+   - `VERCEL=1` 但 `VERCEL_ENV` 缺失/未知 → 抛出 `VERCEL_ENV_REQUIRED_OR_INVALID`（fail closed）
+   - `NODE_ENV` 不再用于 Preview 判定
+   - 8 个 VERCEL_ENV 测试替换 5 个 NODE_ENV 测试 + Test 9b（fail-closed）+ Test 9c（P1-04 场景：VERCEL=1 + VERCEL_ENV=preview + NODE_ENV=production → gate 执行）
+   - 2 个 contract 测试修正：添加 `VERCEL_ENV: 'production'`
+
+4. **RF-R5-04 — 证据文件修正**：
+   - R4 gate evidence 修正：correction banner + 准确 SHA（Result SHA `00ce304`, State Commit `342541d`）+ 10 个 AC 标记为 FAIL/PENDING
+   - R5 gate evidence 创建：完整 8 门禁结果 + 测试计数对比 + AC 覆盖矩阵 + 约束检查清单 + 剩余风险
+
+### 8 门禁结果（FIX-R5）
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc (build) | PASS | 0 errors |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 410 tests / 34 files |
+| 6 | Root tests | PASS | 604 combined (194 client + 410 server, +11 vs R4) |
+| 7 | Build (client + server) | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+
+### 文件变更（11 files: 9 modified + 2 new + 2 new docs）
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.ts` | 修改 | RF-R5-01: 两阶段删除、assertProjectWritable、getCleanupKeys/deleteCleanupKeys、child creates 包裹 withCurrentOrNewTransaction |
+| `cloudbase.nosql.mock.ts` | 修改 | RF-R5-02: occReadTracking + readSet + preCommitHook + commit() OCC 冲突检测 |
+| `select.ts` | 修改 | RF-R5-03: isPreviewEnvironment 使用 VERCEL_ENV + fail-closed |
+| `ProjectService.ts` | 修改 | RF-R5-01: deleteProject duck-type getCleanupKeys/deleteCleanupKeys，无独立 prefetch |
+| `cloudbase.nosql.cascade-boundary.test.ts` | 修改 | RF-R5-02: +6 T1-T5 交错测试，边界数更新为 N+3 |
+| `cloudbase.nosql.contract.test.ts` | 修改 | RF-R5-03: +VERCEL_ENV:production 到 2 个测试 |
+| `cloudbase.nosql.r2.behavior.test.ts` | 修改 | RF-R5-01: +projects.create() 到 9 个测试，边界注释 N+3 |
+| `cloudbase.nosql.tx-atomicity.test.ts` | 修改 | RF-R5-01: +projects.create() 到 2 个测试 |
+| `select.preview-isolation.test.ts` | 修改 | RF-R5-03: 8 个 VERCEL_ENV 测试 + Test 9b/9c |
+| `fix-r4-gate-results.md` | 修改 | RF-R5-04: correction banner + 准确 SHA + FAIL/PENDING 标记 |
+| `fix-r5-gate-results.md` | 新增 | RF-R5-04: 完整 R5 门禁证据 |
+| `FIX-R4-GPT-REVIEW.md` | 新增 | GPT FIX_REQUIRED 裁决文件 |
+| `FIX-R5-TRAE-REPORT.md` | 新增 | 综合 Trae 实施报告（13 节） |
+
+### AC 覆盖矩阵（40 项）
+
+| AC 范围 | 描述 | R4 Status | R5 Status | 证据 |
+|---------|------|-----------|-----------|------|
+| AC-01 ~ AC-08 | Transaction Atomicity | PASS | PASS | tx-atomicity.test.ts (8 tests) |
+| AC-09 | Tombstone → PROJECT_DELETING | ❌ FAIL | ✅ PASS | RF-R5-01: two-phase delete |
+| AC-10 | Snapshot AFTER tombstone | ❌ FAIL | ✅ PASS | RF-R5-01: Phase B post-tombstone |
+| AC-11 | 99/100/101 op boundary | PASS | PASS | N+3 formula |
+| AC-12 | Deterministic interleaving | ❌ FAIL | ✅ PASS | RF-R5-02: T1-T5 |
+| AC-13 | Delete failure → no partial | PASS | PASS | Phase A tombstone survives |
+| AC-14 | Cleanup keys match snapshot | ❌ FAIL | ✅ PASS | RF-R5-01: getCleanupKeys |
+| AC-15 ~ AC-21 | Storage Consistency | PASS | PASS | storage-fault.test.ts (10 tests) |
+| AC-22 | Gate before SDK import | ❌ FAIL | ✅ PASS | RF-R5-03: VERCEL_ENV |
+| AC-23 ~ AC-26 | Preview isolation rules | PASS | PASS | validatePreviewIsolation |
+| AC-27 | Gate failure → no SDK import | ❌ FAIL | ✅ PASS | RF-R5-03: correct detection |
+| AC-28 | Production not blocked | PASS | PASS | VERCEL_ENV=production |
+| AC-29 | Pure functions exported | ❌ FAIL | ✅ PASS | RF-R5-03: exported + tested |
+| AC-30 ~ AC-34 | Regression | PASS | PASS | gates + tests |
+| AC-35 | Test results recorded | ❌ FAIL | ✅ PASS | R5 evidence + R4 corrected |
+| AC-36 | No real credentials | PASS | PASS | Mock-only |
+| AC-37 | Local SHA = Remote SHA | ❌ FAIL | ⏳ PENDING | TODO: after commit |
+| AC-38 | Worktree clean | PENDING | ⏳ PENDING | TODO: after commit |
+| AC-39 | readyForPreview false | PASS | PASS | unchanged |
+| AC-40 | Status awaiting_gpt_acceptance | PENDING | ⏳ PENDING | TODO: after commit |
+
+### 剩余风险
+
+1. Mock-only 行为证据：两阶段删除 + OCC 交错测试基于 Mock SDK，真实 CloudBase 语义可能不同
+2. Tombstone 存活：Phase B 失败时 Phase A tombstone 存活（正确行为，但可能需要运维清理工具）
+3. Op 公式 N+3：Phase B = cleanup keys (1) + child removes (N) + project remove (1) + tombstone remove (1)
+4. project_cleanup_keys 生命周期：Phase B 创建 → ProjectService 读取 → 成功后删除；崩溃时留存供 sweeper（T5 验证）
+5. Duck-typed 方法：getCleanupKeys/deleteCleanupKeys 是 CloudBase 基础设施能力，不在冻结的 PersistenceDependencies 接口上
+6. VERCEL_ENV fail-closed：VERCEL=1 无 VERCEL_ENV 时抛出，比 R4 更严格
+7. OCC 仅 Mock：真实 CloudBase 使用 DATABASE_TRANSACTION_CONFLICT 重试；T1 验证重试路径但冲突本身是 Mock 模拟
+
+### Stop Conditions（持续生效）
+
+- ❌ `readyForPreview` 保持 `false`（不得授权 Preview）
+- ❌ 禁止合并到 main
+- ❌ 禁止配置 Vercel Preview / Production
+- ❌ 禁止使用 Production API Key
+- ❌ 禁止运行 Production 数据迁移或写入
+- ❌ 禁止升级 `@cloudbase/node-sdk`
+- ❌ 禁止用 Mock 行为替代真实 SDK 源码契约
+- ❌ 禁止修改公开 persistence interface
+- ❌ Trae 不得自行标记任务完成
+- ❌ Codex = DEFERRED_UNTIL_FIX_R5_IMPLEMENTED（GPT 通过 R5 后可能授权限域审计）
+
+### 最短收尾顺序（更新）
+
+1. Trae 执行 FIX-R3 ✅
+2. GPT 增量审查 R3 ✅ → 裁决 `CODEX_REQUIRED`
+3. Trae 落盘 GPT 裁决、状态转为 `changes_requested / nextActor=codex` ✅
+4. Codex 限定只读事务审查 ✅ → 输出 7 项 Findings
+5. Trae 实施 FIX-R4 ✅ → 9 Workstreams A-I，14 files，8/8 gates PASS (593 tests)
+6. GPT 验收 FIX-R4 ✅ → 裁决 `FIX_REQUIRED`（4 项阻断缺陷）
+7. Trae 实施 FIX-R5 ✅（本轮，4 RFs，11 files，8/8 gates PASS，604 tests +11）
+8. **GPT 增量审查 FIX-R5** ⏳（下一步）
+9. (可能) Codex 限域 READ_ONLY 审计（两阶段删除、storage snapshot、Vercel Preview）⏳
+10. 配置独立 Preview namespace/prefix，执行真实 CloudBase 冒烟测试 ⏳
+11. Preview 通过后解除 `readyForPreview=false` ⏳
+12. 合并 main，恢复 Production Cron 与持久化验证 ⏳
+13. 关闭 PERSIST-001、PROD-CRON-VERIFY、ROUTING-001，完成项目归档 ⏳
+
+### 范围遵守（本轮 docs + code 落盘）
+
+- ✅ 仅修改 FIX-R5 范围内文件（9 production/test files + 2 new evidence/review + 1 new report + state files）
+- ✅ 不修改公开 persistence interface（duck-typed 方法绕过冻结接口）
+- ✅ 不创建 PR
+- ✅ 不授权 Preview 或 Production
+- ✅ 不推进任务到 `completed`
+- ✅ 不激活下一任务
+- ✅ 不自行降低 GPT 阻断缺陷严重度
+- ✅ `readyForPreview` 保持 `false`
+- ✅ `@cloudbase/node-sdk` 未升级
+- ✅ 无真实凭据/网络/部署/CloudBase 写入
+
+### GPT 下一步（FIX-R5 增量审查）
+
+GPT 在新窗口启动后，按 `docs/lumen-v2/prompts/NEW-WINDOW-GPT.md` 模板加载状态，然后：
+
+1. 读取本文件 + `docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TRAE-REPORT.md` + `docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r5-gate-results.md` + `docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-GPT-REVIEW.md`
+2. 审查 `342541d` → R5 HEAD diff（11 files）
+3. 核查 8 门禁真实输出（client 194 + server 410 = 604 root tests passed，+11 vs R4）
+4. 核查 RF-R5-01：两阶段删除（Phase A 独立提交 tx → Phase B 稳定快照）
+5. 核查 RF-R5-02：T1-T5 确定性交错测试（OCC + preCommitHook）
+6. 核查 RF-R5-03：VERCEL_ENV 判定 + fail-closed
+7. 核查 RF-R5-04：R4 证据修正 + R5 证据完整
+8. 核查 AC-09, 10, 12, 14, 22, 27, 29 现在为 PASS（R4 FAILs）
+9. 核查约束遵守：
+   - 公开 persistence interface 未修改
+   - `@cloudbase/node-sdk` 未升级
+   - 无真实凭据/网络/部署/CloudBase 写入
+   - `readyForPreview` 保持 false
+   - 未合并 main
+10. 给出验收结论：
+    - 通过 → 状态推进为 `gpt_evidence_review_pass`，授权配置 Preview namespace/prefix 或限域 Codex READ_ONLY 审计
+    - 驳回 → 生成 FIX-R6 修复包，状态改为 `changes_requested / nextActor=trae`
+
+### Codex 审计范围（如果 R5 通过）
+
+GPT 裁决原文："FIX-R5 完成并通过 GPT 增量审查后，建议再进行一次严格限域的 Codex READ_ONLY audit，只检查：
+
+1. 两阶段删除屏障与 child create 冲突语义
+2. storage cleanup snapshot 一致性
+3. Vercel Preview 判定和 fail-closed 路径
+
+不需要重新审计已经基本闭合的 Workstream A-D 和 G。"
+
+---
+
+## 历史状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 实施完成，等待 GPT 验收 → GPT 裁决 FIX_REQUIRED）
 
 - 日期：2026-07-22
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TX-AWARE-ATOMICITY`（子任务，Codex 审计后 Trae 实施）

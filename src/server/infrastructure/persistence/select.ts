@@ -75,20 +75,25 @@ function parseBackend(value: string | undefined): PersistenceBackend {
 }
 
 // ---------------------------------------------------------------------------
-// LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 (P1-03): Preview production
+// LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R5 (P1-04 fix): Preview production
 // isolation gate.
 //
-// In Preview deployments (VERCEL=1 but NODE_ENV != production, or
-// CLOUDBASE_PREVIEW_MODE=1), the selector must verify that the Preview data
-// namespace and storage prefix are isolated from Production BEFORE the
-// CloudBase SDK is initialised. This prevents a misconfigured Preview
-// deployment from accidentally reading or writing Production data.
+// In Preview deployments (VERCEL_ENV=preview, or CLOUDBASE_PREVIEW_MODE=1),
+// the selector must verify that the Preview data namespace and storage prefix
+// are isolated from Production BEFORE the CloudBase SDK is initialised. This
+// prevents a misconfigured Preview deployment from accidentally reading or
+// writing Production data.
 //
 // The gate is a PURE function — no SDK imports, no network, no side effects.
 // It runs BEFORE createCloudBaseNoSqlPersistence() so the SDK is never
 // initialised against Production data when Preview == Production.
 //
-// Production runtime (NODE_ENV=production) is NEVER blocked by this gate.
+// FIX-R5: Preview is now identified by Vercel's authoritative VERCEL_ENV
+// system variable (preview / production / development), NOT by NODE_ENV.
+// This fixes P1-04: a Vercel Preview deployment with NODE_ENV=production
+// was previously misidentified as Production and bypassed the gate.
+//
+// Production runtime (VERCEL_ENV=production) is NEVER blocked by this gate.
 // ---------------------------------------------------------------------------
 
 export interface PreviewIsolationOptions {
@@ -161,16 +166,35 @@ export function validatePreviewIsolation(opts: PreviewIsolationOptions): void {
 
 /**
  * PURE: Returns true when the environment is a Preview deployment (not
- * Production). Preview is distinguished by:
- *   - VERCEL=1 AND NODE_ENV != 'production'  (Vercel Preview deployment)
- *   - OR CLOUDBASE_PREVIEW_MODE=1            (explicit opt-in for local tests)
+ * Production). Preview is distinguished by Vercel's authoritative
+ * VERCEL_ENV system variable:
+ *   - VERCEL_ENV=preview                    (Vercel Preview deployment)
+ *   - OR CLOUDBASE_PREVIEW_MODE=1           (explicit opt-in for local tests)
  *
- * Production (NODE_ENV=production) always returns false — the gate must
+ * FIX-R5 (P1-04 fix): Previously used VERCEL=1 && NODE_ENV!='production',
+ * which incorrectly classified a Preview deployment with NODE_ENV=production
+ * as Production. Vercel sets VERCEL_ENV=preview for Preview deployments
+ * regardless of NODE_ENV — this is the authoritative signal.
+ *
+ * When VERCEL=1 but VERCEL_ENV is missing or has an unknown value, this
+ * function throws VERCEL_ENV_REQUIRED_OR_INVALID to fail closed — we never
+ * silently treat an ambiguous Vercel deployment as Production.
+ *
+ * Production (VERCEL_ENV=production) always returns false — the gate must
  * never block Production runtime (AC-28).
  */
 export function isPreviewEnvironment(env: EnvSource): boolean {
   if (env.CLOUDBASE_PREVIEW_MODE === '1') return true;
-  return env.VERCEL === '1' && env.NODE_ENV !== 'production';
+  if (env.VERCEL === '1') {
+    if (env.VERCEL_ENV === 'preview') return true;
+    if (env.VERCEL_ENV === 'production') return false;
+    // VERCEL=1 but VERCEL_ENV is missing or unknown — fail closed.
+    throw new Error(
+      `VERCEL_ENV_REQUIRED_OR_INVALID: VERCEL=1 requires VERCEL_ENV=preview|production, ` +
+      `got: ${env.VERCEL_ENV ?? 'undefined'}. Refusing to guess deployment environment.`
+    );
+  }
+  return false;
 }
 
 /**
@@ -179,7 +203,7 @@ export function isPreviewEnvironment(env: EnvSource): boolean {
  * createCloudBaseNoSqlPersistence() so the SDK is never initialised against
  * Production data when Preview == Production (AC-22, AC-27).
  *
- * Production runtime (NODE_ENV=production) is never blocked.
+ * Production runtime (VERCEL_ENV=production) is never blocked.
  */
 function runPreviewIsolationGateIfPreview(
   env: EnvSource,
@@ -213,14 +237,16 @@ export interface SelectPersistenceOptions {
  * allowed literals.
  * Throws `CLOUDBASE_CONFIG_REQUIRED` when CloudBase env vars are missing.
  *
- * FIX-R4 Preview isolation gate (AC-22 … AC-29): in Preview environments
- * (VERCEL=1 without NODE_ENV=production, or CLOUDBASE_PREVIEW_MODE=1),
+ * FIX-R5 Preview isolation gate (AC-22 … AC-29): in Preview environments
+ * (VERCEL_ENV=preview, or CLOUDBASE_PREVIEW_MODE=1),
  * BEFORE the CloudBase NoSQL SDK is initialised, the selector verifies that
  * the Preview data namespace and storage prefix are isolated from
  * Production. Throws `PRODUCTION_NAMESPACE_REQUIRED`,
  * `PREVIEW_PRODUCTION_NAMESPACE_EQUAL`, `PREVIEW_STORAGE_PREFIX_EQUAL`,
  * `PREVIEW_NAMESPACE_CONTAINS_PROD`, or `PREVIEW_STORAGE_PREFIX_CONTAINS_PROD`.
- * Production runtime (NODE_ENV=production) is never blocked by this gate.
+ * When VERCEL=1 but VERCEL_ENV is missing/unknown, throws
+ * `VERCEL_ENV_REQUIRED_OR_INVALID` (fail closed).
+ * Production runtime (VERCEL_ENV=production) is never blocked by this gate.
  */
 export function selectPersistenceByEnv(
   env: EnvSource = process.env,

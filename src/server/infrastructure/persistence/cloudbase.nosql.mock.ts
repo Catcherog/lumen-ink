@@ -324,6 +324,22 @@ export interface MockCloudBaseState {
    * Used for exists() and error-path testing.
    */
   remoteObjectMissing: Set<string>;
+  /**
+   * FIX-R5: When true, transactions track document reads and check for
+   * conflicts on commit (optimistic concurrency control). If a document
+   * read during the transaction has been modified in committed state by
+   * another transaction, the commit throws DATABASE_TRANSACTION_CONFLICT.
+   * Used by T1 deterministic interleaving test.
+   */
+  occReadTracking: boolean;
+  /**
+   * FIX-R5: Optional async hook called by the mock just before applying
+   * the transaction's write log on commit. Tests use this to inject
+   * committed-state changes (e.g., a tombstone from Phase A) between
+   * a child transaction's read and its commit, simulating concurrent
+   * interleaving without real threads.
+   */
+  preCommitHook?: () => Promise<void>;
 }
 
 export function createMockCloudBaseState(envId: string): MockCloudBaseState {
@@ -340,6 +356,8 @@ export function createMockCloudBaseState(envId: string): MockCloudBaseState {
     deleteFileStatuses: {},
     getTempFileURLStatuses: {},
     remoteObjectMissing: new Set(),
+    occReadTracking: false,
+    preCommitHook: undefined,
   };
 }
 
@@ -618,7 +636,8 @@ function createCollectionHandle(
 function createTransactionCollectionHandle(
   state: MockCloudBaseState,
   collectionName: string,
-  txLog: TransactionOp[]
+  txLog: TransactionOp[],
+  readSet?: Map<string, { collectionName: string; id: string; snapshot: MockDocument | null }>
 ): MockTransactionCollectionHandle {
   return {
     async add(data: Record<string, unknown>): Promise<{ id: string }> {
@@ -642,6 +661,17 @@ function createTransactionCollectionHandle(
          */
         async get() {
           const doc = ensureDoc(state, collectionName, id, txLog);
+          // FIX-R5: OCC read tracking — record the committed-state
+          // snapshot (NOT the txLog overlay) so commit can detect if
+          // another transaction modified this document.
+          if (readSet && state.occReadTracking) {
+            const committedDoc = getCollection(state, collectionName).docs.get(id) ?? null;
+            readSet.set(`${collectionName}:${id}`, {
+              collectionName,
+              id,
+              snapshot: committedDoc ? { ...committedDoc } : null,
+            });
+          }
           return { data: doc };
         },
         async update(data: Record<string, unknown>) {
@@ -701,9 +731,12 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
       let lastError: unknown;
       for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
         const txLog: TransactionOp[] = [];
+        // FIX-R5: OCC read tracking — records documents read during this
+        // transaction so commit can detect conflicts.
+        const readSet = new Map<string, { collectionName: string; id: string; snapshot: MockDocument | null }>();
         const txHandle: MockTransactionHandle = {
           collection(name: string) {
-            return createTransactionCollectionHandle(state, name, txLog);
+            return createTransactionCollectionHandle(state, name, txLog, readSet);
           },
           async commit() {
             // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
@@ -740,6 +773,32 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
             if (state.retryOnConflict) {
               state.retryOnConflict = false;
               throw new Error('DATABASE_TRANSACTION_CONFLICT: injected by mock');
+            }
+            // FIX-R5: preCommitHook — allows tests to inject committed-
+            // state changes between a transaction's reads and its commit.
+            // This simulates concurrent interleaving without real threads.
+            if (state.preCommitHook) {
+              await state.preCommitHook();
+              state.preCommitHook = undefined; // consume the hook
+            }
+            // FIX-R5: OCC conflict detection — if any document read
+            // during this transaction has been modified in committed
+            // state (by the preCommitHook or another committed
+            // transaction), throw DATABASE_TRANSACTION_CONFLICT.
+            if (state.occReadTracking) {
+              for (const [key, entry] of readSet) {
+                const coll = getCollection(state, entry.collectionName);
+                const currentDoc = coll.docs.get(entry.id) ?? null;
+                const snapshotJson = entry.snapshot ? JSON.stringify(entry.snapshot) : 'null';
+                const currentJson = currentDoc ? JSON.stringify(currentDoc) : 'null';
+                if (snapshotJson !== currentJson) {
+                  throw new Error(
+                    `DATABASE_TRANSACTION_CONFLICT: document ${key} was modified ` +
+                    `by another transaction after this transaction read it. ` +
+                    `Snapshot: ${snapshotJson.slice(0, 100)}, Current: ${currentJson.slice(0, 100)}`
+                  );
+                }
+              }
             }
             // Apply txLog to committed state
             for (const op of txLog) {

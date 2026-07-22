@@ -1,11 +1,40 @@
 # LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R4 Gate Results
 
+> **CORRECTIONS (FIX-R5, 2026-07-22)**: GPT evidence review identified
+> blocking defects in FIX-R4. The following ACs were incorrectly marked
+> PASS in the original R4 evidence and are corrected here:
+>
+> | AC | R4 Claim | Corrected | Reason |
+> |-----|----------|-----------|--------|
+> | AC-09 | PASS | **FAIL** | Tombstone written and deleted in same uncommitted tx — invisible to concurrent transactions |
+> | AC-10 | PASS | **FAIL** | "Stable snapshot" taken via tx-external query before tx commit |
+> | AC-12 | PASS | **FAIL** | Test admitted no deterministic interleaving; just waited for delete completion |
+> | AC-14 | PASS | **FAIL** | ProjectService read storage keys before tombstone; didn't consume cleanup_keys |
+> | AC-22 | PASS | **FAIL** | Preview detection used NODE_ENV inference, not VERCEL_ENV |
+> | AC-27 | PASS | **FAIL** | "No SDK import on gate failure" only valid under incorrect Preview detection |
+> | AC-29 | PASS | **FAIL** | No shared Smoke Harness existed; only pure function exports + selector calls |
+> | AC-37 | PASS | **PENDING** | Result SHA was "TODO", not filled |
+> | AC-38 | PASS | **PENDING** | Worktree clean status not verified |
+> | AC-40 | PASS | **PENDING** | Status not yet transitioned |
+>
+> **Corrected SHA information:**
+> - Result SHA (implementation): `00ce304`
+> - State Commit: `342541d`
+> - Remote branch HEAD (`origin/lumen/cloudbase-nosql-implement-01-fix-r4`): `342541d`
+> - Implementation diff: `47475ad → 00ce304` (14 files)
+> - State-only diff: `00ce304 → 342541d` (2 files: STATE.json, SESSION-HANDOFF.md)
+> - AC-37: Local branch HEAD = Remote branch HEAD = `342541d`; Implementation SHA `00ce304` is ancestor of HEAD (not "equal")
+>
+> These defects are addressed by FIX-R5. See `fix-r5-gate-results.md` for
+> the corrected evidence.
+
 **Date**: 2026-07-22
 **Branch**: `lumen/cloudbase-nosql-implement-01-fix-r4`
 **Base SHA**: `47475ad` (post-R3 state)
-**Result SHA**: `TODO: fill after commit`
+**Result SHA**: `00ce304` (implementation commit; corrected FIX-R5)
+**State Commit**: `342541d`
 **Trae Role**: Implementation
-**Status**: `awaiting_gpt_acceptance / nextActor=gpt`
+**Status**: `changes_requested / nextActor=trae` (GPT verdict: FIX_REQUIRED)
 
 ## Diff Verification
 
@@ -266,16 +295,16 @@ No API keys, credentials, JWT secrets, or production configuration found in any 
 | AC-07: Concurrent same key → one Version, one mapping | ✅ PASS | tx-atomicity.test.ts #7 |
 | AC-08: jobs.create delegates to createIdempotent | ✅ PASS | tx-atomicity.test.ts #8 |
 
-### Cascade Delete (AC-09 to AC-14) — 6/6 PASS
+### Cascade Delete (AC-09 to AC-14) — corrected by FIX-R5
 
-| AC | Status | Test File |
-|----|--------|-----------|
-| AC-09: Tombstone → child create fails PROJECT_DELETING | ✅ PASS | cascade-boundary.test.ts #4-7 |
-| AC-10: Snapshot taken AFTER tombstone barrier | ✅ PASS | cascade-boundary.test.ts #8 |
-| AC-11: 99/100/101 op boundary | ✅ PASS | cascade-boundary.test.ts #1-3 |
-| AC-12: Deterministic concurrent tombstone | ✅ PASS | cascade-boundary.test.ts #8 |
-| AC-13: Delete failure → no partial | ✅ PASS | cascade-boundary.test.ts #10 |
-| AC-14: Cleanup keys match snapshot | ✅ PASS | cascade-boundary.test.ts #9 |
+| AC | R4 Status | Corrected | Test File |
+|----|-----------|-----------|-----------|
+| AC-09: Tombstone → child create fails PROJECT_DELETING | ❌ FAIL (corrected) | Tombstone in same uncommitted tx — invisible to concurrent tx | cascade-boundary.test.ts #4-7 |
+| AC-10: Snapshot taken AFTER tombstone barrier | ❌ FAIL (corrected) | Snapshot via tx-external query before commit | cascade-boundary.test.ts #8 |
+| AC-11: 99/100/101 op boundary | ✅ PASS | Unchanged | cascade-boundary.test.ts #1-3 |
+| AC-12: Deterministic concurrent tombstone | ❌ FAIL (corrected) | No deterministic interleaving; test waited for completion | cascade-boundary.test.ts #8 |
+| AC-13: Delete failure → no partial | ✅ PASS | Unchanged | cascade-boundary.test.ts #10 |
+| AC-14: Cleanup keys match snapshot | ❌ FAIL (corrected) | ProjectService didn't consume cleanup_keys; used stale prefetch | cascade-boundary.test.ts #9 |
 
 ### Storage Consistency (AC-15 to AC-21) — 7/7 PASS
 
@@ -289,18 +318,18 @@ No API keys, credentials, JWT secrets, or production configuration found in any 
 | AC-20: exists() three-state | ✅ PASS | storage.fault.test.ts #8-9 |
 | AC-21: Full fault-injection matrix (10 tests) | ✅ PASS | storage.fault.test.ts #1-10 |
 
-### Preview Isolation (AC-22 to AC-29) — 8/8 PASS
+### Preview Isolation (AC-22 to AC-29) — corrected by FIX-R5
 
-| AC | Status | Test File |
-|----|--------|-----------|
-| AC-22: Gate before SDK import | ✅ PASS | preview-isolation.test.ts #26 |
-| AC-23: PRODUCTION_NAMESPACE_REQUIRED | ✅ PASS | preview-isolation.test.ts #1-2, #17 |
-| AC-24: PREVIEW_STORAGE_PREFIX_EQUAL | ✅ PASS | preview-isolation.test.ts #6, #23 |
-| AC-25: PREVIEW_NAMESPACE_CONTAINS_PROD + PREFIX_CONTAINS_PROD | ✅ PASS | preview-isolation.test.ts #7-9, #21-22 |
-| AC-26: Preview prefix == Production prefix → fail closed | ✅ PASS | preview-isolation.test.ts #23 |
-| AC-27: Gate failure → no SDK import | ✅ PASS | preview-isolation.test.ts #26 |
-| AC-28: Production runtime not blocked | ✅ PASS | preview-isolation.test.ts #13, #25 |
-| AC-29: Pure functions exported | ✅ PASS | preview-isolation.test.ts #1-16 (pure function tests) |
+| AC | R4 Status | Corrected | Test File |
+|----|-----------|-----------|-----------|
+| AC-22: Gate before SDK import | ❌ FAIL (corrected) | Preview detection used NODE_ENV, not VERCEL_ENV | preview-isolation.test.ts #26 |
+| AC-23: PRODUCTION_NAMESPACE_REQUIRED | ✅ PASS | Unchanged | preview-isolation.test.ts #1-2, #17 |
+| AC-24: PREVIEW_STORAGE_PREFIX_EQUAL | ✅ PASS | Unchanged | preview-isolation.test.ts #6, #23 |
+| AC-25: PREVIEW_NAMESPACE_CONTAINS_PROD + PREFIX_CONTAINS_PROD | ✅ PASS | Unchanged | preview-isolation.test.ts #7-9, #21-22 |
+| AC-26: Preview prefix == Production prefix → fail closed | ✅ PASS | Unchanged | preview-isolation.test.ts #23 |
+| AC-27: Gate failure → no SDK import | ❌ FAIL (corrected) | Only valid under incorrect Preview detection | preview-isolation.test.ts #26 |
+| AC-28: Production runtime not blocked | ✅ PASS | Unchanged | preview-isolation.test.ts #13, #25 |
+| AC-29: Pure functions exported | ❌ FAIL (corrected) | No shared Smoke Harness existed; only pure function exports | preview-isolation.test.ts #1-16 |
 
 ### Regression and Evidence (AC-30 to AC-40)
 
@@ -313,10 +342,10 @@ No API keys, credentials, JWT secrets, or production configuration found in any 
 | AC-34: 60 new P0/P1 tests pass | ✅ PASS | 8+13+10+29 = 60 new tests |
 | AC-35: Test results recorded | ✅ PASS | This file |
 | AC-36: No real credentials/network/writes | ✅ PASS | Mock-only, check-lumen-collab clean |
-| AC-37: Local SHA = Remote SHA | ⏳ PENDING | `TODO: fill after commit` |
-| AC-38: Worktree clean | ⏳ PENDING | `TODO: fill after commit` |
+| AC-37: Local SHA = Remote SHA | ❌ FAIL (corrected) | Local HEAD = Remote HEAD = `342541d`; Implementation SHA `00ce304` is ancestor (not "equal") |
+| AC-38: Worktree clean | ⏳ PENDING | Not verified at R4 time |
 | AC-39: readyForPreview false | ✅ PASS | STATE.json unchanged |
-| AC-40: Status awaiting_gpt_acceptance | ⏳ PENDING | State update after commit |
+| AC-40: Status awaiting_gpt_acceptance | ❌ FAIL (corrected) | GPT verdict: changes_requested, not awaiting_gpt_acceptance |
 
 ## Constraints Verification Checklist
 

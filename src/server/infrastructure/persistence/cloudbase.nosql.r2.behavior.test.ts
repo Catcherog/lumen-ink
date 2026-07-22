@@ -180,6 +180,8 @@ describe('NOSQL-R2-08 scenario 3: concurrent Job idempotency -> only one Job', (
 
   it('two concurrent createIdempotent calls with same key -> one Job, one idempotency record', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const jobA = makeJob('job-a', 'p1', 'shared-key');
     const jobB = makeJob('job-b', 'p1', 'shared-key');
 
@@ -213,6 +215,9 @@ describe('NOSQL-R2-08 scenario 3: concurrent Job idempotency -> only one Job', (
 
   it('different projects with same key -> two Jobs (projectId-scoped uniqueness)', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
+    await deps.projects.create(makeProject('p2'));
     const jobA = makeJob('job-a', 'p1', 'shared-key');
     const jobB = makeJob('job-b', 'p2', 'shared-key');
 
@@ -237,6 +242,8 @@ describe('NOSQL-R2-08 scenario 4: concurrent lease claim -> only one worker wins
 
   it('two workers claiming the same job -> only one wins', async () => {
     const { deps } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
 
@@ -256,6 +263,8 @@ describe('NOSQL-R2-08 scenario 4: concurrent lease claim -> only one worker wins
 
   it('second claim after first lease expires -> second worker wins', async () => {
     const { deps } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
 
@@ -288,6 +297,8 @@ describe('NOSQL-R2-08 scenario 5: terminal Job updateIfClaimed -> null', () => {
 
   it('updateIfClaimed on a terminal Job returns null', async () => {
     const { deps } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
 
@@ -306,6 +317,8 @@ describe('NOSQL-R2-08 scenario 5: terminal Job updateIfClaimed -> null', () => {
 
   it('updateIfActive on a terminal Job returns null', async () => {
     const { deps } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     await deps.jobs.create(job);
     await deps.jobs.update('job-1', { status: 'cancelled' });
@@ -325,6 +338,8 @@ describe('NOSQL-R2-08 scenario 6: JobPatch null -> command.remove()', () => {
 
   it('patching workerId=null removes the field from the document', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     job.workerId = 'w1';
     job.leaseToken = 'tok-1';
@@ -446,6 +461,8 @@ describe('NOSQL-R2-08 scenario 9: JobPatch uses real buildUpdateFromPatch', () =
 
   it('update writes command.set / command.remove operators (not raw $set/$unset)', async () => {
     const { deps, state } = setup;
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const job = makeJob('job-1', 'p1');
     job.workerId = 'w1';
     await deps.jobs.create(job);
@@ -579,6 +596,8 @@ describe('FIX-R3 AC-10: concurrent idempotency — both transactions read before
 
   it('adapter createIdempotent handles concurrent E11000 -> one Job, one idem, zero orphans', async () => {
     const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
+    // FIX-R5: assertProjectWritable checks project existence — create first.
+    await deps.projects.create(makeProject('p1'));
     const jobA = makeJob('job-a', 'p1', 'shared-key');
     const jobB = makeJob('job-b', 'p1', 'shared-key');
 
@@ -603,8 +622,9 @@ describe('FIX-R3 AC-05: deleteCascade 100-op limit fail closed', () => {
   it('project with >100 child docs -> CLOUDBASE_TX_LIMIT_EXCEEDED, no partial deletion', async () => {
     const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
 
-    // Create a project with 100 assets (each counts as 1 doc in deleteCascade)
-    // + 1 project doc = 101 ops > 100 limit.
+    // Create a project with 100 assets. FIX-R5: op count is N + 3
+    // (cleanup keys add + project remove + tombstone remove; Phase A
+    // tombstone is a separate tx). 100 + 3 = 103 > 100 limit.
     await deps.projects.create(makeProject('p-big'));
     for (let i = 0; i < 100; i++) {
       await deps.assets.create(makeAsset(`a${i}`, 'p-big', `key-${i}`));
@@ -624,10 +644,11 @@ describe('FIX-R3 AC-05: deleteCascade 100-op limit fail closed', () => {
   it('project with exactly 100 child docs -> succeeds (at the limit)', async () => {
     const { deps, state } = await makeReadyDeps(PROD_OPTIONS);
 
-    // FIX-R4: op count is now N + 4 (tombstone add + cleanup keys add +
-    // project remove + tombstone remove). 96 assets + 4 = 100 ops exactly.
+    // FIX-R5: op count is N + 3 (cleanup keys add + project remove +
+    // tombstone remove; Phase A tombstone is a separate tx).
+    // 97 assets + 3 = 100 ops exactly (at the limit).
     await deps.projects.create(makeProject('p-limit'));
-    for (let i = 0; i < 96; i++) {
+    for (let i = 0; i < 97; i++) {
       await deps.assets.create(makeAsset(`a${i}`, 'p-limit', `key-${i}`));
     }
 
@@ -674,7 +695,7 @@ describe('FIX-R3 AC-06/07/08: Storage boundary on deleteProject', () => {
     const deleteSpy = vi.spyOn(deps.objects, 'delete');
 
     // Make deleteCascade throw by exceeding the 100-op limit.
-    // Add 98 more assets (3 + 98 = 101 child docs + 1 project = 102 ops).
+    // FIX-R5: op count is N + 3. 3 + 98 = 101 child docs + 3 = 104 > 100.
     for (let i = 3; i < 101; i++) {
       await deps.assets.create(makeAsset(`a${i}`, projectId, `key-${i}`));
     }
