@@ -150,7 +150,7 @@
     "status": "awaiting_gpt_acceptance",
     "nextActor": "gpt",
     "riskLevel": "HIGH",
-    "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TRAE-REPORT.md",
+    "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md",
     "pocEvidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md",
     "completionPackage": "C:\\Users\\Catcher\\Desktop\\协作文件夹\\picture-edit-collab-completion.md",
     "envId": "zeh-d7glqc07me2155c61",
@@ -462,8 +462,49 @@
     "fixR7GptReviewPending": true,
     "fixR7CodexStatus": "REQUIRED_AFTER_GPT_REVIEW_PASS",
     "fixR7CodexScope": "cleanup ledger crash-window + partial-failure; cleanup worker concurrency + read-modify-write semantics; tombstone + child create concurrency invariants; Preview Smoke Harness production reuse (read-only, no modifications)",
-    "lastUpdatedAt": "2026-07-22",
+    "fixR8Status": "awaiting_gpt_acceptance",
+    "fixR8NextActor": "gpt",
+    "fixR8TaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-CONCURRENCY-HARDENING",
+    "fixR8RiskLevel": "HIGH",
+    "fixR8BaseSha": "44add08",
+    "fixR8ImplementationSha": "0439924",
+    "fixR8ImplementationShaFull": "043992435e95803fd1f592a7af48abdf95c3d04f",
+    "fixR8Branch": "lumen/cloudbase-nosql-implement-01-fix-r8",
+    "fixR8WorktreesBase": "d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r8",
+    "fixR8GateResult": "Server tsc exit 0 + 429 server tests PASS + check-lumen-collab PASS (client unchanged at 194; +13 server tests vs R7: 8 cascade-boundary + 5 preview-isolation)",
+    "fixR8TraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md",
+    "fixR8Evidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r8-gate-results.md",
+    "fixR8Scope": "AC-01: deleteCascade Phase B checks existing ledger before writing (OCC retry preserves first call's snapshot). AC-02: removeCleanupKeys uses runTransaction() for atomic read-modify-write (no key resurrection). AC-03: objects.delete/exists throw METADATA_MISSING (distinct from OBJECT_NOT_FOUND); ProjectService treats METADATA_MISSING as probable success with warning. AC-04: validatePreviewIsolation requires PRODUCTION_STORAGE_PREFIX (fail-closed). 13 new tests + 1 updated test (AC-R6-03 for METADATA_MISSING semantic).",
+    "fixR8FilesChanged": [
+      "src/server/infrastructure/persistence/cloudbase.nosql.ts (modified: AC-01 ledger existence check; AC-02 removeCleanupKeys runTransaction; AC-03 METADATA_MISSING in objects.delete/exists)",
+      "src/server/services/ProjectService.ts (modified: AC-03 deleteProject handles METADATA_MISSING distinctly from OBJECT_NOT_FOUND)",
+      "src/server/infrastructure/persistence/select.ts (modified: AC-04 PRODUCTION_STORAGE_PREFIX_REQUIRED check)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.cascade-boundary.test.ts (modified: +8 NEW tests AC-01/02/03; AC-R6-03 updated for METADATA_MISSING)",
+      "src/server/infrastructure/persistence/select.preview-isolation.test.ts (modified: +5 NEW tests AC-04)",
+      "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md (new: FIX-R8 Trae Report)",
+      "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r8-gate-results.md (new: FIX-R8 gate evidence)",
+      "docs/lumen-v2/state/STATE.json (modified: fixR8 fields added; status transitioned to awaiting_gpt_acceptance/nextActor=gpt)",
+      "docs/lumen-v2/state/SESSION-HANDOFF.md (modified: FIX-R8 section added)"
+    ],
+    "fixR8StopConditions": "readyForPreview=false unchanged; no merge to main; no real CloudBase writes; PersistenceDependencies interface unchanged; no new services",
+    "fixR8AcCoverage": {
+      "AC-01": "PASS (2 NEW tests: concurrent Phase B preserves first call's ledger via OCC retry; ledger not overwritten when already present)",
+      "AC-02": "PASS (3 NEW tests: concurrent removeCleanupKeys no resurrection via OCC retry; returns [] when ledger already deleted; sequential batches)",
+      "AC-03": "PASS (3 NEW tests + 1 updated: objects.delete throws METADATA_MISSING; objects.exists logs distinctly; ProjectService treats as probable success with warning; AC-R6-03 updated)",
+      "AC-04": "PASS (5 NEW tests: empty/whitespace/undefined productionStoragePrefix throws PRODUCTION_STORAGE_PREFIX_REQUIRED; integration tests for missing/empty env var)",
+      "AC-05": "PASS (R7 crash-window test AC-R6-04 remains PASS; all 33 cascade-boundary tests PASS)",
+      "AC-06": "PASS (429/429 server tests + tsc exit 0 + check-lumen-collab exit 0)"
+    },
+    "fixR8RemainingRisks": [
+      "Mock-only concurrency evidence: OCC retry is Mock-simulated via occReadTracking + preCommitHook; real CloudBase OCC semantics may differ slightly, but production code path (runTransaction + read-before-write) is correct regardless",
+      "METADATA_MISSING is best-effort for crash-window: treating missing metadata as probable success is correct recovery semantic, but remote deletion NOT confirmed; future Storage audit tool could verify",
+      "Codex READ_ONLY audit scope: this round addresses 4 specific audit findings; follow-up Codex audit may be required to verify fixes"
+    ],
+    "fixR8GptReviewPending": true,
+    "fixR8CodexStatus": "REQUIRED_AFTER_GPT_REVIEW_PASS",
+    "fixR8CodexScope": "verify FIX-R8 concurrency hardening fixes: deleteCascade ledger ownership under concurrent Phase B; removeCleanupKeys runTransaction atomicity; METADATA_MISSING vs OBJECT_NOT_FOUND semantic distinction; PRODUCTION_STORAGE_PREFIX_REQUIRED fail-closed (read-only, no modifications)",
+    "lastUpdatedAt": "2026-07-23",
     "lastUpdatedBy": "trae",
-    "lastUpdatedAction": "FIX-R7 implementation complete: 3 RFs (NEW real service-path crash-window test closing AC-R6-04, test classification corrections across all evidence files, re-ran 9 gates). 1 modified test file + 2 new evidence files + 2 modified state files. NO PRODUCTION CODE CHANGES. 9/9 gates PASS (610 root tests, +1 vs R6). status transitioned to awaiting_gpt_acceptance/nextActor=gpt; readyForPreview remains false; Codex REQUIRED_AFTER_GPT_REVIEW_PASS (deferred until GPT accepts FIX-R7)"
+    "lastUpdatedAction": "FIX-R8 implementation complete: 4 ACs (deleteCascade concurrent ledger ownership, removeCleanupKeys atomicity via runTransaction, METADATA_MISSING semantic distinction, PRODUCTION_STORAGE_PREFIX_REQUIRED validation). 3 production code files + 2 test files + 1 new Trae Report + 1 new gate evidence + 2 modified state files. 13 new tests + 1 updated test. 429/429 server tests PASS + tsc exit 0 + check-lumen-collab PASS. status transitioned to awaiting_gpt_acceptance/nextActor=gpt; readyForPreview remains false; Codex REQUIRED_AFTER_GPT_REVIEW_PASS (deferred until GPT accepts FIX-R8)"
   }
 }

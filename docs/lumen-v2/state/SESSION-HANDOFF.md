@@ -1,12 +1,156 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R7 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+## 当前状态（2026-07-23，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R8 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+
+- 日期：2026-07-23
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-CONCURRENCY-HARDENING`（子任务，Codex READ_ONLY 审计发现 cleanup concurrency 与 fail-open 风险后 Trae 实施）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Route**：R7 → Codex READ_ONLY 审计发现 → Trae FIX-R8 并发加固 → GPT 证据复审 → Codex 限域审计
+- **Base SHA**：`44add08`（FIX-R7 gate-evidence SHA backfill，FIX-R8 worktree 创建时的分支 HEAD）
+- **Implementation SHA**：`0439924`（full: `043992435e95803fd1f592a7af48abdf95c3d04f`）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r8`
+- **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r8`
+- **Codex READ_ONLY 审计发现**：4 项 cleanup concurrency 与 fail-open 风险（见下方 FIX-R8 实施核心结论）
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r8-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r8-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
+- **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT 通过 R8 后必须进行一次 Codex READ_ONLY 限域审计验证修复）
+
+### Codex READ_ONLY 审计发现摘要（4 项 concurrency/fail-open 风险）
+
+| ID | 风险 | AC | 描述 |
+|----|------|----|------|
+| 1 | deleteProject concurrent ownership | AC-01 | deleteCascade Phase B 无条件 set() ledger，并发调用会覆盖首调 ledger |
+| 2 | removeCleanupKeys atomicity | AC-02 | 非原子 read→compute→update，并发 worker 会 resurrect 已完成 keys |
+| 3 | OBJECT_NOT_FOUND semantic distinction | AC-03 | metadata 缺失与远端确认删除使用同一错误码，fail-open 风险 |
+| 4 | Preview production storage prefix | AC-04 | validatePreviewIsolation 未检查 productionStoragePrefix，缺失时 fail-open |
+
+### FIX-R8 实施核心结论（4 ACs + 13 新测试 + 1 更新测试）
+
+1. **AC-01 — deleteCascade 并发 ledger 所有权**：
+   - Phase B 写 ledger 前检查是否已存在；已存在则保留首调快照
+   - 事务内 OCC read tracking：并发 Phase B 提交后，次调 commit 检测冲突 → 重试 → 重读非 null ledger → 跳过写入
+   - **2 个新测试**验证并发 Phase B 保留首调 ledger
+
+2. **AC-02 — removeCleanupKeys 原子性**：
+   - 替换非原子 read→compute→update 为 `getDb().runTransaction()`
+   - 并发 worker：OCC 冲突 → 重试 → 重读 → 基于最新快照计算 remaining → 无 key resurrection
+   - **3 个新测试**验证并发无 resurrection、ledger 已删除时返回 []、顺序批次
+
+3. **AC-03 — OBJECT_NOT_FOUND 语义区分**：
+   - `objects.delete()` metadata 缺失时抛 `METADATA_MISSING`（非 `OBJECT_NOT_FOUND`）
+   - `objects.exists()` metadata 缺失返回 false 但记录 `METADATA_MISSING` + "remote NOT confirmed deleted"
+   - `ProjectService.deleteProject()` 区分处理：`OBJECT_NOT_FOUND` = SDK 确认幂等成功；`METADATA_MISSING` = 可能成功（crash-window 恢复）但显式 warn
+   - **3 个新测试 + 1 更新测试**（AC-R6-03 反映新 METADATA_MISSING 语义）
+
+4. **AC-04 — Preview 生产 Storage Prefix 验证**：
+   - `validatePreviewIsolation()` 新增 `PRODUCTION_STORAGE_PREFIX_REQUIRED` 检查（平行于 `productionNamespace` 检查）
+   - 缺失/空/空白 → fail closed
+   - **5 个新测试**（3 纯函数 + 2 集成）验证 empty/whitespace/undefined + missing/empty env var
+
+### 门禁结果（FIX-R8）
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Server tsc | PASS | 0 errors |
+| 2 | Server tests | PASS | 429 tests / 34 files |
+| 3 | check-lumen-collab | PASS | no secrets |
+| 4 | readyForPreview | PASS | false（不变） |
+| 5 | main merge | PASS | none（stop condition） |
+| 6 | real CloudBase writes | PASS | none（stop condition） |
+
+**Client gates 未变**（194 tests，FIX-R8 仅修改 src/server/）。
+
+### 测试计数对比（R7 → R8）
+
+| Suite | R7 | R8 | Delta |
+|-------|-----|-----|-------|
+| Client | 194 | 194 | 0 |
+| Server | 416 | 429 | +13 |
+| Root total | 610 | 623 | +13 |
+
+### 文件变更（3 production code + 2 test + 1 new report + 1 new evidence + 2 state files）
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `cloudbase.nosql.ts` | 修改 | AC-01: ledger 存在性检查；AC-02: removeCleanupKeys runTransaction；AC-03: METADATA_MISSING |
+| `ProjectService.ts` | 修改 | AC-03: deleteProject 区分 METADATA_MISSING 与 OBJECT_NOT_FOUND |
+| `select.ts` | 修改 | AC-04: PRODUCTION_STORAGE_PREFIX_REQUIRED 检查 |
+| `cloudbase.nosql.cascade-boundary.test.ts` | 修改 | +8 NEW tests (AC-01×2, AC-02×3, AC-03×3)；AC-R6-03 更新 |
+| `select.preview-isolation.test.ts` | 修改 | +5 NEW tests (AC-04) |
+| `FIX-R8-TRAE-REPORT.md` | 新增 | FIX-R8 Trae Report |
+| `fix-r8-gate-results.md` | 新增 | FIX-R8 门禁证据 |
+| `STATE.json` | 修改 | fixR8 字段添加；状态转为 awaiting_gpt_acceptance/nextActor=gpt |
+| `SESSION-HANDOFF.md` | 修改 | FIX-R8 段落添加 |
+
+### AC 覆盖矩阵（AC-01 ~ AC-06 全部 PASS）
+
+| AC | Status | 证据 |
+|----|--------|------|
+| AC-01 | PASS | 2 NEW tests: 并发 Phase B 保留首调 ledger（OCC 重试）；ledger 已存在时不覆盖 |
+| AC-02 | PASS | 3 NEW tests: 并发 removeCleanupKeys 无 resurrection（OCC 重试）；ledger 已删除返回 []；顺序批次 |
+| AC-03 | PASS | 3 NEW tests + 1 更新: objects.delete 抛 METADATA_MISSING；objects.exists 区分日志；ProjectService 视为可能成功并 warn；AC-R6-03 更新 |
+| AC-04 | PASS | 5 NEW tests: empty/whitespace/undefined productionStoragePrefix 抛 PRODUCTION_STORAGE_PREFIX_REQUIRED；missing/empty env var 集成测试 |
+| AC-05 | PASS | R7 crash-window 测试 (AC-R6-04) 保持 PASS；33 cascade-boundary 测试全过 |
+| AC-06 | PASS | 429/429 server tests + tsc exit 0 + check-lumen-collab exit 0 |
+
+### 遗留风险
+
+1. **Mock-only 并发证据**：OCC 重试由 Mock 通过 `occReadTracking` + `preCommitHook` 模拟；真实 CloudBase OCC 语义可能略有差异，但生产代码路径（`runTransaction` + read-before-write）无论 Mock 与否都正确
+2. **METADATA_MISSING 是 crash-window 的 best-effort**：将缺失 metadata 视为"可能成功"是正确的恢复语义（最可能是前次删除已成功），但运维需知晓远端删除未确认；未来可用 Storage 审计工具验证
+3. **Codex READ_ONLY 审计范围**：本轮解决 4 项具体审计发现；可能需要后续 Codex 审计验证修复
+
+### Stop Conditions（持续生效）
+
+- ❌ `readyForPreview` 保持 `false`
+- ❌ 禁止合并到 main
+- ❌ 禁止真实 CloudBase 写入
+- ❌ PersistenceDependencies 接口不变
+- ❌ 不创建新服务
+- ❌ Trae 不得自行标记任务完成
+
+### GPT 下一步（FIX-R8 证据复审）
+
+1. 读取本文件 + Trae 报告 + 门禁证据
+2. 审查 `44add08` → `0439924` diff（3 production code + 2 test + 1 new report = 6 files, +701/-43）
+3. 核查门禁真实输出（429 server tests + tsc exit 0 + check-lumen-collab PASS）
+4. 核查 AC-01：deleteCascade Phase B ledger 存在性检查 + OCC 重试保留首调快照
+5. 核查 AC-02：removeCleanupKeys runTransaction 原子性 + 并发无 resurrection
+6. 核查 AC-03：METADATA_MISSING 语义区分（objects.delete/exists + ProjectService 处理）
+7. 核查 AC-04：PRODUCTION_STORAGE_PREFIX_REQUIRED fail-closed
+8. 核查 AC-05：R7 crash-window 测试保持 PASS
+9. 核查 AC-06：门禁全过
+10. 核查约束遵守：
+    - PersistenceDependencies 接口未修改
+    - 无真实凭据/网络/部署/CloudBase 写入
+    - `readyForPreview` 保持 false
+    - 未合并 main
+11. 给出验收结论：
+    - 通过 → 授权 Codex READ_ONLY 限域审计验证修复
+    - 驳回 → 生成 FIX-R9 修复包
+
+### Codex 审计范围（GPT 通过后必须执行）
+
+Codex READ_ONLY 限域审计，只检查：
+1. deleteCascade ledger 所有权在并发 Phase B 下的正确性
+2. removeCleanupKeys runTransaction 原子性
+3. METADATA_MISSING vs OBJECT_NOT_FOUND 语义区分
+4. PRODUCTION_STORAGE_PREFIX_REQUIRED fail-closed
+5. 不重新审计已闭合的其他 workstreams
+
+---
+
+## 历史状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R7 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+
+> **注意**：FIX-R7 已被 Codex READ_ONLY 审计发现 4 项 concurrency/fail-open 风险，触发 FIX-R8。以下为 R7 历史记录，保留供追溯。
 
 - 日期：2026-07-22
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R7-SERVICE-CRASH-TEST-CORRECTION`（子任务，GPT FIX-R6 FIX_REQUIRED 后 Trae 实施）
-- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`（Codex 审计后触发 FIX-R8）
 - **Risk Level**：MEDIUM
-- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R7 → GPT 证据复审 → Codex READ_ONLY 限域审计）
+- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R7 → GPT 证据复审 → Codex READ_ONLY 限域审计 → FIX-R8）
 - **Base SHA**：`5d28b32`（FIX-R6 docs commit，FIX-R7 worktree 创建时的分支 HEAD）
 - **Implementation SHA**：`2e5df25`
 - **分支**：`lumen/cloudbase-nosql-implement-01-fix-r7`
