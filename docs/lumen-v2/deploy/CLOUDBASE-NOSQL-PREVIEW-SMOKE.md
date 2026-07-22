@@ -22,7 +22,9 @@
 ### 禁止行为
 - ❌ 在 Production 环境运行本工具（`ALLOW_CLOUDBASE_PREVIEW_SMOKE=true` 在 Production 禁止设置）
 - ❌ 复用 Production API Key 执行本工具
-- ❌ 在 `CLOUDBASE_DATA_NAMESPACE` 或 `CLOUDBASE_STORAGE_PREFIX` 含 `prod` 时运行
+- ❌ 在 `CLOUDBASE_DATA_NAMESPACE` 或 `CLOUDBASE_STORAGE_PREFIX` 含 `prod` 时运行（Layer 2 防御）
+- ❌ 在 `CLOUDBASE_DATA_NAMESPACE` 与 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 相等（trim+大小写归一化后）时运行（Layer 1 主防线）
+- ❌ 在 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 缺失时运行（gate 开启时强制要求声明 Production namespace）
 - ❌ 在 SMOKE_RUN_ID 缺失时运行
 - ❌ 在 FIX-R4 GPT 验收通过前运行
 - ❌ 修改 `STATE.json`（AC-08）
@@ -46,6 +48,8 @@
   - `CLOUDBASE_API_KEY=<Preview-only API Key>`
   - `CLOUDBASE_DATA_NAMESPACE=preview`
   - `CLOUDBASE_STORAGE_PREFIX=preview/`
+  - `CLOUDBASE_PRODUCTION_DATA_NAMESPACE=<真实 Production namespace>`（**必需**，例如 `lumen` / `live` 等不含 `prod` 的值；用于 Layer 1 equality check 防止 Preview namespace 误命中非-"prod" 的 Production namespace）
+  - `CLOUDBASE_PRODUCTION_STORAGE_PREFIX=<真实 Production storage prefix>`（**可选**，例如 `lumen/`；如设置，Layer 1 equality check 也会对 storage prefix 生效）
   - `CLOUDBASE_SIGNED_URL_TTL_SECONDS=900`（可选）
 
 ---
@@ -61,6 +65,8 @@ $env:CLOUDBASE_ENV_ID = "<Preview 环境 ID>"
 $env:CLOUDBASE_API_KEY = "<Preview-only API Key>"
 $env:CLOUDBASE_DATA_NAMESPACE = "preview"
 $env:CLOUDBASE_STORAGE_PREFIX = "preview/"
+$env:CLOUDBASE_PRODUCTION_DATA_NAMESPACE = "lumen"  # 真实 Production namespace（必需）
+$env:CLOUDBASE_PRODUCTION_STORAGE_PREFIX = "lumen/"  # 可选
 $env:CLOUDBASE_SIGNED_URL_TTL_SECONDS = "900"
 
 npx tsx src/server/scripts/cloudbase-nosql-preview-smoke.ts
@@ -75,6 +81,8 @@ CLOUDBASE_ENV_ID=<Preview 环境 ID> \
 CLOUDBASE_API_KEY=<Preview-only API Key> \
 CLOUDBASE_DATA_NAMESPACE=preview \
 CLOUDBASE_STORAGE_PREFIX=preview/ \
+CLOUDBASE_PRODUCTION_DATA_NAMESPACE=lumen \
+CLOUDBASE_PRODUCTION_STORAGE_PREFIX=lumen/ \
 CLOUDBASE_SIGNED_URL_TTL_SECONDS=900 \
 npx tsx src/server/scripts/cloudbase-nosql-preview-smoke.ts
 ```
@@ -101,7 +109,7 @@ npx tsx src/server/scripts/cloudbase-nosql-preview-smoke.ts
 |--------|------|------------------|
 | `0` | `pass`（全部步骤通过）或 `skipped`（gate 未开，AC-01 默认 no-write） | 无 |
 | `1` | `fail`（任一步骤失败或清理失败） | 检查报告 `steps[].error` 与 `cleanupFailures`，必要时手动清理 |
-| `2` | `blocked`（gate 开启但配置错误：缺 namespace/prefix/runId，或含 `prod`） | 修正配置后重试 |
+| `2` | `blocked`（gate 开启但配置错误：缺 namespace/prefix/runId/productionNamespace，或 Layer 1 equality 命中，或 Layer 2 含 `prod`） | 修正配置后重试 |
 
 ---
 
@@ -115,14 +123,20 @@ npx tsx src/server/scripts/cloudbase-nosql-preview-smoke.ts
 - 检查 `ALLOW_CLOUDBASE_PREVIEW_SMOKE === 'true'`（AC-01 / AC-02）
 - 检查 `SMOKE_RUN_ID` 非空
 - 检查 `CLOUDBASE_ENV_ID`、`CLOUDBASE_API_KEY`、`CLOUDBASE_DATA_NAMESPACE`、`CLOUDBASE_STORAGE_PREFIX` 全部非空
-- 检查 namespace 和 storage prefix 不含 `prod`（Safety Requirements）
+- 检查 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 非空（gate 开启时强制要求声明 Production namespace，否则 Layer 1 equality check 无法生效）
+- **Layer 1（主防线）**：检查 `normalizeIdentifier(CLOUDBASE_DATA_NAMESPACE) === normalizeIdentifier(CLOUDBASE_PRODUCTION_DATA_NAMESPACE)` → 拒绝（trim + 小写归一化后比较，覆盖 `Preview` / `preview ` / `PREVIEW` 等变体）
+- **Layer 1（可选）**：当 `CLOUDBASE_PRODUCTION_STORAGE_PREFIX` 设置时，同样对 storage prefix 执行 equality check
+- **Layer 2（防御性）**：检查 namespace 和 storage prefix 不含 `prod` 子串（捕获未通过 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 声明的 misconfigured namespace，如 `prod-data`、`myprod`）
 - 失败时返回 `blocked` 报告，退出码 2，**不进行任何网络调用**
 
 ### Step 2：namespace/prefix 安全复查（`namespace-prefix-safety`）
 **对应任务项**：2. Preview namespace/prefix 安全检查
 
-- 在 adapter 构造前再次显式检查 namespace 与 prefix 不含 `prod`
-- 双重防御：避免依赖单一检查点
+- 在 adapter 构造前再次显式执行 Step 1 同款检查（防御性双重检查）
+- 检查 `config.productionNamespace` 仍非空
+- Layer 1 equality check 复查（namespace + 可选 storage prefix）
+- Layer 2 `prod` 子串复查
+- 双重防御：避免依赖单一检查点；config 解析 bug 无法绕过此层
 
 ### Step 3：SDK 初始化（`sdk-init-ensureReady`）⚠️ 首次网络调用
 **对应任务项**：（adapter 内部 lazy init，非任务列出的 9 项之一，但必要）
@@ -296,16 +310,19 @@ interface SmokeReport {
 | # | 测试矩阵 | 触发方式 | 期望行为 | 验证位置 |
 |---|---------|---------|---------|---------|
 | 1 | 缺少 Preview 开关 | 不设 `ALLOW_CLOUDBASE_PREVIEW_SMOKE` 或设为非 `true` | `overall: skipped`，退出码 0，无网络调用 | `resolveConfig()` 第 1 分支 |
-| 2 | 缺少 namespace | gate 开启但 `CLOUDBASE_DATA_NAMESPACE` 为空 | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` 第 2 分支 |
-| 3 | namespace 含 prod | `CLOUDBASE_DATA_NAMESPACE=prod-anything` | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` 第 3 分支 |
-| 4 | storage prefix 含 prod | `CLOUDBASE_STORAGE_PREFIX=prod/anything` | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` 第 4 分支 |
-| 5 | SDK 初始化失败 | 提供无效 envId 或 API Key | Step 3 `fail`，abortOnFail 触发清理，退出码 1 | Step 3 + cleanup |
-| 6 | 中途 DB 写入失败 | CloudBase 权限不足或集合不存在 | Step 4/5/6/8 `fail`，进入清理，退出码 1 | 对应 Step + cleanup |
-| 7 | Storage 删除失败 | CloudBase Storage 权限不足 | Step 7 `fail` 或 cleanup 记录 `cleanupFailures`，退出码 1 | Step 7 + `cleanupFailures` |
-| 8 | 全流程成功 | 全部配置正确且权限完整 | `overall: pass`，退出码 0，`cleanupFailures: []` | 全部 Step + cleanup |
-| 9 | 二次清理保持幂等 | 在首次运行后再次运行同一 `SMOKE_RUN_ID` | 第二轮 cleanup 对已删除对象不抛错（`isAlreadyGone` 命中），`cleanupFailures: []` | `runCleanup()` 第二轮 |
+| 2 | 缺少 run ID | gate 开启但 `SMOKE_RUN_ID` 为空 | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` 第 2 分支 |
+| 3 | 缺少 namespace | gate 开启但 `CLOUDBASE_DATA_NAMESPACE` 为空 | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` 第 3 分支 |
+| 4 | namespace 含 prod | `CLOUDBASE_DATA_NAMESPACE=prod-anything` | `overall: blocked`（Layer 2），退出码 2，无网络调用 | `resolveConfig()` Layer 2 检查 |
+| 5 | namespace 等于不含 prod 的 Production namespace | `CLOUDBASE_DATA_NAMESPACE=lumen CLOUDBASE_PRODUCTION_DATA_NAMESPACE=lumen` | `overall: blocked`（Layer 1 equality），退出码 2，无网络调用 | `resolveConfig()` Layer 1 检查 |
+| 6 | storage prefix 含 prod | `CLOUDBASE_STORAGE_PREFIX=prod/anything` | `overall: blocked`（Layer 2），退出码 2，无网络调用 | `resolveConfig()` Layer 2 检查 |
+| 7 | 缺少 Production namespace 声明 | gate 开启但 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 为空 | `overall: blocked`，退出码 2，无网络调用 | `resolveConfig()` Layer 1 前置检查 |
+| 8 | SDK 初始化失败 | 提供无效 envId 或 API Key | Step 3 `fail`，abortOnFail 触发清理，退出码 1 | Step 3 + cleanup |
+| 9 | 中途 DB 写入失败 | CloudBase 权限不足或集合不存在 | Step 4/5/6/8 `fail`，进入清理，退出码 1 | 对应 Step + cleanup |
+| 10 | Storage 删除失败 | CloudBase Storage 权限不足 | Step 7 `fail` 或 cleanup 记录 `cleanupFailures`，退出码 1 | Step 7 + `cleanupFailures` |
+| 11 | 全流程成功 | 全部配置正确且权限完整 | `overall: pass`，退出码 0，`cleanupFailures: []` | 全部 Step + cleanup |
+| 12 | 二次清理保持幂等 | 在首次运行后再次运行同一 `SMOKE_RUN_ID` | 第二轮 cleanup 对已删除对象不抛错（`isAlreadyGone` 命中），`cleanupFailures: []` | `runCleanup()` 第二轮 |
 
-> **操作建议**：矩阵 1~4 可在本地无凭据环境下运行验证 fail-closed 行为；矩阵 5~9 需在 Preview 凭据就绪后运行。
+> **操作建议**：矩阵 1~7 可在本地无凭据环境下运行验证 fail-closed 行为（已完成负向测试归档，见 evidence/LUMEN-CLOUDBASE-NOSQL-PREVIEW-SMOKE-HARNESS-01/）；矩阵 8~12 需在 Preview 凭据就绪后运行（PENDING_FIX_R4_AND_PREVIEW_CREDENTIALS）。
 
 ---
 
@@ -333,14 +350,29 @@ interface SmokeReport {
 - ❌ 将脚本输出重定向到包含完整 API Key 的日志文件（脚本已脱敏，但请避免额外日志）
 - ❌ 在终端共享屏幕时执行（API Key 通过 `$env:` 设置时会短暂出现在终端历史中，建议执行后 `Clear-History`）
 
-### 6.3 namespace / prefix 保护
+### 6.3 namespace / prefix 保护（双层防御）
 
-`resolveConfig()` 和 Step 2 双重检查：
+`resolveConfig()` 和 Step 2 双重检查（同一逻辑两处执行，避免单点失效）：
+
+**Layer 1（主防线）** — 显式 Production namespace 声明 + equality check：
+
+- `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 缺失或为空（gate 开启时）→ 拒绝（fail closed）
+- `normalizeIdentifier(CLOUDBASE_DATA_NAMESPACE) === normalizeIdentifier(CLOUDBASE_PRODUCTION_DATA_NAMESPACE)` → 拒绝
+  - `normalizeIdentifier` = `s.trim().toLowerCase()`
+  - 覆盖 `Preview` / `preview ` / `PREVIEW` 等变体
+- 可选：当 `CLOUDBASE_PRODUCTION_STORAGE_PREFIX` 设置时，同样对 storage prefix 执行 equality check
+
+**Layer 2（防御性）** — `prod` 子串启发式：
 
 - namespace 含 `prod`（不区分大小写）→ 拒绝
 - storagePrefix 含 `prod` → 拒绝
+
+**基础检查**：
+
 - namespace 为空 → 拒绝
 - storagePrefix 为空 → 拒绝
+
+**为什么需要 Layer 1**：若 Production namespace 是 `lumen`、`live` 等不含 `prod` 子串的值，Layer 2 无法捕获 Preview namespace 误命中 Production namespace 的情况。Layer 1 通过显式声明 + equality check 强制操作员声明 Production namespace，确保 Preview 与 Production 不会重名。
 
 ---
 
@@ -433,8 +465,14 @@ tcb fn call delete-smoke-records --data '{"runId":"20260722-1430"}'
 
 按 `blockReason` 修正：
 - `SMOKE_RUN_ID is missing or empty` → 设置 `SMOKE_RUN_ID` 环境变量
-- `CLOUDBASE_* is missing or empty` → 补齐对应环境变量
-- `contains "prod"` → 将 namespace/prefix 改为 `preview` / `preview/`
+- `CLOUDBASE_DATA_NAMESPACE is missing or empty` → 设置 `CLOUDBASE_DATA_NAMESPACE=preview`
+- `CLOUDBASE_STORAGE_PREFIX is missing or empty` → 设置 `CLOUDBASE_STORAGE_PREFIX=preview/`
+- `CLOUDBASE_ENV_ID is missing or empty` → 设置 `CLOUDBASE_ENV_ID=<Preview 环境 ID>`
+- `CLOUDBASE_API_KEY is missing or empty` → 设置 `CLOUDBASE_API_KEY=<Preview-only API Key>`
+- `CLOUDBASE_PRODUCTION_DATA_NAMESPACE is missing or empty` → 设置 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE=<真实 Production namespace>`（如 `lumen` / `live`）
+- `equals declared Production namespace` (Layer 1 equality) → 将 `CLOUDBASE_DATA_NAMESPACE` 改为与 Production namespace 不同的值（如 `preview`）
+- `equals declared Production storage prefix` (Layer 1 equality) → 将 `CLOUDBASE_STORAGE_PREFIX` 改为与 Production storage prefix 不同的值（如 `preview/`）
+- `contains "prod"` (Layer 2) → 将 namespace/prefix 改为 `preview` / `preview/`
 
 ---
 
@@ -458,9 +496,15 @@ tcb fn call delete-smoke-records --data '{"runId":"20260722-1430"}'
 
 本任务（LUMEN-CLOUDBASE-NOSQL-PREVIEW-SMOKE-HARNESS-01）的审计范围：
 
-### 10.1 仅新增文件
+### 10.1 文件清单
+
+**初版（2026-07-22 commit 0504f0b）仅新增**：
 - ✅ `src/server/scripts/cloudbase-nosql-preview-smoke.ts`
 - ✅ `docs/lumen-v2/deploy/CLOUDBASE-NOSQL-PREVIEW-SMOKE.md`（本文件）
+
+**FIX 修订（GPT 证据审查后，本提交）修改**：
+- ✏️ `src/server/scripts/cloudbase-nosql-preview-smoke.ts` — 增加 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 显式变量 + Layer 1 equality check + 保留 Layer 2 `prod` 子串防御
+- ✏️ `docs/lumen-v2/deploy/CLOUDBASE-NOSQL-PREVIEW-SMOKE.md` — 同步更新前置条件、命令示例、Step 1/2 描述、Test Matrix、安全模型、故障排查
 
 ### 10.2 禁止修改的文件（AC-08）
 - ❌ `src/server/infrastructure/persistence/cloudbase.nosql.ts`
@@ -493,4 +537,5 @@ node scripts/check-lumen-collab.mjs
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
-| 2026-07-22 | 1.0 | 初版（LUMEN-CLOUDBASE-NOSQL-PREVIEW-SMOKE-HARNESS-01） |
+| 2026-07-22 | 1.0 | 初版（LUMEN-CLOUDBASE-NOSQL-PREVIEW-SMOKE-HARNESS-01，commit 0504f0b） |
+| 2026-07-22 | 1.1 | FIX 修订（GPT 证据审查 FIX_REQUIRED）：增加 `CLOUDBASE_PRODUCTION_DATA_NAMESPACE` 显式变量 + Layer 1 equality check（覆盖非-"prod" Production namespace 如 `lumen`/`live`）+ 保留 Layer 2 `prod` 子串作为防御性第二层；同步更新 Test Matrix、命令示例、Step 1/2 描述、安全模型、故障排查 |

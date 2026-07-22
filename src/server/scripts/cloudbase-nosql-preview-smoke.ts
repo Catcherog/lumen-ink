@@ -10,8 +10,21 @@
  * Safety model (AC-01 / AC-02):
  *  - By default (no `ALLOW_CLOUDBASE_PREVIEW_SMOKE=true`) the script emits a
  *    `skipped` report and performs NO network requests and NO writes.
- *  - Even when the gate is on, the script refuses to run if the namespace or
- *    storage prefix is empty, contains `prod`, or if a run id is missing.
+ *  - Even when the gate is on, the script refuses to run if any of the
+ *    following fail:
+ *      - SMOKE_RUN_ID, CLOUDBASE_DATA_NAMESPACE, CLOUDBASE_STORAGE_PREFIX,
+ *        CLOUDBASE_ENV_ID, CLOUDBASE_API_KEY are missing or empty.
+ *      - CLOUDBASE_PRODUCTION_DATA_NAMESPACE is missing or empty (REQUIRED
+ *        when gate is on so Layer 1 equality check can fire).
+ *      - Layer 1: preview namespace equals declared Production namespace
+ *        (after trim + lowercase normalization). This rejects non-"prod"
+ *        production namespaces like "lumen", "live" that Layer 2 would miss.
+ *      - Layer 1 (optional): preview storage prefix equals declared
+ *        Production storage prefix when CLOUDBASE_PRODUCTION_STORAGE_PREFIX
+ *        is provided.
+ *      - Layer 2 (defensive): namespace or storage prefix contains "prod"
+ *        substring. Catches misconfigured namespaces not declared via
+ *        CLOUDBASE_PRODUCTION_DATA_NAMESPACE.
  *  - Every created record carries the `smokeRunId` in its id + human fields
  *    (AC-03) so stray test data is identifiable and cleanable.
  *  - Success AND failure paths both attempt cleanup (AC-04); cleanup failures
@@ -28,6 +41,8 @@
  *   SMOKE_RUN_ID=20260722-1430 \
  *   CLOUDBASE_ENV_ID=... CLOUDBASE_API_KEY=... \
  *   CLOUDBASE_DATA_NAMESPACE=preview CLOUDBASE_STORAGE_PREFIX=preview/ \
+ *   CLOUDBASE_PRODUCTION_DATA_NAMESPACE=lumen \
+ *   [CLOUDBASE_PRODUCTION_STORAGE_PREFIX=lumen/] \
  *   npx tsx src/server/scripts/cloudbase-nosql-preview-smoke.ts
  *
  * This file does NOT modify production code, service code, tests or state
@@ -134,6 +149,19 @@ interface OkConfig {
   smokeRunId: string;
   apiKey: string;
   options: CloudBaseNoSqlOptions;
+  /**
+   * Declared Production namespace (from CLOUDBASE_PRODUCTION_DATA_NAMESPACE).
+   * Required when the smoke gate is on so Layer 1 equality check can reject
+   * Preview namespaces that match a non-"prod" Production namespace
+   * (e.g. "lumen", "live"). Re-checked in step 2 (defensive).
+   */
+  productionNamespace: string;
+  /**
+   * Optional declared Production storage prefix (from
+   * CLOUDBASE_PRODUCTION_STORAGE_PREFIX). When present, Layer 1 equality
+   * check also applies to the storage prefix.
+   */
+  productionStoragePrefix: string;
 }
 
 type ResolvedConfig = OkConfig | BlockedConfig | SkippedConfig;
@@ -170,6 +198,14 @@ function resolveConfig(env: NodeJS.ProcessEnv): ResolvedConfig {
   const storagePrefix = (env.CLOUDBASE_STORAGE_PREFIX ?? '').trim();
   const envId = (env.CLOUDBASE_ENV_ID ?? '').trim();
   const apiKey = env.CLOUDBASE_API_KEY ?? '';
+  // Production namespace declaration (REQUIRED when smoke gate is on).
+  // Without this explicit declaration we cannot perform Layer 1 equality
+  // check, so a non-"prod" Production namespace (e.g. "lumen", "live")
+  // could be silently hit by Preview smoke writes. Fail closed.
+  const productionNamespace = (env.CLOUDBASE_PRODUCTION_DATA_NAMESPACE ?? '').trim();
+  // Optional Production storage prefix declaration. When present, Layer 1
+  // equality check also applies to the storage prefix.
+  const productionStoragePrefix = (env.CLOUDBASE_PRODUCTION_STORAGE_PREFIX ?? '').trim();
 
   // namespace / prefix must be present (Safety Requirements).
   if (!namespace) {
@@ -184,7 +220,40 @@ function resolveConfig(env: NodeJS.ProcessEnv): ResolvedConfig {
   if (!apiKey) {
     return blocked('CLOUDBASE_API_KEY is missing or empty.');
   }
-  // Reject anything that looks like production targeting.
+  // Production namespace declaration is REQUIRED when the smoke gate is on.
+  // Without it the Layer 1 equality check cannot fire and a non-"prod"
+  // Production namespace would be reachable. Fail closed.
+  if (!productionNamespace) {
+    return blocked(
+      'CLOUDBASE_PRODUCTION_DATA_NAMESPACE is missing or empty; required when ALLOW_CLOUDBASE_PREVIEW_SMOKE=true so the harness can reject Preview==Production collisions for non-"prod" production namespaces (e.g. "lumen", "live").'
+    );
+  }
+
+  // Layer 1 (strongest): explicit Preview==Production equality check.
+  // Compare after trim + lowercase normalization so "Preview" / "preview " /
+  // "PREVIEW" all collide with "preview" production namespace and are rejected.
+  if (normalizeIdentifier(namespace) === normalizeIdentifier(productionNamespace)) {
+    return blocked(
+      `CLOUDBASE_DATA_NAMESPACE "${namespace}" equals declared Production namespace "${productionNamespace}"; refusing to target production.`
+    );
+  }
+  // Optional Layer 1 equality check on storage prefix when production prefix
+  // is declared. Prevents Preview storage writes from hitting Production
+  // storage paths even when namespace strings differ.
+  if (
+    productionStoragePrefix &&
+    normalizeIdentifier(storagePrefix) === normalizeIdentifier(productionStoragePrefix)
+  ) {
+    return blocked(
+      `CLOUDBASE_STORAGE_PREFIX "${storagePrefix}" equals declared Production storage prefix "${productionStoragePrefix}"; refusing to target production storage.`
+    );
+  }
+
+  // Layer 2 (defensive): reject anything that still looks like production
+  // targeting via the "prod" substring heuristic. Catches misconfigured
+  // namespaces that weren't declared via CLOUDBASE_PRODUCTION_DATA_NAMESPACE
+  // (e.g. "prod-data", "myprod"). This is the second layer of protection,
+  // not the primary boundary.
   if (namespace.toLowerCase().includes('prod')) {
     return blocked(
       `CLOUDBASE_DATA_NAMESPACE "${namespace}" contains "prod"; refusing to target production.`
@@ -209,7 +278,23 @@ function resolveConfig(env: NodeJS.ProcessEnv): ResolvedConfig {
       : {}),
   };
 
-  return { kind: 'ok', smokeRunId, apiKey, options };
+  return {
+    kind: 'ok',
+    smokeRunId,
+    apiKey,
+    options,
+    productionNamespace,
+    productionStoragePrefix,
+  };
+}
+
+/**
+ * Normalize an identifier for equality comparison: trim surrounding whitespace
+ * and lowercase. Used by Layer 1 equality check so "Preview" / "preview " /
+ * "PREVIEW" all collide with "preview".
+ */
+function normalizeIdentifier(s: string): string {
+  return s.trim().toLowerCase();
 }
 
 function blocked(reason: string): BlockedConfig {
@@ -301,7 +386,26 @@ async function runSmoke(
     steps.push({ step: 1, name: 'config-fail-closed', status: 'pass' });
 
     // Step 2: namespace/prefix safety re-check (explicit, defensive).
+    // Mirrors resolveConfig() so a bug in config resolution cannot silently
+    // bypass the production-targeting guard. Layer 1 (equality) is the
+    // primary boundary; Layer 2 (prod substring) is defensive.
     await step(2, 'namespace-prefix-safety', async () => {
+      if (!config.productionNamespace) {
+        throw new Error('CLOUDBASE_PRODUCTION_DATA_NAMESPACE missing at step 2');
+      }
+      if (
+        normalizeIdentifier(options.dataNamespace) ===
+        normalizeIdentifier(config.productionNamespace)
+      ) {
+        throw new Error('preview namespace equals production namespace');
+      }
+      if (
+        config.productionStoragePrefix &&
+        normalizeIdentifier(options.storagePrefix) ===
+          normalizeIdentifier(config.productionStoragePrefix)
+      ) {
+        throw new Error('preview storage prefix equals production storage prefix');
+      }
       if (options.dataNamespace.toLowerCase().includes('prod')) {
         throw new Error('namespace contains "prod"');
       }
