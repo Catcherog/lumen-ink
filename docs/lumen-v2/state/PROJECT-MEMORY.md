@@ -110,6 +110,7 @@ P0 允许 3 人共享的单工作区认证，但必须取消默认密码和 JWT 
 - [~] `PERSIST-001` 持久化生成闭环（GPT 证据验收 `EVIDENCE_REVIEW_PASS` / `MVP_PASS_WITH_POST_MERGE_GATE`，2026-07-20；已合并到 `main`（fast-forward push `76d18f7..f0e28dd`）；`gpt_evidence_review_pass / nextActor=gpt`，**未归档**，等 PROD-CRON-VERIFY 通过后才归档）。
 - [~] `HARDEN-001` 安全、可靠性与发布加固（2026-07-21 由 POST-MERGE-PARALLEL-ACTIVATION-01 激活为项目主任务；HARDEN-001A 已通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS_WITH_DEBT` 并合并到 main（mergeCommit `4e720b6`）；HARDEN-001B 已通过 GPT 证据审查 `EVIDENCE_REVIEW_PASS`，实施提交 `4483a7c`，等待合并 PR 后进入 HARDEN-001C；`gpt_evidence_review_pass / nextActor=user_or_trae_for_merge`；HARDEN-001 任务整体不归档，需 C 也通过）。
 - [ ] `PROD-CRON-VERIFY` Production Cron 注册与运行验证（2026-07-21 激活为并行用户证据门禁；`active / awaiting_user_evidence / nextActor=user`；与 HARDEN-001 并行，不阻塞 HARDEN-001B/C）。
+- [~] `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01` CloudBase NoSQL 生产适配（Track B 并行修复；FIX-R1 `1fba413` GPT `FIX_REQUIRED`；FIX-R2 `63bd445` 实施完成；FIX-R3 `627bd7e` GPT 裁决 `CODEX_REQUIRED`（2026-07-22）：AC-04 事务逃逸 + 嵌套独立事务 + 删除竞态；状态 `changes_requested / nextActor=codex`；Codex 限定只读事务审查必须先于 FIX-R4 实施；`readyForPreview=false` 保持）。
 - [ ] P0 实施与验收。
 
 ## 6. 下一步

@@ -147,8 +147,8 @@
   "publicRepoSafety": "required",
   "cloudbaseNoSqlImplement": {
     "taskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01",
-    "status": "awaiting_gpt_acceptance",
-    "nextActor": "gpt",
+    "status": "changes_requested",
+    "nextActor": "codex",
     "riskLevel": "HIGH",
     "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md",
     "pocEvidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md",
@@ -160,8 +160,9 @@
     "gateP0Status": "PASS",
     "gateP1ImplementationStatus": "COMPLETE",
     "pendingAc": ["AC-15", "AC-16", "AC-17", "AC-19"],
-    "codexStatus": "REQUIRED_AFTER_R3_GPT_PASS",
+    "codexStatus": "REQUIRED_NOW_FOR_TX_AUDIT_R3",
     "readyForPreview": false,
+    "previewBlockedReason": "R3 GPT verdict CODEX_REQUIRED: tx-escaping getDb().where().update + nested independent runTransaction in createIdempotent + delete race; Codex read-only audit required before FIX-R4",
     "fixR1Verdict": "FIX_REQUIRED",
     "fixR1ReviewPath": "docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-GPT-REVIEW.md",
     "fixR1DefectCount": 8,
@@ -184,10 +185,11 @@
       "package-lock.json (modified, project rename gemini-image-editor -> lumen-ink)"
     ],
     "fixR2StopConditions": "NoSQL remains readyForPreview=false; no merge to main; no Preview/Production config; no Production API Key usage",
-    "fixR3Status": "COMPLETE",
+    "fixR3Status": "REJECTED_CODEX_REQUIRED",
     "fixR3TaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-SDK-CONTRACT",
     "fixR3BaseSha": "87d0ba5",
     "fixR3ResultSha": "627bd7e",
+    "fixR3StateCommitSha": "a858d7f",
     "fixR3Branch": "lumen/cloudbase-nosql-implement-01-fix-r3",
     "fixR3GateResult": "8/8 PASS (client 194 + server 331 = 525 root tests; +14 vs R2: 7 SDK contract tests + 7 AC-05/06/07/08/09/10 behavior tests)",
     "fixR3TraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-TRAE-REPORT.md",
@@ -207,7 +209,41 @@
       "100-op limit is pre-check + Mock commit-check; errs fail-closed but may be stricter than real CloudBase",
       "ws optional dependency warning in SDK contract test (7/7 pass, no functional impact)"
     ],
+    "fixR3GptReviewPath": "docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R3-GPT-REVIEW.md",
+    "fixR3GptReviewVerdict": "CODEX_REQUIRED",
+    "fixR3GptReviewDate": "2026-07-22",
+    "fixR3GptReviewAcceptedAc": ["AC-01", "AC-02", "AC-03", "AC-05", "AC-06", "AC-07", "AC-08", "AC-09", "AC-10", "AC-11", "AC-12"],
+    "fixR3GptReviewBlockingAc": ["AC-04"],
+    "fixR3GptReviewFindings": [
+      {"id": "P0-01", "title": "条件 Job 更新逃逸外层事务", "severity": "P0", "affectedFunctions": ["updateIfClaimed", "updateIfActive"], "rootCause": "getDb().collection().where().update bypasses AsyncLocalStorage transaction; writes land outside UoW when called inside UnitOfWork.run()", "businessImpact": "Job succeeded + outer tx commit failure → Asset/Project pointer rolled back, Job points to non-existent result"},
+      {"id": "P0-02", "title": "versions.createIdempotent() 创建独立嵌套事务", "severity": "P0", "affectedFunctions": ["versions.createIdempotent"], "rootCause": "Repository method unconditionally calls getDb().runTransaction() instead of reusing current tx; Version/idempotency may commit before outer tx", "businessImpact": "Violates ONE UnitOfWork invariant; partial commit leaves inconsistent Version/idempotency/Job/Asset/Project state"},
+      {"id": "P1-01", "title": "项目删除存在双重预取竞态", "severity": "P1", "affectedFunctions": ["ProjectService.deleteProject", "deleteCascade"], "rootCause": "Two snapshots (ProjectService pre-fetch + deleteCascade in-tx pre-fetch) allow new Asset/Version between them; new docs may escape second pre-fetch", "businessImpact": "DB orphan or Storage orphan after project deletion; 'new doc orphan is harmless' comment is incorrect"},
+      {"id": "P2-01", "title": "SDK contract 测试的证明范围被高估", "severity": "P2", "affectedFunctions": ["cloudbase.nosql.sdk-contract.test.ts"], "rootCause": "Tests verify SDK method existence but do not actually invoke transactions or verify tx doc().get() return structure; last check only verifies runTransaction.length", "businessImpact": "None blocking; SDK contract test description should be downgraded to 'API surface smoke test'"}
+    ],
+    "fixR3MissingTestCoverage": [
+      "外层 UoW 最终提交失败时，Job 不得已是 succeeded",
+      "versions.createIdempotent() 在已有外层事务时不得独立提交",
+      "Job 条件更新、Version idempotency、Asset 和 Project 指针必须全成或全败",
+      "删除与 Generation 结果提交并发时，不得产生 DB 或 Storage orphan",
+      "删除预取后新增 Asset 的确定性交错测试"
+    ],
+    "fixR4Status": "ready_for_codex_audit",
+    "fixR4NextActor": "codex",
+    "fixR4TaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R4-TX-AWARE-ATOMICITY",
+    "fixR4CodexAuditTaskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-CODEX-TX-AUDIT-R3",
+    "fixR4CodexMode": "READ_ONLY",
+    "fixR4CodexMustPrecedeTrae": true,
+    "fixR4MinimumScope": [
+      "事务感知的 Job 条件更新路径（无 tx → where().update；有 tx → tx.doc(id).get + 同 tx doc(id).update；禁止 getDb() 逃逸）",
+      "禁止 versions.createIdempotent() 在已有 UoW 中打开独立事务（复用当前 tx 或 current-or-new helper）",
+      "外层 commit failure 回归测试（强制 commit throw；断言 Job 未成功；Version/Asset/idempotency/Project pointer 均无部分提交）",
+      "解决删除竞态（deletion lock/tombstone；Storage key 快照在项目进入稳定 deleting 状态后获取；不接受孤儿无害）",
+      "文档修正（R3 commit 范围、SDK contract test 描述降级为 API surface smoke test、a858d7f 仅 SHA 回填）"
+    ],
+    "fixR4PersistenceDependenciesFrozen": true,
+    "fixR4PersistenceDependenciesNote": "Codex 需在审查结论中明确：冻结 PersistenceDependencies 接口能否在不修改的前提下实现事务感知的 updateIfClaimed/updateIfActive",
     "lastUpdatedAt": "2026-07-22",
-    "lastUpdatedBy": "trae"
+    "lastUpdatedBy": "trae",
+    "lastUpdatedAction": "archive GPT R3 CODEX_REQUIRED verdict; transition to changes_requested/nextActor=codex; FIX-R4 blocked on Codex read-only audit"
   }
 }
