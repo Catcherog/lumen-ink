@@ -1,6 +1,130 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R5 实施完成，等待 GPT 增量审查）
+## 当前状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R6 实施完成，等待 GPT 证据复审 + Codex 限域审计）
+
+- 日期：2026-07-22
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R6-CLEANUP-LEDGER-CLOSURE`（子任务，GPT FIX-R5 FIX_REQUIRED 后 Trae 实施）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Route**：R3（GPT FIX_REQUIRED → Trae FIX-R6 → GPT 证据复审 → Codex READ_ONLY 限域审计）
+- **Base SHA**：`98764ad`（FIX-R5 docs backfill，FIX-R6 worktree 创建时的分支 HEAD）
+- **Implementation SHA**：`ff6d33d`（full: `ff6d33d7f171e87a210d609f8e4a63c2e38f367b`）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r6`
+- **Worktree**：`d:/360Downloads/Trae 项目/picture-edit/.worktrees/cloudbase-nosql-implement-01-fix-r6`
+- **GPT FIX-R5 裁决**：[docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-GPT-REVIEW.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-GPT-REVIEW.md)
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R6-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R6-TRAE-REPORT.md)
+- **门禁证据**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r6-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r6-gate-results.md)
+- **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
+- **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
+- **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT 通过 R6 后必须进行一次 Codex READ_ONLY 限域审计）
+
+### GPT FIX-R5 裁决摘要（FIX_REQUIRED → changes_requested）
+
+GPT 审查 FIX-R5 远端代码后给出 `FIX_REQUIRED`，识别 4 项缺陷：
+
+| 缺陷 | 严重度 | AC | 描述 |
+|------|--------|----|------|
+| P1-01 | P1 | AC-R6-01/02/03/04 | Cleanup ledger 在 Storage cleanup 前被删除；crash recovery 不成立 |
+| P2-01 | P2 | AC-R6-05/06 | AC-29 仍没有真实 Smoke Harness，只有纯函数导出 |
+| P2-02 | P2 | AC-R6-07 | AC-37 SHA 陈述失真（声称 HEAD=6b4b379，但 98764ad 已推送） |
+| P2-03 | P2 | AC-R6-08 | 部署声明需要校正（不应绝对声称"未部署"） |
+
+### FIX-R6 实施核心结论（4 Required Fixes）
+
+1. **RF-R6-01 — Cleanup Ledger 生命周期（AC-R6-01/02/03）**：
+   - 新增 `removeCleanupKeys(id, removedKeys)` 到 NoSQL adapter
+   - `ProjectService.deleteProject()` 不再在 Storage cleanup 前删除 ledger
+   - 成功删除的 keys 在 Storage cleanup 后通过 `removeCleanupKeys()` 从 ledger 移除
+   - 失败的 keys 保留在 ledger 中供 sweeper 恢复
+   - `OBJECT_NOT_FOUND` 视为幂等成功（crash window 安全）
+   - ledger 为空时才删除 ledger 文档
+
+2. **RF-R6-02 — 真实服务路径 Crash/Retry 测试（AC-R6-04）**：
+   - 5 个新测试通过真实 `ProjectService.deleteProject()` 路径（不绕过服务层）
+   - 覆盖：完全成功、部分失败、crash window 幂等重放、服务重试、mid-crash 回归
+
+3. **RF-R6-03 — Preview Isolation Smoke Harness（AC-R6-05/06）**：
+   - 新增 `scripts/verify-preview-isolation.ts` — 可执行 TypeScript 脚本
+   - 导入生产 `isPreviewEnvironment` / `validatePreviewIsolation`（非复制逻辑）
+   - 9 个合成自测 + 当前环境检查
+   - `VERCEL=1` 无 `VERCEL_ENV` → exit 1（fail-closed 验证通过）
+
+4. **RF-R6-04 — 证据修正（AC-R6-07/08）**：
+   - SHA 证据明确区分：Implementation SHA (`ff6d33d`) vs Evidence Commit vs Remote HEAD
+   - 部署声明修正：无手动部署、无运行时验证；Vercel 自动 Preview 构建状态已确认
+
+### 9 门禁结果（FIX-R6）
+
+| # | 门禁 | 结果 | 计数 |
+|---|------|------|------|
+| 1 | Client lint | PASS | 0 errors |
+| 2 | Client tsc (build) | PASS | built successfully |
+| 3 | Client tests | PASS | 194 tests / 10 files |
+| 4 | Server tsc | PASS | 0 errors |
+| 5 | Server tests | PASS | 415 tests / 34 files |
+| 6 | Root tests | PASS | 609 combined (194 client + 415 server, +5 vs R5) |
+| 7 | Build (client + server) | PASS | client + server |
+| 8 | check-lumen-collab | PASS | no secrets |
+| 9 | Smoke Harness | PASS | exit 0; 9 self-tests pass |
+
+### 文件变更（5 files: 3 modified + 2 new）
+
+| 文件 | 变更类型 | 说明 |
+|------|---------|------|
+| `ProjectService.ts` | 修改 | `deleteProject()` 重构：removeCleanupKeys + completedKeys 跟踪 + OBJECT_NOT_FOUND 幂等 |
+| `cloudbase.nosql.ts` | 修改 | 新增 `removeCleanupKeys()` 到 projects 接口 + 实现 |
+| `cloudbase.nosql.cascade-boundary.test.ts` | 修改 | +5 FIX-R6 服务路径测试（AC-R6-01..04） |
+| `scripts/verify-preview-isolation.ts` | 新增 | Smoke Harness（9 自测 + 当前环境 gate） |
+| `FIX-R5-GPT-REVIEW.md` | 新增 | GPT 裁决文件 |
+
+### AC 覆盖矩阵（AC-R6-01 ~ AC-R6-10 全部 PASS）
+
+| AC | Status | 证据 |
+|----|--------|------|
+| AC-R6-01 | PASS | Ledger 在 Storage cleanup 全部完成前不被删除 |
+| AC-R6-02 | PASS | 失败 keys 持久化并可通过 removeCleanupKeys 重放 |
+| AC-R6-03 | PASS | OBJECT_NOT_FOUND 视为幂等成功；crash window 安全 |
+| AC-R6-04 | PASS | 5 个真实服务路径测试（ProjectService.deleteProject） |
+| AC-R6-05 | PASS | Smoke Harness 导入生产 selector 函数 |
+| AC-R6-06 | PASS | Smoke Harness 非法 Preview 配置 exit 1（已验证） |
+| AC-R6-07 | PASS | SHA 证据区分 impl/evidence/remote HEAD；ancestor 已验证 |
+| AC-R6-08 | PASS | 部署声明：无手动部署；Vercel auto-build 已确认 |
+| AC-R6-09 | PASS | 9 门禁 PASS（609 root tests） |
+| AC-R6-10 | PASS | `readyForPreview=false` 不变 |
+
+### Stop Conditions（持续生效）
+
+- ❌ `readyForPreview` 保持 `false`
+- ❌ 禁止合并到 main
+- ❌ 禁止真实 CloudBase 写入
+- ❌ Cleanup ledger 在失败路径不得丢失
+- ❌ Smoke Harness 未实际执行时不得标记 AC-29 PASS
+- ❌ Trae 不得自行标记任务完成
+
+### GPT 下一步（FIX-R6 证据复审）
+
+1. 读取本文件 + Trae 报告 + 门禁证据 + GPT FIX-R5 裁决
+2. 审查 `98764ad` → `ff6d33d` diff（5 files）
+3. 核查 9 门禁真实输出（609 root tests）
+4. 核查 RF-R6-01：cleanup ledger 生命周期（removeCleanupKeys）
+5. 核查 RF-R6-02：真实服务路径测试（5 tests via ProjectService.deleteProject）
+6. 核查 RF-R6-03：Smoke Harness 实际执行 + fail-closed 验证
+7. 核查 RF-R6-04：SHA 区分 + 部署声明修正
+8. 给出验收结论：
+   - 通过 → 授权 Codex READ_ONLY 限域审计
+   - 驳回 → 生成 FIX-R7 修复包
+
+### Codex 审计范围（GPT 通过后必须执行）
+
+Codex READ_ONLY 限域审计，只检查：
+1. cleanup ledger 的 crash-window 与 partial-failure 语义
+2. 两阶段 tombstone 与 child create 的并发不变量
+3. Preview Smoke Harness 是否真正复用生产逻辑
+4. 不重新审计已闭合的其他 workstreams
+
+---
+
+## 历史状态（2026-07-22，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R5 实施完成，等待 GPT 增量审查）
 
 - 日期：2026-07-22
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R5-TWO-PHASE-DELETE-PREVIEW-ENV`（子任务，GPT FIX_REQUIRED 后 Trae 实施）
