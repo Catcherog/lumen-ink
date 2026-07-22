@@ -187,6 +187,79 @@
     "ROUTING-001"
   ],
   "publicRepoSafety": "required",
+  "parallelEvidenceClosure": {
+    "taskId": "LUMEN-CLOUDBASE-NOSQL-PARALLEL-EVIDENCE-CLOSURE-01",
+    "status": "awaiting_gpt_acceptance",
+    "nextActor": "gpt",
+    "riskLevel": "LOW",
+    "route": "R2",
+    "codexStatus": "NOT_REQUIRED",
+    "baselineCommit": "436d29f",
+    "branch": "lumen/parallel-evidence-closure-01-trae",
+    "latestTraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-PARALLEL-EVIDENCE-CLOSURE-01-TRAE-REPORT.md",
+    "completionPackage": "C:\\Users\\Catcher\\Desktop\\协作文件夹\\picture-edit-collab-completion.md",
+    "completionPackageRevision": "R2",
+    "scope": "Fix evidence completeness and branch scope documentation for three parallel deliveries (#2-A, #2-B, #3) without modifying Smoke Harness core logic",
+    "parallelTasks": [
+      {
+        "id": "2-A",
+        "name": "check-lumen-collab.mjs composite .example fix",
+        "branch": "lumen/cloudbase-nosql-check-lumen-collab-composite-example-fix-01-trae",
+        "resultSha": "6462fed1bc04316e2f50135789f9afd8fd849894",
+        "remoteSha": "6462fed1bc04316e2f50135789f9afd8fd849894",
+        "baseSha": "436d29f",
+        "dependency": "none",
+        "diffFileCount": 2,
+        "diffFiles": [".gitignore", "scripts/check-lumen-collab.mjs"]
+      },
+      {
+        "id": "2-B",
+        "name": "Preview Deployment Readiness 4 deliverables",
+        "branch": "lumen/cloudbase-nosql-preview-deployment-readiness-01-trae",
+        "resultSha": "bf9bac3814cf58b34ab603379ae6a6e27dca88ab",
+        "remoteSha": "bf9bac3814cf58b34ab603379ae6a6e27dca88ab",
+        "stackedBaseSha": "6462fed",
+        "dependency": "STACKED_ON_6462fed",
+        "diffFileCount": 4,
+        "diffFiles": [
+          ".env.cloudbase-nosql.preview.example",
+          "docs/lumen-v2/deploy/CLOUDBASE-NOSQL-ENV-MATRIX.md",
+          "docs/lumen-v2/deploy/CLOUDBASE-NOSQL-PREVIEW-RUNBOOK.md",
+          "docs/lumen-v2/deploy/CLOUDBASE-NOSQL-ROLLBACK.md"
+        ]
+      },
+      {
+        "id": "3",
+        "name": "Preview Smoke Harness FIX + negative tests",
+        "branch": "lumen/cloudbase-nosql-preview-smoke-harness-01-trae",
+        "resultSha": "36b722c5aae08c1d08e3834202e98b61d099ee50",
+        "remoteSha": "36b722c5aae08c1d08e3834202e98b61d099ee50",
+        "mergeBaseWithMain": "7be5f76",
+        "dependency": "independent",
+        "scopeConstraint": "No modification to src/server/scripts/cloudbase-nosql-preview-smoke.ts in this round"
+      }
+    ],
+    "evidenceFixes": [
+      "Test count 15 → 16 (7 PASS + 8 FAIL + 1 BOUNDARY)",
+      ".envrc moved from FAIL to BOUNDARY (forbidden=false, isEnvFile=false)",
+      "Non-empty git status no longer called clean worktree (isolated worktree evidence)",
+      "#2-B marked STACKED_ON_6462fed",
+      "Added base...result file lists and commit graphs"
+    ],
+    "acResults": {
+      "AC-01": "PASS",
+      "AC-02": "PASS",
+      "AC-03": "PASS",
+      "AC-04": "PASS",
+      "AC-05": "PASS",
+      "AC-06": "PASS",
+      "AC-07": "PASS"
+    },
+    "readyForPreviewUnchanged": true,
+    "testMatrixUnchanged": "PENDING_FIX_R4_AND_PREVIEW_CREDENTIALS",
+    "lastUpdatedAt": "2026-07-22",
+    "lastUpdatedBy": "trae"
+  },
   "cloudbaseNoSqlImplement": {
     "taskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01",
     "status": "changes_requested",
@@ -221,5 +294,8 @@
     "previewBlockedReason": "NoSQL must pass GPT evidence review of R2 + one bounded Codex read-only audit before READY_FOR_PREVIEW",
     "lastUpdatedAt": "2026-07-21",
     "lastUpdatedBy": "trae"
-  }
+  },
+  "topLevelLastUpdatedAt": "2026-07-22",
+  "topLevelLastUpdatedBy": "trae",
+  "topLevelLastUpdateReason": "LUMEN-CLOUDBASE-NOSQL-PARALLEL-EVIDENCE-CLOSURE-01 R2 evidence closure complete; main NoSQL task state unchanged (readyForPreview still false)"
 }
