@@ -1,15 +1,17 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-23，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9 实施完成，等待 GPT FIX-R9 证据复审 + Codex 限域总审计）
+## 当前状态（2026-07-23，LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9 RF-R9-01/02/03 实施完成，等待 GPT 证据复审 + Codex 限域总审计）
 
 - 日期：2026-07-23
-- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-STORAGE-CONTRACT-METADATA-LEDGER`（修复 GPT FIX_REQUIRED verdict 的 C-01 Critical / H-01 High / M-01 Medium 三项缺陷）
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-STORAGE-CONTRACT-METADATA-LEDGER`（原始 FIX-R9 修复 C-01/H-01/M-01；RF-R9-01/02/03 闭合 C-01 SDK 派生类型 + 顶层失败合同）
 - **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
 - **Risk Level**：HIGH
 - **Base SHA**：`939e9e9`
-- **Implementation SHA**：`e55b84d`（e55b84de13c08c0bdbd2307111e7f488f785bea0）
+- **Implementation SHA**：`e55b84d`（原始 FIX-R9 — C-01/H-01/M-01）
+- **RF-R9-01/02/03 SHA**：`<post-push>`（SDK 派生类型 + 8 顶层失败合同测试）
 - **Working Branch**：`lumen/cloudbase-nosql-implement-01-fix-r9`
-- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md)
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md)（已追加 §12 RF-R9-01/02/03 Supplement）
+- **Gate Evidence**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md)
 - **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
 - **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
 - **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT FIX-R9 证据复审通过后，由 Codex 执行一次限域 READ_ONLY 总审计）
@@ -20,53 +22,96 @@
 - **EVIDENCE-CORRECTION-02** → `superseded_by_fix_r9`
 - **EVIDENCE-CORRECTION-01** → `superseded_by_evidence_correction_02`（已标记）
 
-> GPT FIX_REQUIRED verdict 发现 3 项缺陷（C-01 Critical / H-01 High / M-01 Medium），FIX-R9 已全部修复。AC-07 FINAL_CODEX_BLOCKER 已通过 H-01 修复解决。下方保留历史 section 作为记录。
+> GPT FIX_REQUIRED verdict 发现 3 项缺陷（C-01 Critical / H-01 High / M-01 Medium），FIX-R9 已全部修复。AC-07 FINAL_CODEX_BLOCKER 已通过 H-01 修复解决。GPT 对原始 FIX-R9 下发 FIX_REQUIRED（RF-R9-01/02/03），本轮已闭合。下方保留历史 section 作为记录。
 
-### FIX-R9 实施核心结论
+### RF-R9-01/02/03 实施核心结论（本轮）
+
+GPT 对原始 FIX-R9 下发 FIX_REQUIRED verdict，要求 3 项闭合 C-01 的工作（H-01/M-01 已 PASS，不重写）：
+
+1. **RF-R9-01 — 使用 SDK 派生类型**：
+   - 不再保留手写 `CloudBaseApp` Storage 接口类型（漂移风险）
+   - `deleteFile()`/`getTempFileURL()` 返回类型直接派生自已安装的 `@cloudbase/node-sdk@3.18.3`
+   - **SDK 类型**：`IDeleteFileResult`（deleteFile 成功分支）、`IGetFileUrlResult`（getTempFileURL 成功分支）
+   - **Import 位置**：`cloudbase.nosql.ts` 第 44 行 `import type { IDeleteFileResult, IGetFileUrlResult } from '@cloudbase/node-sdk';`
+   - **联合类型**：`DeleteFileReturn = IDeleteFileResult | SdkStorageTopLevelError`（成功分支 IS SDK 类型，编译期漂移检测）
+   - **`statusMessage` 运行时字段**：SDK 类型不声明，使用 safe cast `(item as { statusMessage?: string }).statusMessage ?? ''`
+
+2. **RF-R9-02 — 补齐顶层失败合同**（8 个新测试）：
+   - 新增 `isSdkTopLevelError()` 类型守卫：`fileList` 缺失或非数组 → 顶层错误（`message` 内容不影响判定）
+   - 4 处判定点更新：put 补偿删除、getSignedUrl、delete、exists
+   - 8 个新测试覆盖：fail-closed、metadata 保留、ledger 保留、稳定领域错误、message 无关性
+   - 测试注入使用 `vi.spyOn(...).mockResolvedValueOnce(...)` + `as never` cast（模拟 SDK 类型未声明的运行时形状）
+
+3. **RF-R9-03 — 更新证据包**：
+   - SDK 类型、import、顶层错误判定逻辑、新测试名称、server 测试总数、HEAD、worktree clean、readyForPreview=false 全部记录
+   - 新建 `fix-r9-gate-results.md` 完整证据文件
+   - Trae Report 追加 §12 RF-R9-01/02/03 Supplement
+   - STATE.json fixR9 字段更新
+   - SESSION-HANDOFF.md 更新（本节）
+
+### 原始 FIX-R9 实施核心结论（保持不变）
 
 1. **C-01 (Critical) — CloudBase Storage 成功码类型建模错误**：
    - 生产适配器把 `deleteFile()`/`getTempFileURL()` 的 `code` 声明为 `number`，以 `code !== 0` 判定失败
    - 实际 `@cloudbase/node-sdk@3.18.3` 类型将 `code` 定义为字符串，成功值为 `"SUCCESS"`（官方文档确认）
    - 真实成功响应被误判为失败，破坏项目创建主路径和删除路径原子性
    - **修复**：4 处判定点（put 补偿删除、getSignedUrl、objects.delete、objects.exists）改为 `code !== 'SUCCESS'` + fileID 匹配；空/不匹配 fileList 抛 OBJECT_NOT_FOUND/OBJECT_DELETE_PARTIAL；Mock 对齐字符串合同
+   - **RF-R9-01 补充**：4 处判定点现已使用 SDK 派生类型 + `isSdkTopLevelError()` 顶层错误处理
 
 2. **H-01 (High) — METADATA_MISSING 清除 ledger 且无 fileID 恢复**：
    - `objects.delete()` 抛 METADATA_MISSING 后，ProjectService 将 key 加入 completedKeys 并从 ledger 删除
    - 远端对象可能仍存在，ledger 只存 storageKey 不存 fileID，永久失去清理所有权
    - **修复**：METADATA_MISSING keys 不再进入 completedKeys；新增 `project_unresolved_metadata` 集合 + `markUnresolvedMetadata()` duck-typed 方法持久化不可恢复 keys；ledger 保留
    - **AC-07 FINAL_CODEX_BLOCKER RESOLVED**
+   - **RF-R9-01/02/03 无回归**：H-01 修复保持不变
 
 3. **M-01 (Medium) — ledger 更新失败被吞掉**：
    - `removeCleanupKeys()` 失败被捕获后吞掉，方法仍返回 `{ deleted: true, cleanupFailures=[] }`
    - 调用方无信号重试；无持久化后台 replayer
    - **修复**：`removeCleanupKeys()` 失败时设置 `ledgerUpdateFailed=true` in DeleteProjectResult；调用方收到明确 retry-required 信号
+   - **RF-R9-01/02/03 无回归**：M-01 修复保持不变
 
-### 门禁结果（FIX-R9）
+### 门禁结果（RF-R9-01/02/03 完整 8 门禁）
 
 | # | 门禁 | 结果 | 计数 |
 |---|------|------|------|
 | 1 | Server tsc | PASS | 0 errors |
-| 2 | Server tests | PASS | 454 tests |
+| 2 | Server tests | PASS | 462 tests / 36 files（vs 原始 R9 454，+8 RF-R9-02） |
 | 3 | Client tsc | PASS | 0 errors |
-| 4 | Client tests | PASS | 194 tests |
+| 4 | Client tests | PASS | 194 tests / 10 files |
 | 5 | check-lumen-collab | PASS | no secrets |
 | 6 | readyForPreview | PASS | false（不变） |
 | 7 | No merge to main | PASS | on `lumen/cloudbase-nosql-implement-01-fix-r9` |
 | 8 | git diff --check | PASS | exit 0 |
+
+### RF-R9-02 新增测试清单（8 个）
+
+| # | 测试名 |
+|---|--------|
+| 1 | delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (STORAGE_REQUEST_FAIL), metadata preserved |
+| 2 | delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (SYS_ERR), different code still fails closed |
+| 3 | delete top-level failure with different message still fails closed (message does not affect fail-closed) |
+| 4 | getSignedUrl throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure, metadata preserved |
+| 5 | getSignedUrl top-level failure with different message still fails closed (message does not affect fail-closed) |
+| 6 | put compensation delete: top-level failure from deleteFile preserves orphaned file |
+| 7 | exists returns false when SDK returns top-level failure (fail-closed, no throw, metadata preserved) |
+| 8 | deleteProject: top-level failure on object delete does NOT remove cleanup ledger |
 
 ### AC-07 FINAL_CODEX_BLOCKER — RESOLVED
 
 - **原风险**：`objects.delete()` 抛 `METADATA_MISSING` 时，key 加入 completedKeys，ledger 被清除，远端对象可能 orphaned
 - **修复状态**：**RESOLVED via H-01**。METADATA_MISSING keys 现在持久化到 `project_unresolved_metadata` 集合，ledger 保留，远端对象清理所有权可恢复
 - **测试覆盖**：3 个 cascade-boundary 测试 + 2 个 final-closure 测试已更新验证新行为
+- **RF-R9-01/02/03 无回归**：H-01 修复保持不变
 
 ### GPT 下一步行动
 
-1. 证据复审 FIX-R9 Trae 报告
-2. 验证 C-01/H-01/M-01 三项缺陷是否全部修复
-3. 审查 AC-07 BLOCKER 解决方案是否合理（project_unresolved_metadata 集合设计）
-4. 通过后激活 Codex 限域 READ_ONLY 总审计（范围：FIX-R9 4 处判定点 + markUnresolvedMetadata + ledgerUpdateFailed 信号）
-5. Codex 通过后方可考虑解锁 Preview（仍需用户决策 + 真实 CloudBase 字符串状态码验证）
+1. 证据复审 RF-R9-01/02/03 Trae 报告 §12 + gate evidence 文件
+2. 验证 SDK 派生类型是否满足 RF-R9-01（`IDeleteFileResult`/`IGetFileUrlResult` import + 联合类型 + 编译期漂移检测）
+3. 验证顶层失败合同是否满足 RF-R9-02（8 测试 + 5 项合同断言：fail-closed、metadata 保留、ledger 保留、稳定领域错误、message 无关性）
+4. 验证证据包是否满足 RF-R9-03（SDK 类型、import、顶层错误逻辑、新测试名称、server 总数 462、HEAD、worktree clean、readyForPreview=false）
+5. 通过后激活 Codex 限域 READ_ONLY 总审计（范围：FIX-R9 4 处判定点 + SDK 派生类型 + isSdkTopLevelError + markUnresolvedMetadata + ledgerUpdateFailed 信号）
+6. Codex 通过后方可考虑解锁 Preview（仍需用户决策 + 真实 CloudBase 字符串状态码 + OCC 行为验证）
 
 ### Stop Conditions（持续生效）
 
@@ -78,6 +123,8 @@
 - 不扩大到无关核心模块
 - 不自行判定 AC-07 通过（已由 H-01 修复，但需 GPT 验收确认）
 - 不使用测试通过代替并发不变量证明
+- 不升级 `@cloudbase/node-sdk`
+- 不重写 H-01/M-01（已 PASS，RF-R9-01/02/03 仅闭合 C-01）
 
 ---
 

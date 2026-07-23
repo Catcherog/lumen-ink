@@ -241,4 +241,130 @@ GPT 要求：保持 `readyForPreview=false`，修复后用真实 SDK 响应形�
 
 ---
 
+## 12. RF-R9-01/02/03 Supplement (GPT FIX_REQUIRED on original FIX-R9)
+
+GPT FIX_REQUIRED verdict on the original FIX-R9 round required 3 specific fixes for C-01 closure (H-01/M-01 already PASS — no regression permitted). This section documents the supplement.
+
+### 12.1 RF-R9-01 — SDK-Derived Types
+
+**Required**: Stop keeping handwritten `CloudBaseApp` Storage interface types (drift risk). Derive `deleteFile()`/`getTempFileURL()` return types directly from installed `@cloudbase/node-sdk`.
+
+**Implementation**:
+
+- **SDK type used**: `IDeleteFileResult` (for `deleteFile`) and `IGetFileUrlResult` (for `getTempFileURL`), both imported directly from `@cloudbase/node-sdk` v3.18.3.
+- **Import location**: `src/server/infrastructure/persistence/cloudbase.nosql.ts` line 44:
+  ```typescript
+  import type { IDeleteFileResult, IGetFileUrlResult } from '@cloudbase/node-sdk';
+  ```
+- **Adapter-level union types** (compile-time drift detection):
+  ```typescript
+  interface SdkStorageTopLevelError {
+    code: string;
+    message: string;
+    requestId?: string;
+  }
+  type DeleteFileReturn = IDeleteFileResult | SdkStorageTopLevelError;
+  type GetTempFileURLReturn = IGetFileUrlResult | SdkStorageTopLevelError;
+  ```
+- **Success branch IS the SDK type** — not a `Pick` mirror, not a handwritten copy. Any drift in `@cloudbase/node-sdk` types fails the adapter at compile time.
+- **Why union (not pure SDK type)**: SDK TypeScript types declare `fileList` as required, but at runtime the SDK returns raw `res` (top-level `code`/`message`, NO `fileList`) when the backend API fails. This runtime/declaration gap is documented in `@cloudbase/node-sdk@3.18.3` `src/storage/index.ts` lines 163-174 (deleteFile) and 231-239 (getTempFileURL).
+- **`statusMessage` runtime field**: SDK types do NOT declare `statusMessage`, but runtime responses include it. The "not found" idempotent check now uses safe cast: `(item as { statusMessage?: string }).statusMessage ?? ''`.
+
+### 12.2 RF-R9-02 — Top-Level Failure Contract (8 new tests)
+
+**Required**: Add tests proving SDK top-level `code`/`message` failures are fail-closed.
+
+**Top-level error judgment logic** — `isSdkTopLevelError()` type guard:
+
+```typescript
+function isSdkTopLevelError(res: unknown): res is SdkStorageTopLevelError {
+  return (
+    typeof res === 'object' &&
+    res !== null &&
+    !Array.isArray((res as { fileList?: unknown }).fileList)
+  );
+}
+```
+
+If `fileList` is missing or not an array → top-level error. The `message` content does NOT affect this determination.
+
+**4 judgment sites updated**:
+
+| # | Site | Behavior on top-level error |
+|---|------|-----------------------------|
+| 1 | `put()` compensation delete | throws `COMPENSATION_DELETE_FAILED: STORAGE_TOPLEVEL_ERROR` (orphaned file preserved) |
+| 2 | `getSignedUrl()` | throws `STORAGE_TOPLEVEL_ERROR` |
+| 3 | `delete()` | throws `STORAGE_TOPLEVEL_ERROR` (metadata + ledger preserved) |
+| 4 | `exists()` | returns `false` + `console.warn` (fail-closed, no throw) |
+
+**8 new tests** in `cloudbase.nosql.storage.contract.r9.test.ts` describe block `"FIX-R9 RF-R9-02: SDK top-level failure contract (fail-closed)"`:
+
+| # | Test name |
+|---|-----------|
+| 1 | `delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (STORAGE_REQUEST_FAIL), metadata preserved` |
+| 2 | `delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (SYS_ERR), different code still fails closed` |
+| 3 | `delete top-level failure with different message still fails closed (message does not affect fail-closed)` |
+| 4 | `getSignedUrl throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure, metadata preserved` |
+| 5 | `getSignedUrl top-level failure with different message still fails closed (message does not affect fail-closed)` |
+| 6 | `put compensation delete: top-level failure from deleteFile preserves orphaned file` |
+| 7 | `exists returns false when SDK returns top-level failure (fail-closed, no throw, metadata preserved)` |
+| 8 | `deleteProject: top-level failure on object delete does NOT remove cleanup ledger` |
+
+**Contract assertions verified**:
+
+| Requirement | Tests | Status |
+|-------------|-------|--------|
+| Top-level failure never treated as success | 1-8 | PASS |
+| Don't delete metadata on top-level failure | 1, 4, 7, 8 | PASS |
+| Don't delete cleanup ledger on top-level failure | 8 | PASS |
+| Return/throw stable domain error | 1-6 (throw); 7 (returns false + warn) | PASS |
+| `message` doesn't affect fail-closed behavior | 3, 5 | PASS |
+
+### 12.3 RF-R9-03 — Evidence Package Update
+
+**Required**: Explicitly list SDK type used, import, top-level error logic, new test names, server test total, local/remote HEAD, worktree clean, readyForPreview=false.
+
+**Provided**:
+
+- **SDK type used**: `IDeleteFileResult`, `IGetFileUrlResult` (see §12.1)
+- **Import location**: `cloudbase.nosql.ts` line 44 (see §12.1)
+- **Top-level error judgment logic**: `isSdkTopLevelError()` type guard (see §12.2)
+- **New test names**: 8 tests listed in §12.2
+- **Server test total**: 462 (vs original R9 454; +8 RF-R9-02 tests)
+- **Local/Remote HEAD**: `<populated post-push>` (see gate evidence file)
+- **Worktree clean**: confirmed — only 2 modified files (`cloudbase.nosql.ts`, `cloudbase.nosql.storage.contract.r9.test.ts`)
+- **readyForPreview**: `false` (unchanged — STATE.json line 164)
+
+### 12.4 Gate Results (RF-R9-01/02/03 full 8-gate run)
+
+| # | Gate | Result | Count |
+|---|------|--------|-------|
+| 1 | Server tsc | PASS | 0 errors |
+| 2 | Server tests | PASS | 462 tests / 36 files |
+| 3 | Client tsc | PASS | 0 errors |
+| 4 | Client tests | PASS | 194 tests / 10 files |
+| 5 | check-lumen-collab | PASS | no secrets |
+| 6 | readyForPreview | PASS | false (unchanged) |
+| 7 | No merge to main | PASS | on `lumen/cloudbase-nosql-implement-01-fix-r9` |
+| 8 | git diff --check | PASS | exit 0 |
+
+**8/8 PASS**
+
+### 12.5 Files Changed (RF-R9-01/02/03 supplement)
+
+| File | Change |
+|------|--------|
+| `src/server/infrastructure/persistence/cloudbase.nosql.ts` | Added SDK type import; added `SdkStorageTopLevelError` + union types; replaced handwritten return types; added `isSdkTopLevelError()` guard; updated 4 judgment sites; updated 2 `statusMessage` safe casts |
+| `src/server/infrastructure/persistence/cloudbase.nosql.storage.contract.r9.test.ts` | +1 new describe block with 8 RF-R9-02 tests |
+| `docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md` | new: complete RF-R9-01/02/03 gate evidence |
+| `docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md` | this section appended |
+| `docs/lumen-v2/state/STATE.json` | fixR9 fields updated (gateResult, scope, filesChanged, remainingRisks) |
+| `docs/lumen-v2/state/SESSION-HANDOFF.md` | FIX-R9 section updated with RF-R9-01/02/03 info |
+
+### 12.6 No Regression to H-01/M-01
+
+H-01 and M-01 fixes from original FIX-R9 are unchanged. The 3 cascade-boundary + 2 final-closure tests for H-01/M-01 still pass without modification. The new RF-R9-01/02/03 work only adds SDK-derived types and top-level failure handling — it does not modify the `markUnresolvedMetadata` method, `project_unresolved_metadata` collection, or `ledgerUpdateFailed` signal.
+
+---
+
 **EVIDENCE PROVIDED BY TRAE; NOT YET INDEPENDENTLY VERIFIED.**
