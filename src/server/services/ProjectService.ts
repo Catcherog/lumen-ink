@@ -27,6 +27,7 @@ import type {
   Project,
   Asset,
   Version,
+  ObjectStore,
 } from '../domain/persistence.js';
 import type { JobExecutor } from '../domain/persistence.js';
 import { DomainError } from '../domain/errors.js';
@@ -73,6 +74,12 @@ export interface DeleteProjectResult {
    * retry-required to the client or schedule a ledger reconciliation.
    */
   ledgerUpdateFailed: boolean;
+  /**
+   * RF-R10-04 (R9-METADATA-02/AC-07): True when markUnresolvedMetadata()
+   * failed to persist the unresolved entries. The entries are NOT durably
+   * recorded for reconciliation; the caller should signal retry-required.
+   */
+  unresolvedPersistFailed: boolean;
 }
 
 function generateId(prefix: string): string {
@@ -339,7 +346,14 @@ export class ProjectService {
       getCleanupKeys?(id: string): Promise<string[]>;
       removeCleanupKeys?(id: string, removedKeys: string[]): Promise<string[]>;
       deleteCleanupKeys?(id: string): Promise<void>;
-      markUnresolvedMetadata?(id: string, keys: string[]): Promise<void>;
+      markUnresolvedMetadata?(
+        id: string,
+        entries: Array<{ storageKey: string; fileID: string | null }>
+      ): Promise<void>;
+    };
+    // RF-R10-04: Check if the adapter supports getFileId (duck-typed).
+    const objectStore = this.deps.objects as ObjectStore & {
+      getFileId?(key: string): Promise<string | null>;
     };
 
     let storageKeys: string[] = [];
@@ -374,13 +388,34 @@ export class ProjectService {
     // successful objects.delete() call), but is explicitly logged as
     // "remote deletion NOT confirmed" to distinguish it from OBJECT_NOT_FOUND
     // (which IS confirmed remote deletion via SDK status code).
+    //
+    // RF-R10-04 (R9-METADATA-02/AC-07): Before each delete, capture the
+    // fileID via duck-typed objects.getFileId(). If METADATA_MISSING occurs,
+    // the captured fileID is persisted to project_unresolved_metadata so
+    // the durable reconciliation replayer can attempt remote deletion by
+    // fileID even after object_metadata is lost.
     const cleanupFailures: string[] = [];
     const completedKeys: string[] = [];
     // FIX-R9 H-01: METADATA_MISSING keys must NOT be added to completedKeys.
     // They are persisted to project_unresolved_metadata for operational
     // review and remain in the cleanup ledger (not removed).
     const unresolvedMetadataMissing: string[] = [];
+    // RF-R10-04: Entries with fileID for durable reconciliation.
+    const unresolvedEntries: Array<{ storageKey: string; fileID: string | null }> = [];
     for (const key of storageKeys) {
+      // RF-R10-04: Capture fileID BEFORE attempting delete. If the metadata
+      // is later lost (METADATA_MISSING), we still have the fileID for
+      // reconciliation replay. If the metadata is already gone at this
+      // point, getFileId returns null.
+      let capturedFileId: string | null = null;
+      if (typeof objectStore.getFileId === 'function') {
+        try {
+          capturedFileId = await objectStore.getFileId(key);
+        } catch {
+          // Best-effort capture — if getFileId throws unexpectedly, proceed
+          // with null. The delete attempt will still work via object_metadata.
+        }
+      }
       try {
         await this.deps.objects.delete(key);
         completedKeys.push(key);
@@ -395,15 +430,16 @@ export class ProjectService {
           continue;
         }
         // FIX-R9 H-01: METADATA_MISSING — metadata is gone, fileID is
-        // unrecoverable, remote deletion NOT confirmed. These keys CANNOT
-        // be retried (no fileID). They must NOT be added to completedKeys
-        // (which would remove them from the ledger). Instead, persist them
-        // to project_unresolved_metadata for durable operational review.
+        // unrecoverable from object_metadata, remote deletion NOT confirmed.
+        // RF-R10-04: We captured the fileID above (if available). Persist
+        // both storageKey and fileID to project_unresolved_metadata for
+        // durable reconciliation via replayUnresolvedMetadata().
         if (msg.includes('METADATA_MISSING')) {
           console.warn(
             `[ProjectService.deleteProject] METADATA_MISSING key=${key}: remote deletion NOT confirmed, persisting to unresolved record for operational review`
           );
           unresolvedMetadataMissing.push(key);
+          unresolvedEntries.push({ storageKey: key, fileID: capturedFileId });
           continue;
         }
         const diagnosticId = generateDiagnosticId();
@@ -415,19 +451,25 @@ export class ProjectService {
       }
     }
 
-    // FIX-R9 H-01: Persist unresolved metadata-missing keys to a durable
-    // record. Duck-typed — only CloudBase adapter implements this method.
+    // FIX-R9 H-01 / RF-R10-04: Persist unresolved metadata-missing entries
+    // (with fileID when available) to a durable record. Duck-typed — only
+    // CloudBase adapter implements this method.
+    // RF-R10-04: If persistence fails, set unresolvedPersistFailed=true so
+    // the caller can signal retry-required (failure signal closure).
+    let unresolvedPersistFailed = false;
     if (
-      unresolvedMetadataMissing.length > 0 &&
+      unresolvedEntries.length > 0 &&
       typeof repo.markUnresolvedMetadata === 'function'
     ) {
       try {
-        await repo.markUnresolvedMetadata(projectId, unresolvedMetadataMissing);
+        await repo.markUnresolvedMetadata(projectId, unresolvedEntries);
       } catch (err) {
-        // Best-effort persistence — log but do not fail the delete. The
-        // keys remain in cleanupFailures-equivalent state (still in ledger).
+        // RF-R10-04: Failure signal — do NOT silently swallow. Set
+        // unresolvedPersistFailed=true so the caller knows the entries
+        // are NOT durably recorded and can signal retry-required.
+        unresolvedPersistFailed = true;
         console.warn(
-          `[ProjectService.deleteProject] markUnresolvedMetadata failed for ${projectId}`,
+          `[ProjectService.deleteProject] markUnresolvedMetadata failed for ${projectId} (unresolvedPersistFailed=true)`,
           err
         );
       }
@@ -473,7 +515,42 @@ export class ProjectService {
       }
     }
 
-    return { deleted: true, cleanupFailures, unresolvedMetadataMissing, ledgerUpdateFailed };
+    return {
+      deleted: true,
+      cleanupFailures,
+      unresolvedMetadataMissing,
+      ledgerUpdateFailed,
+      unresolvedPersistFailed,
+    };
+  }
+
+  /**
+   * RF-R10-05 (R9-LEDGER-01 / M-01 / AC-07): Durable reconciliation entry
+   * point. Delegates to the adapter's duck-typed replayUnresolvedMetadata()
+   * to attempt remote object deletion by fileID for entries persisted by
+   * markUnresolvedMetadata().
+   *
+   * Called by the server route (fire-and-forget) when deleteProject returns
+   * with unresolved entries. Also callable by a future background sweeper.
+   *
+   * Returns the replayer result: { replayed, succeeded, failed }.
+   */
+  async reconcileUnresolvedMetadata(projectId: string): Promise<{
+    replayed: number;
+    succeeded: string[];
+    failed: Array<{ storageKey: string; error: string }>;
+  }> {
+    const repo = this.deps.projects as ProjectRepository & {
+      replayUnresolvedMetadata?(id: string): Promise<{
+        replayed: number;
+        succeeded: string[];
+        failed: Array<{ storageKey: string; error: string }>;
+      }>;
+    };
+    if (typeof repo.replayUnresolvedMetadata !== 'function') {
+      return { replayed: 0, succeeded: [], failed: [] };
+    }
+    return repo.replayUnresolvedMetadata(projectId);
   }
 }
 

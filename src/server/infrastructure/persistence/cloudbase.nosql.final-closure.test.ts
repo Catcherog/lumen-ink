@@ -455,11 +455,15 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
     expect(metadataWarnings.length).toBeGreaterThan(0);
     expect(metadataWarnings.some((msg) => msg.includes('key-0'))).toBe(true);
 
-    // H-01: Unresolved metadata record was written.
+    // H-01 / RF-R10-04: Unresolved metadata record was written with entries schema.
     const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
     expect(unresolvedColl?.docs.has('p1')).toBe(true);
-    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
-    expect(unresolvedDoc.keys).toEqual(['key-0']);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as {
+      entries: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+    };
+    expect(unresolvedDoc.entries.map((e) => e.storageKey)).toEqual(['key-0']);
+    // RF-R10-04: fileID is null because metadata was already gone when getFileId captured it.
+    expect(unresolvedDoc.entries[0].fileID).toBeNull();
 
     warnSpy.mockRestore();
     await deps.close();
@@ -508,11 +512,15 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
     // key-0 remains; key-1 was removed (either OBJECT_NOT_FOUND or success).
     expect(cleanupDoc.keys).toEqual(['key-0']);
 
-    // H-01: Unresolved metadata record preserves key-0 for operational review.
+    // H-01 / RF-R10-04: Unresolved metadata record preserves key-0 for operational review.
     const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
     expect(unresolvedColl?.docs.has('p1')).toBe(true);
-    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
-    expect(unresolvedDoc.keys).toEqual(['key-0']);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as {
+      entries: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+    };
+    expect(unresolvedDoc.entries.map((e) => e.storageKey)).toEqual(['key-0']);
+    // RF-R10-04: fileID is null (metadata was pre-deleted before getFileId).
+    expect(unresolvedDoc.entries[0].fileID).toBeNull();
 
     warnSpy.mockRestore();
 
@@ -587,6 +595,161 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
       })
     ).rejects.toThrow(/IDEMPOTENT_VERSION_INCONSISTENT_STATE/);
 
+    await deps.close();
+  });
+});
+
+// ===========================================================================
+// RF-R10-04 (R9-METADATA-02 / AC-07): ProjectService fileID capture &
+// unresolvedPersistFailed signal.
+//
+// GPT verdict (FIX_REQUIRED):
+//  "R9-METADATA-02: METADATA_MISSING 持久化但无 fileID/reader/replayer，无法
+//   证明 AC-07 可执行所有权恢复。Required Fix: 持久化可执行清理标识（至少
+//   fileID + storageKey），为 unresolved 写入提供失败信号或阻止成功返回，并
+//   实现可调用的 durable reconciliation reader/replayer。"
+//
+// These integration tests verify the ProjectService.deleteProject flow:
+//  1. fileID is captured BEFORE delete (via duck-typed objects.getFileId)
+//     and persisted to project_unresolved_metadata when METADATA_MISSING occurs.
+//  2. unresolvedPersistFailed=true is returned when markUnresolvedMetadata
+//     throws (failure signal closure — caller can signal retry-required).
+// ===========================================================================
+
+describe('RF-R10-04 (R9-METADATA-02/AC-07): ProjectService fileID capture & failure signal', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // --- fileID captured and persisted when getFileId succeeds but delete throws METADATA_MISSING ---
+
+  it('deleteProject persists captured fileID when getFileId succeeds but delete throws METADATA_MISSING', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p1'));
+
+    const key = 'key-capture-fid';
+    await deps.objects.put(key, new Uint8Array([1]), 'image/png');
+    await deps.assets.create(makeAsset('a1', 'p1', key));
+    const expectedFileID = `cloud://${OPTIONS.envId}/${OPTIONS.storagePrefix}/${key}`;
+
+    // deleteCascade creates the ledger + deletes project metadata.
+    // object_metadata for key still exists at this point.
+    await deps.projects.deleteCascade('p1');
+
+    // Verify metadata still exists (getFileId will capture the fileID).
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    // Spy on objects.delete to throw METADATA_MISSING (simulating: metadata
+    // lost between getFileId capture and delete attempt).
+    vi.spyOn(deps.objects, 'delete').mockRejectedValueOnce(
+      new Error(`METADATA_MISSING: storageKey=${key} not found in object_metadata`)
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await service.deleteProject('p1');
+
+    expect(result.deleted).toBe(true);
+    expect(result.unresolvedMetadataMissing).toEqual([key]);
+
+    // RF-R10-04: The captured fileID was persisted (NOT null) because
+    // getFileId succeeded before delete threw METADATA_MISSING.
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p1')).toBe(true);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as {
+      entries: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+    };
+    expect(unresolvedDoc.entries).toHaveLength(1);
+    expect(unresolvedDoc.entries[0].storageKey).toBe(key);
+    expect(unresolvedDoc.entries[0].fileID).toBe(expectedFileID);
+
+    warnSpy.mockRestore();
+    await deps.close();
+  });
+
+  // --- unresolvedPersistFailed=true when markUnresolvedMetadata throws ---
+
+  it('deleteProject sets unresolvedPersistFailed=true when markUnresolvedMetadata throws', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p2'));
+
+    const key = 'key-persist-fail';
+    await deps.objects.put(key, new Uint8Array([1]), 'image/png');
+    await deps.assets.create(makeAsset('a2', 'p2', key));
+
+    await deps.projects.deleteCascade('p2');
+
+    // Delete metadata to trigger METADATA_MISSING path.
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    metaColl?.docs.delete(key);
+
+    // Spy on the repo's markUnresolvedMetadata to throw.
+    const repo = deps.projects as typeof deps.projects & {
+      markUnresolvedMetadata(
+        id: string,
+        entries: Array<{ storageKey: string; fileID: string | null }>
+      ): Promise<void>;
+    };
+    vi.spyOn(repo, 'markUnresolvedMetadata').mockRejectedValueOnce(
+      new Error('PERSIST_FAILED: simulated transaction conflict exhaustion')
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await service.deleteProject('p2');
+
+    // deleteProject still succeeds (metadata was already deleted by deleteCascade).
+    expect(result.deleted).toBe(true);
+    expect(result.unresolvedMetadataMissing).toEqual([key]);
+
+    // RF-R10-04: Failure signal — unresolvedPersistFailed=true.
+    expect(result.unresolvedPersistFailed).toBe(true);
+
+    // The unresolved record was NOT written (mark threw).
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p2') ?? false).toBe(false);
+
+    // The persistence failure warning was logged.
+    const persistWarnings = warnSpy.mock.calls
+      .map((call) => String(call[0]))
+      .filter((msg) => msg.includes('unresolvedPersistFailed=true'));
+    expect(persistWarnings.length).toBeGreaterThan(0);
+
+    warnSpy.mockRestore();
+    await deps.close();
+  });
+
+  // --- Normal delete (no METADATA_MISSING): unresolvedPersistFailed stays false ---
+
+  it('deleteProject with no METADATA_MISSING: unresolvedPersistFailed=false, no unresolved record', async () => {
+    const { deps, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+    await deps.projects.create(makeProject('p3'));
+
+    const key = 'key-normal';
+    await deps.objects.put(key, new Uint8Array([1]), 'image/png');
+    await deps.assets.create(makeAsset('a3', 'p3', key));
+
+    await deps.projects.deleteCascade('p3');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await service.deleteProject('p3');
+
+    expect(result.deleted).toBe(true);
+    expect(result.unresolvedMetadataMissing).toEqual([]);
+    expect(result.unresolvedPersistFailed).toBe(false);
+    expect(result.ledgerUpdateFailed).toBe(false);
+
+    // No unresolved record written (no METADATA_MISSING).
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p3') ?? false).toBe(false);
+
+    warnSpy.mockRestore();
     await deps.close();
   });
 });

@@ -182,7 +182,29 @@ export function createProjectsRouter(deps: {
   router.delete('/:id', async (req: Request, res: Response) => {
     try {
       const result = await projectService.deleteProject(String(req.params.id));
-      res.json(result);
+      // RF-R10-05 (R9-LEDGER-01 / M-01): Convert cleanup-incomplete signals
+      // to a retry-required protocol. HTTP 202 (Accepted) signals that the
+      // project metadata was deleted but storage cleanup is incomplete.
+      // The client parses retryRequired and warns the user; the server
+      // fires the durable reconciliation replayer asynchronously.
+      const retryRequired = result.ledgerUpdateFailed || result.unresolvedPersistFailed;
+      if (retryRequired && result.unresolvedMetadataMissing.length > 0) {
+        // Fire-and-forget: attempt immediate reconciliation for unresolved
+        // entries (those with captured fileIDs). Errors are logged but do
+        // not affect the response — the entries remain durable for retry.
+        void projectService
+          .reconcileUnresolvedMetadata(String(req.params.id))
+          .catch((e) => {
+            console.warn(
+              `[routes.projects] reconcileUnresolvedMetadata failed for ${req.params.id}`,
+              e
+            );
+          });
+      }
+      res.status(retryRequired ? 202 : 200).json({
+        deleted: true,
+        retryRequired,
+      });
     } catch (err) {
       if (isDomainError(err)) {
         sendDomainError(res, err);

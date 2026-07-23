@@ -103,6 +103,22 @@ export interface ApiError extends Error {
   status?: number;
 }
 
+/**
+ * RF-R10-05 (R9-LEDGER-01 / M-01): Delete project response DTO.
+ *
+ * The server returns HTTP 200 when storage cleanup fully succeeded, and
+ * HTTP 202 (Accepted) when the project metadata was deleted but storage
+ * cleanup is incomplete (ledgerUpdateFailed or unresolvedPersistFailed).
+ *
+ * When retryRequired=true, the client should warn the user that cleanup
+ * is pending and the server will attempt durable reconciliation.
+ */
+export interface DeleteProjectResponseDto {
+  deleted: true;
+  /** True when storage cleanup is incomplete — server will reconcile. */
+  retryRequired: boolean;
+}
+
 function toApiError(err: unknown): ApiError {
   if (axios.isAxiosError(err)) {
     const body = err.response?.data as
@@ -150,9 +166,16 @@ export async function getProject(id: string): Promise<ProjectSnapshotDto> {
   }
 }
 
-export async function deleteProject(id: string): Promise<void> {
+export async function deleteProject(id: string): Promise<DeleteProjectResponseDto> {
   try {
-    await axios.delete(`/api/projects/${id}`, { timeout: 15_000 });
+    // RF-R10-05: Parse the response body. The server returns 200 when
+    // cleanup succeeded, or 202 when cleanup is incomplete (retryRequired).
+    // axios treats both as success (2xx), so no throw on 202.
+    const res = await axios.delete<DeleteProjectResponseDto>(
+      `/api/projects/${id}`,
+      { timeout: 15_000 }
+    );
+    return res.data;
   } catch (err) {
     throw toApiError(err);
   }

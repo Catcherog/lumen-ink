@@ -165,8 +165,11 @@ interface CloudBaseTransaction {
  * `TypeError: Cannot read properties of undefined (reading 'find')`.
  */
 interface SdkStorageTopLevelError {
-  code: string;
-  message: string;
+  // RF-R10-02: code/message are optional because the strict parser now
+  // also captures null/primitive responses (which have no code/message).
+  // Callers MUST use safe access (?? 'UNKNOWN') when reading these fields.
+  code?: string;
+  message?: string;
   requestId?: string;
 }
 
@@ -225,26 +228,58 @@ function unwrapDocumentData<T>(data: unknown): T | null {
 }
 
 /**
- * RF-R9-02: Type guard for the SDK's runtime top-level error shape.
+ * RF-R10-02 (R9-TOPLEVEL-01): Strict type guard for SDK runtime responses.
  *
- * When the CloudBase backend API fails, the SDK returns a raw response
- * `{ code, message, requestId? }` with NO `fileList` — even though
- * TypeScript types declare `fileList` as required. This guard detects
- * that shape so the adapter can fail closed with a stable domain error
- * (`STORAGE_TOPLEVEL_ERROR`) instead of throwing
- * `TypeError: Cannot read properties of undefined (reading 'find')`.
+ * GPT FIX_REQUIRED verdict: the old guard only checked "non-null object with
+ * non-array fileList" — it let null/primitive fall through to per-item success
+ * path (causing TypeError) and let mixed shapes (top-level code + valid
+ * fileList) enter the success branch (ignoring backend API failure).
  *
- * The guard checks for the ABSENCE of a valid `fileList` array — if
- * `fileList` is missing or not an array, the response is a top-level error.
- * The `message` field content does NOT affect this determination (fail-closed
- * regardless of message text).
+ * SDK success types (IDeleteFileResult/IGetFileUrlResult) extend IBaseResult
+ * which declares ONLY `requestId?` — NO top-level `code` field. The runtime
+ * top-level error shape is `{ code, message, requestId? }` with NO fileList,
+ * OR a mixed shape `{ code, message, fileList }` where the top-level code
+ * indicates backend API failure (the fileList in a mixed shape is NOT
+ * authoritative — it may be stale/partial from the failed API call).
+ *
+ * Strict rules:
+ *   1. null/primitive → top-level error (avoid TypeError)
+ *   2. non-object → top-level error
+ *   3. top-level `code` present → top-level error (backend API failure,
+ *      even if fileList is also present — mixed shape)
+ *   4. fileList not an array → top-level error
+ *   5. otherwise (non-null object, no top-level code, fileList is array)
+ *      → per-item success path
+ *
+ * Callers MUST use safe access (?? 'UNKNOWN') when reading code/message
+ * because null/primitive responses have no such fields.
  */
 function isSdkTopLevelError(res: unknown): res is SdkStorageTopLevelError {
-  return (
-    typeof res === 'object' &&
-    res !== null &&
-    !Array.isArray((res as { fileList?: unknown }).fileList)
-  );
+  if (res === null || typeof res !== 'object') {
+    return true; // null/primitive → top-level error (avoid TypeError)
+  }
+  const obj = res as { code?: unknown; fileList?: unknown };
+  if ('code' in obj) {
+    return true; // top-level code = backend API failure (even with fileList)
+  }
+  if (!Array.isArray(obj.fileList)) {
+    return true; // no valid fileList → cannot enter per-item success path
+  }
+  return false; // non-null object, no top-level code, fileList is array → success
+}
+
+/**
+ * RF-R10-02: Safely describe a top-level error response for logging.
+ *
+ * The type predicate `isSdkTopLevelError` narrows to `SdkStorageTopLevelError`
+ * but at runtime the value may be null/primitive (which have no code/message).
+ * This helper extracts a human-readable description without throwing.
+ */
+function describeTopLevelError(res: unknown): string {
+  if (res === null) return 'code=UNKNOWN msg=null response';
+  if (typeof res !== 'object') return `code=UNKNOWN msg=${String(res)}`;
+  const obj = res as { code?: string; message?: string };
+  return `code=${obj.code ?? 'UNKNOWN'} msg=${obj.message ?? 'no message'}`;
 }
 
 /**
@@ -630,15 +665,48 @@ export function createCloudBaseNoSqlPersistence(
      */
     removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
     /**
-     * FIX-R9 H-01: Persist metadata-missing keys to a durable unresolved
-     * record. These keys cannot be retried (fileID is gone with the missing
-     * metadata) and must NOT be added to completedKeys. The record survives
-     * for manual/COS-API reconciliation of potentially orphaned remote objects.
+     * FIX-R9 H-01 / RF-R10-04: Persist metadata-missing entries to a durable
+     * unresolved record. Each entry includes both storageKey AND fileID (when
+     * available) so that a durable reconciliation replayer can attempt remote
+     * deletion by fileID even after object_metadata is lost.
+     *
+     * These entries must NOT be added to completedKeys. The record survives
+     * for operational review and replay via replayUnresolvedMetadata().
      *
      * Infrastructure-internal method — NOT part of the frozen interface.
      * ProjectService uses duck-typing to check if this method exists.
      */
-    markUnresolvedMetadata(id: string, keys: string[]): Promise<void>;
+    markUnresolvedMetadata(
+      id: string,
+      entries: Array<{ storageKey: string; fileID: string | null }>
+    ): Promise<void>;
+    /**
+     * RF-R10-04 (AC-07): Durable reconciliation reader. Returns the unresolved
+     * metadata entries persisted by markUnresolvedMetadata(). Each entry
+     * includes storageKey, fileID (may be null if metadata was already gone),
+     * and recordedAt timestamp.
+     *
+     * Infrastructure-internal method — NOT part of the frozen interface.
+     */
+    getUnresolvedMetadata(
+      id: string
+    ): Promise<Array<{ storageKey: string; fileID: string | null; recordedAt: string }>>;
+    /**
+     * RF-R10-04 (AC-07): Durable reconciliation replayer. Reads unresolved
+     * entries and attempts to delete each remote object by fileID (bypassing
+     * object_metadata lookup). Entries with null fileID are reported as
+     * failed (cannot replay without fileID). Successfully-deleted entries
+     * are removed from the unresolved record.
+     *
+     * Infrastructure-internal method — NOT part of the frozen interface.
+     */
+    replayUnresolvedMetadata(
+      id: string
+    ): Promise<{
+      replayed: number;
+      succeeded: string[];
+      failed: Array<{ storageKey: string; error: string }>;
+    }>;
   } = {
     async create(input: Project): Promise<Project> {
       assertReady();
@@ -921,26 +989,151 @@ export function createCloudBaseNoSqlPersistence(
     },
 
     /**
-     * FIX-R9 H-01: Mark keys as unresolved metadata-missing.
-     * These keys are written to project_unresolved_metadata for durable
-     * operational review. The keys remain in the cleanup ledger (not
-     * removed via completedKeys) so the sweeper does NOT falsely declare
-     * them complete.
+     * FIX-R9 H-01 / RF-R10-04: Mark entries as unresolved metadata-missing.
+     * Each entry includes storageKey AND fileID (when available) so the
+     * durable reconciliation replayer can attempt remote deletion by fileID.
      *
-     * This method does NOT use a transaction — it is a simple upsert.
-     * Concurrent calls append keys via read-merge-write.
+     * RF-R10-03 (R9-METADATA-01): Uses runTransaction for atomic read-union-
+     * write. Concurrent callers' entries are preserved via OCC retry.
+     *
+     * RF-R10-04 (R9-METADATA-02/AC-07): Schema changed from { keys: string[] }
+     * to { entries: Array<{ storageKey, fileID, recordedAt }> } so that
+     * fileID is persisted for executable recovery.
      */
-    async markUnresolvedMetadata(id: string, keys: string[]): Promise<void> {
+    async markUnresolvedMetadata(
+      id: string,
+      entries: Array<{ storageKey: string; fileID: string | null }>
+    ): Promise<void> {
       assertReady();
-      if (keys.length === 0) return;
-      // Read existing unresolved keys, merge, and write back.
-      const coll = getDb().collection(COLLECTIONS.projectUnresolvedMetadata);
-      const existing = await coll.doc(id).get();
-      const existingDoc = unwrapDocumentData<{ keys: string[] }>(existing.data);
-      const existingKeys = new Set(existingDoc?.keys ?? []);
-      for (const k of keys) existingKeys.add(k);
-      // set() is an upsert — pass the raw value, not a command operator.
-      await coll.doc(id).set({ keys: [...existingKeys] });
+      if (entries.length === 0) return;
+      const now = new Date().toISOString();
+      const newEntries = entries.map((e) => ({
+        storageKey: e.storageKey,
+        fileID: e.fileID,
+        recordedAt: now,
+      }));
+      // RF-R10-03: Use runTransaction for atomic read-union-write.
+      // Concurrent callers' entries are preserved via OCC retry.
+      await getDb().runTransaction(async (tx) => {
+        const res = await tx.collection(COLLECTIONS.projectUnresolvedMetadata).doc(id).get();
+        const doc = res.data as { entries?: Array<{ storageKey: string; fileID: string | null; recordedAt: string }> } | null;
+        const existingEntries = doc?.entries ?? [];
+        // Union by storageKey: merge existing + new entries. If a storageKey
+        // already exists, prefer the entry with a non-null fileID.
+        const byKey = new Map<string, { storageKey: string; fileID: string | null; recordedAt: string }>();
+        for (const e of existingEntries) {
+          byKey.set(e.storageKey, e);
+        }
+        for (const e of newEntries) {
+          const existing = byKey.get(e.storageKey);
+          if (!existing) {
+            byKey.set(e.storageKey, e);
+          } else if (existing.fileID === null && e.fileID !== null) {
+            // Upgrade: replace null fileID with a known fileID.
+            byKey.set(e.storageKey, e);
+          }
+        }
+        await tx.collection(COLLECTIONS.projectUnresolvedMetadata).doc(id).set({
+          entries: [...byKey.values()],
+        });
+      });
+    },
+
+    /**
+     * RF-R10-04 (AC-07): Durable reconciliation reader.
+     * Returns the unresolved metadata entries persisted by markUnresolvedMetadata().
+     */
+    async getUnresolvedMetadata(
+      id: string
+    ): Promise<Array<{ storageKey: string; fileID: string | null; recordedAt: string }>> {
+      assertReady();
+      const res = await getDb().collection(COLLECTIONS.projectUnresolvedMetadata).doc(id).get();
+      const doc = unwrapDocumentData<{
+        entries?: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+      }>(res.data);
+      return doc?.entries ?? [];
+    },
+
+    /**
+     * RF-R10-04 (AC-07): Durable reconciliation replayer.
+     * Reads unresolved entries and attempts to delete each remote object by
+     * fileID (bypassing object_metadata lookup). Entries with null fileID
+     * are reported as failed. Successfully-deleted entries are removed from
+     * the unresolved record.
+     */
+    async replayUnresolvedMetadata(
+      id: string
+    ): Promise<{
+      replayed: number;
+      succeeded: string[];
+      failed: Array<{ storageKey: string; error: string }>;
+    }> {
+      assertReady();
+      const entries = await this.getUnresolvedMetadata(id);
+      if (entries.length === 0) {
+        return { replayed: 0, succeeded: [], failed: [] };
+      }
+      const succeeded: string[] = [];
+      const failed: Array<{ storageKey: string; error: string }> = [];
+      for (const entry of entries) {
+        if (entry.fileID === null) {
+          failed.push({
+            storageKey: entry.storageKey,
+            error: 'FILEID_MISSING: cannot replay without fileID (metadata was already gone when recorded)',
+          });
+          continue;
+        }
+        try {
+          const res = await getApp().deleteFile({ fileList: [entry.fileID] });
+          if (isSdkTopLevelError(res)) {
+            failed.push({
+              storageKey: entry.storageKey,
+              error: `STORAGE_TOPLEVEL_ERROR: ${describeTopLevelError(res)}`,
+            });
+            continue;
+          }
+          const item = res.fileList.find((f) => f.fileID === entry.fileID);
+          if (!item) {
+            failed.push({
+              storageKey: entry.storageKey,
+              error: `OBJECT_DELETE_PARTIAL: no matching result from SDK`,
+            });
+            continue;
+          }
+          if (item.code !== 'SUCCESS') {
+            failed.push({
+              storageKey: entry.storageKey,
+              error: `OBJECT_DELETE_PARTIAL: code=${item.code}`,
+            });
+            continue;
+          }
+          // Success — try to delete object_metadata too (best-effort).
+          try {
+            await deleteFileMetadata(entry.storageKey);
+          } catch {
+            // Metadata may already be gone — that's OK, the remote object
+            // was confirmed deleted by the SDK SUCCESS code.
+          }
+          succeeded.push(entry.storageKey);
+        } catch (err) {
+          failed.push({
+            storageKey: entry.storageKey,
+            error: (err as Error).message ?? 'UNKNOWN_ERROR',
+          });
+        }
+      }
+      // Remove succeeded entries from the unresolved record.
+      if (succeeded.length > 0) {
+        const succeededSet = new Set(succeeded);
+        const remaining = entries.filter((e) => !succeededSet.has(e.storageKey));
+        const coll = getDb().collection(COLLECTIONS.projectUnresolvedMetadata);
+        if (remaining.length === 0) {
+          await coll.doc(id).remove();
+        } else {
+          await coll.doc(id).set({ entries: remaining });
+        }
+      }
+      return { replayed: entries.length, succeeded, failed };
     },
   };
 
@@ -1456,7 +1649,19 @@ export function createCloudBaseNoSqlPersistence(
 
   // --- ObjectStore (NOSQL-R2-04: persist fileID) -------------------------
 
-  const objects: ObjectStore = {
+  const objects: ObjectStore & {
+    /**
+     * RF-R10-04 (R9-METADATA-02/AC-07): Look up fileID by storageKey WITHOUT
+     * deleting the object. Returns null if metadata is missing (object_metadata
+     * gone). Used by ProjectService.deleteProject to capture fileID before
+     * attempting delete, so that METADATA_MISSING entries can include the
+     * fileID for durable reconciliation.
+     *
+     * Infrastructure-internal method — NOT part of the frozen ObjectStore
+     * interface. ProjectService uses duck-typing.
+     */
+    getFileId?(key: string): Promise<string | null>;
+  } = {
     /**
      * FIX-R4 Workstream G (P1-02): Upload to CloudBase Storage and persist
      * the returned fileID to `object_metadata`. If the metadata write fails,
@@ -1496,20 +1701,17 @@ export function createCloudBaseNoSqlPersistence(
           // with NO fileList. Fail closed with a stable domain error.
           if (isSdkTopLevelError(compRes)) {
             throw new Error(
-              `COMPENSATION_DELETE_FAILED: STORAGE_TOPLEVEL_ERROR code=${compRes.code} msg=${compRes.message}`
+              `COMPENSATION_DELETE_FAILED: STORAGE_TOPLEVEL_ERROR ${describeTopLevelError(compRes)}`
             );
           }
           // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
           // Only accept the result matching the requested fileID.
           const compItem = compRes.fileList.find((f) => f.fileID === fileID);
           if (!compItem || compItem.code !== 'SUCCESS') {
-            // RF-R9-01: SDK's IDeleteFileResult.fileList[number] type is
-            // { code: string; fileID: string } — does NOT declare statusMessage.
-            // The backend API may include this diagnostic field at runtime;
-            // access it via a safe cast.
-            const compMsg = (compItem as { statusMessage?: string } | undefined)?.statusMessage ?? '';
+            // RF-R10-01: No free-text statusMessage判定 — code !== 'SUCCESS'
+            // is failure. SDK type declares ONLY { code, fileID }.
             throw new Error(
-              `COMPENSATION_DELETE_FAILED: code=${compItem?.code ?? 'NO_RESULT'} msg=${compMsg}`
+              `COMPENSATION_DELETE_FAILED: code=${compItem?.code ?? 'NO_RESULT'}`
             );
           }
           // Compensation succeeded — throw the original metadata error.
@@ -1557,7 +1759,7 @@ export function createCloudBaseNoSqlPersistence(
       // does NOT affect fail-closed behavior.
       if (isSdkTopLevelError(res)) {
         throw new Error(
-          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: code=${res.code} msg=${res.message}`
+          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: ${describeTopLevelError(res)}`
         );
       }
       // FIX-R9 C-01: SDK returns string code "SUCCESS". Only accept the
@@ -1618,13 +1820,13 @@ export function createCloudBaseNoSqlPersistence(
       // for retry. The message content does NOT affect fail-closed behavior.
       if (isSdkTopLevelError(res)) {
         throw new Error(
-          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: code=${res.code} msg=${res.message}`
+          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: ${describeTopLevelError(res)}`
         );
       }
       // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
       // Only accept the result matching the requested fileID. If the
-      // result is missing or code != "SUCCESS" (and not a "not found"
-      // idempotent case), do NOT delete metadata — preserve for retry.
+      // result is missing or code != "SUCCESS", do NOT delete metadata —
+      // preserve for retry.
       const item = res.fileList.find((f) => f.fileID === fileID);
       if (!item) {
         throw new Error(
@@ -1632,20 +1834,16 @@ export function createCloudBaseNoSqlPersistence(
         );
       }
       if (item.code !== 'SUCCESS') {
-        // RF-R9-01: SDK's IDeleteFileResult.fileList[number] type is
-        // { code: string; fileID: string } — does NOT declare statusMessage.
-        // The backend API may include this diagnostic field at runtime;
-        // access it via a safe cast. The message content does NOT affect
-        // top-level failure handling (fail-closed via isSdkTopLevelError
-        // above); it only affects the "not found" idempotent check here.
-        const msg = (item as { statusMessage?: string }).statusMessage ?? '';
-        // "not found" / "no such file" = already deleted, acceptable.
-        const lower = msg.toLowerCase();
-        if (!lower.includes('not found') && !lower.includes('no such file')) {
-          throw new Error(
-            `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: code=${item.code} msg=${msg}`
-          );
-        }
+        // RF-R10-01 (R9-STORAGE-01): Do NOT use free-text statusMessage
+        // to infer "not found". SDK type IDeleteFileResult.fileList[number]
+        // declares ONLY { code, fileID } — no statusMessage, no documented
+        // per-item not-found code. Any code !== 'SUCCESS' is a failure.
+        // Metadata + ledger are preserved for retry. GPT FIX_REQUIRED:
+        // "无法权威确认 absent 时必须保留 metadata 和 ledger。
+        //  不要以自由文本决定清理所有权。"
+        throw new Error(
+          `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: code=${item.code}`
+        );
       }
       // Remote delete succeeded — now delete metadata.
       await deleteFileMetadata(key);
@@ -1689,7 +1887,7 @@ export function createCloudBaseNoSqlPersistence(
         // affect fail-closed behavior.
         if (isSdkTopLevelError(res)) {
           console.warn(
-            `[objects.exists] STORAGE_TOPLEVEL_ERROR: key=${key} fileID=${fileID} code=${res.code} msg=${res.message}`
+            `[objects.exists] STORAGE_TOPLEVEL_ERROR: key=${key} fileID=${fileID} ${describeTopLevelError(res)}`
           );
           return false;
         }
@@ -1714,6 +1912,24 @@ export function createCloudBaseNoSqlPersistence(
           `[objects.exists] remote check failed: key=${key} fileID=${fileID}: ${(e as Error).message}`
         );
         return false;
+      }
+    },
+
+    /**
+     * RF-R10-04 (R9-METADATA-02/AC-07): Look up fileID by storageKey WITHOUT
+     * deleting the object. Returns null if metadata is missing. Used by
+     * ProjectService.deleteProject to capture fileID before attempting delete.
+     */
+    async getFileId(key: string): Promise<string | null> {
+      assertReady();
+      try {
+        return await resolveFileId(key);
+      } catch (e) {
+        const msg = (e as Error).message ?? '';
+        if (msg.includes('OBJECT_NOT_FOUND') || msg.includes('OBJECT_METADATA_CORRUPT')) {
+          return null;
+        }
+        throw e;
       }
     },
   };

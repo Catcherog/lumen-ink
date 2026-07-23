@@ -1119,11 +1119,26 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
     const cleanupDoc2 = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
     expect(cleanupDoc2.keys.sort()).toEqual([...storageKeys].sort());
 
-    // H-01: Unresolved metadata record preserves both keys for operational review
+    // H-01: Unresolved metadata record preserves both keys for operational review.
+    // RF-R10-04: schema changed from { keys: string[] } to
+    // { entries: Array<{ storageKey, fileID, recordedAt }> } for durable reconciliation.
     const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
     expect(unresolvedColl?.docs.has('p1')).toBe(true);
-    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
-    expect(unresolvedDoc.keys.sort()).toEqual([...storageKeys].sort());
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as {
+      entries: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+    };
+    expect(unresolvedDoc.entries.map((e) => e.storageKey).sort()).toEqual(
+      [...storageKeys].sort()
+    );
+    // RF-R10-04: entries are durably persisted with recordedAt timestamp.
+    // fileID may be null in this crash-window scenario because Phase 1
+    // (deleteCascade) already deleted object_metadata before getFileId()
+    // was called. The replayer handles null fileID by reporting
+    // FILEID_MISSING (covered in storage.contract.r9.test.ts).
+    expect(unresolvedDoc.entries.length).toBe(storageKeys.length);
+    for (const entry of unresolvedDoc.entries) {
+      expect(entry.recordedAt).toBeTruthy();
+    }
 
     // Storage metadata remains gone (Phase 1 already deleted it)
     for (const key of storageKeys) {
@@ -1466,10 +1481,19 @@ describe('FIX-R8 AC-03: METADATA_MISSING semantic distinction', () => {
     expect(cleanupDoc.keys).toEqual(['key-0']);
 
     // H-01: Unresolved metadata record was written for durable review.
+    // RF-R10-04: schema is { entries: Array<{ storageKey, fileID, recordedAt }> }.
     const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
     expect(unresolvedColl?.docs.has('p1')).toBe(true);
-    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
-    expect(unresolvedDoc.keys).toEqual(['key-0']);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as {
+      entries: Array<{ storageKey: string; fileID: string | null; recordedAt: string }>;
+    };
+    expect(unresolvedDoc.entries.map((e) => e.storageKey)).toEqual(['key-0']);
+    // RF-R10-04: entry is durably persisted with recordedAt timestamp.
+    // fileID may be null in this scenario because Phase 1 (deleteCascade)
+    // already deleted object_metadata before getFileId() was called.
+    // The replayer handles null fileID by reporting FILEID_MISSING
+    // (covered in storage.contract.r9.test.ts).
+    expect(unresolvedDoc.entries[0].recordedAt).toBeTruthy();
 
     warnSpy.mockRestore();
     await deps.close();

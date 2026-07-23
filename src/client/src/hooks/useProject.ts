@@ -323,10 +323,25 @@ export function useProject(
     pollAbortRef.current = true;
     setError(null);
     try {
-      await deleteProject(snapshot.project.id);
+      // RF-R10-05 (R9-LEDGER-01 / M-01): Parse the response body. The
+      // server returns retryRequired=true when storage cleanup is
+      // incomplete (HTTP 202). In that case, warn the user but still
+      // clear the snapshot (project metadata is already deleted).
+      const result = await deleteProject(snapshot.project.id);
       if (unmountedRef.current) return;
       setSnapshot(null);
       setActiveJob(null);
+      if (result.retryRequired) {
+        // Cleanup is incomplete — the server fires the durable
+        // reconciliation replayer. Warn the user so they know some
+        // remote objects may still be pending deletion.
+        const warn: ApiError = new Error(
+          '项目已删除，但部分存储对象清理未完成。系统将自动重试清理。'
+        );
+        warn.errorCode = 'CLEANUP_PENDING';
+        warn.status = 202;
+        setError(warn);
+      }
     } catch (err) {
       if (unmountedRef.current) return;
       setError(err as ApiError);

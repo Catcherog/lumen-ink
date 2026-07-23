@@ -383,7 +383,8 @@ describe('useProject hook', () => {
   it('delete calls deleteProject and clears local state', async () => {
     const snapshot = makeSnapshot();
     mocked.getProject.mockResolvedValue(snapshot);
-    mocked.deleteProject.mockResolvedValue(undefined);
+    // RF-R10-05: deleteProject now returns DeleteProjectResponseDto.
+    mocked.deleteProject.mockResolvedValue({ deleted: true, retryRequired: false });
 
     const { result } = renderHook(() => useProject('proj_1'));
 
@@ -398,5 +399,36 @@ describe('useProject hook', () => {
     expect(mocked.deleteProject).toHaveBeenCalledWith('proj_1');
     expect(result.current.snapshot).toBeNull();
     expect(result.current.activeJob).toBeNull();
+    // No error when cleanup succeeded.
+    expect(result.current.error).toBeNull();
+  });
+
+  // RF-R10-05 (R9-LEDGER-01 / M-01): when retryRequired=true, the hook
+  // clears the snapshot (project metadata is gone) but sets a warning
+  // error so the user knows cleanup is pending.
+
+  it('delete with retryRequired=true clears snapshot and sets CLEANUP_PENDING warning', async () => {
+    const snapshot = makeSnapshot();
+    mocked.getProject.mockResolvedValue(snapshot);
+    mocked.deleteProject.mockResolvedValue({ deleted: true, retryRequired: true });
+
+    const { result } = renderHook(() => useProject('proj_1'));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.snapshot).not.toBeNull();
+
+    await act(async () => {
+      await result.current.delete();
+    });
+    expect(mocked.deleteProject).toHaveBeenCalledWith('proj_1');
+    // Snapshot cleared (project metadata is deleted).
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.activeJob).toBeNull();
+    // Warning error set with CLEANUP_PENDING code.
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error?.errorCode).toBe('CLEANUP_PENDING');
+    expect(result.current.error?.status).toBe(202);
   });
 });

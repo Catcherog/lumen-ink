@@ -6,7 +6,7 @@
  * file-backed adapter rooted in a tmp directory so tests run hermetically.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { promises as fs } from 'fs';
@@ -201,5 +201,141 @@ describe('PERSIST-001 Task 6 — Project API routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.approvedVersionId).toBe(v0Id);
+  });
+});
+
+// ===========================================================================
+// RF-R10-05 (R9-LEDGER-01 / M-01): DELETE retry-required protocol.
+//
+// GPT verdict (FIX_REQUIRED):
+//  "R9-LEDGER-01: service 返回 ledgerUpdateFailed=true，route 仍返回成功，
+//   client 丢弃响应并清空本地项目。没有 caller retry，也没有后台重放。
+//   Required Fix: 让 server 将此状态转换为明确 retry-required 协议并调度
+//   durable reconciliation，或让 client 解析结果且不清空恢复入口；新增端到端测试。"
+//
+// These tests verify the server route's HTTP-level retry-required protocol:
+//  - 200 + retryRequired=false when cleanup fully succeeded
+//  - 202 + retryRequired=true when ledgerUpdateFailed or unresolvedPersistFailed
+//  - The route fires reconcileUnresolvedMetadata fire-and-forget when
+//    unresolved entries exist
+// ===========================================================================
+
+describe('RF-R10-05 (R9-LEDGER-01/M-01): DELETE retry-required protocol', () => {
+  function buildAppWithMockService(opts: {
+    deleteResult: {
+      deleted: true;
+      cleanupFailures: string[];
+      unresolvedMetadataMissing: string[];
+      ledgerUpdateFailed: boolean;
+      unresolvedPersistFailed: boolean;
+    };
+    reconcileResult?: { replayed: number; succeeded: string[]; failed: Array<{ storageKey: string; error: string }> };
+  }): { app: express.Application; reconcileSpy: ReturnType<typeof vi.fn> } {
+    process.env.JWT_SECRET = JWT_SECRET;
+    const reconcileSpy = vi.fn().mockResolvedValue(
+      opts.reconcileResult ?? { replayed: 0, succeeded: [], failed: [] }
+    );
+    const mockProjectService = {
+      deleteProject: vi.fn().mockResolvedValue(opts.deleteResult),
+      reconcileUnresolvedMetadata: reconcileSpy,
+      getProjectSnapshot: vi.fn(),
+      createProject: vi.fn(),
+      activateVersion: vi.fn(),
+      approveVersion: vi.fn(),
+    } as unknown as ProjectService;
+    const mockGenerationService = {} as unknown as GenerationService;
+
+    const app = express();
+    app.use(express.json({ limit: '50mb' }));
+    app.use('/api/projects', (req, res, next) => {
+      next(); // auth bypassed — mock service has no real state
+    }, createProjectsRouter({ projectService: mockProjectService, generationService: mockGenerationService }));
+    return { app, reconcileSpy };
+  }
+
+  it('DELETE returns 200 + retryRequired=false when cleanup fully succeeded', async () => {
+    const { app } = buildAppWithMockService({
+      deleteResult: {
+        deleted: true,
+        cleanupFailures: [],
+        unresolvedMetadataMissing: [],
+        ledgerUpdateFailed: false,
+        unresolvedPersistFailed: false,
+      },
+    });
+
+    const res = await request(app)
+      .delete('/api/projects/proj_clean')
+      .set('Authorization', `Bearer ${TEST_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.deleted).toBe(true);
+    expect(res.body.retryRequired).toBe(false);
+  });
+
+  it('DELETE returns 202 + retryRequired=true when ledgerUpdateFailed=true', async () => {
+    const { app, reconcileSpy } = buildAppWithMockService({
+      deleteResult: {
+        deleted: true,
+        cleanupFailures: [],
+        unresolvedMetadataMissing: ['key-0'],
+        ledgerUpdateFailed: true,
+        unresolvedPersistFailed: false,
+      },
+    });
+
+    const res = await request(app)
+      .delete('/api/projects/proj_ledger_fail')
+      .set('Authorization', `Bearer ${TEST_TOKEN}`);
+
+    expect(res.status).toBe(202);
+    expect(res.body.deleted).toBe(true);
+    expect(res.body.retryRequired).toBe(true);
+    // Fire-and-forget reconciliation was triggered (unresolved entries exist).
+    expect(reconcileSpy).toHaveBeenCalledWith('proj_ledger_fail');
+  });
+
+  it('DELETE returns 202 + retryRequired=true when unresolvedPersistFailed=true', async () => {
+    const { app, reconcileSpy } = buildAppWithMockService({
+      deleteResult: {
+        deleted: true,
+        cleanupFailures: [],
+        unresolvedMetadataMissing: ['key-0'],
+        ledgerUpdateFailed: false,
+        unresolvedPersistFailed: true,
+      },
+    });
+
+    const res = await request(app)
+      .delete('/api/projects/proj_persist_fail')
+      .set('Authorization', `Bearer ${TEST_TOKEN}`);
+
+    expect(res.status).toBe(202);
+    expect(res.body.deleted).toBe(true);
+    expect(res.body.retryRequired).toBe(true);
+    // Reconciliation was triggered.
+    expect(reconcileSpy).toHaveBeenCalledWith('proj_persist_fail');
+  });
+
+  it('DELETE does NOT call reconcile when no unresolved entries', async () => {
+    const { app, reconcileSpy } = buildAppWithMockService({
+      deleteResult: {
+        deleted: true,
+        cleanupFailures: ['key-fail'],
+        unresolvedMetadataMissing: [],
+        ledgerUpdateFailed: true,
+        unresolvedPersistFailed: false,
+      },
+    });
+
+    const res = await request(app)
+      .delete('/api/projects/proj_no_unresolved')
+      .set('Authorization', `Bearer ${TEST_TOKEN}`);
+
+    // retryRequired is true (ledgerUpdateFailed) but no unresolved entries.
+    expect(res.status).toBe(202);
+    expect(res.body.retryRequired).toBe(true);
+    // Reconciliation NOT called (no unresolved entries to replay).
+    expect(reconcileSpy).not.toHaveBeenCalled();
   });
 });
