@@ -69,7 +69,7 @@ GPT 对原始 FIX-R9 下发 `FIX_REQUIRED` verdict，要求 3 项闭合 C-01 的
 - **顶层错误判定逻辑**：`isSdkTopLevelError()` 类型守卫（见 RF-R9-02）
 - **新增测试名称**：8 个（见 RF-R9-02）
 - **Server 测试总数**：462（vs 原始 R9 454，+8 RF-R9-02）
-- **Local/Remote HEAD**：`<post-push>`（push 后回填）
+- **Local/Remote HEAD**：`0f0d0ae`（push 后回填，local == remote 已验证）
 - **Worktree clean**：已确认 — 仅 2 个修改文件（`cloudbase.nosql.ts`、`cloudbase.nosql.storage.contract.r9.test.ts`）
 - **`readyForPreview=false`**：已确认（STATE.json `cloudbaseNoSqlImplement.readyForPreview`）
 
@@ -86,7 +86,7 @@ GPT 对原始 FIX-R9 下发 `FIX_REQUIRED` verdict，要求 3 项闭合 C-01 的
 | Route | R2_BATCHED_AUDIT |
 | Base SHA | `939e9e9` |
 | Implementation SHA (original R9) | `e55b84d` (e55b84de13c08c0bdbd2307111e7f488f785bea0) |
-| RF-R9-01/02/03 SHA | `<post-push>` |
+| RF-R9-01/02/03 SHA | `0f0d0ae` |
 | Branch | `lumen/cloudbase-nosql-implement-01-fix-r9` |
 | Defects Source | GPT `FIX_REQUIRED` verdict on LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 |
 | Defects Resolved | C-01 (Critical), H-01 (High), M-01 (Medium) |

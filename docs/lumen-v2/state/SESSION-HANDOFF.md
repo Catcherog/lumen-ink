@@ -8,7 +8,7 @@
 - **Risk Level**：HIGH
 - **Base SHA**：`939e9e9`
 - **Implementation SHA**：`e55b84d`（原始 FIX-R9 — C-01/H-01/M-01）
-- **RF-R9-01/02/03 SHA**：`<post-push>`（SDK 派生类型 + 8 顶层失败合同测试）
+- **RF-R9-01/02/03 SHA**：`0f0d0ae`（SDK 派生类型 + 8 顶层失败合同测试）
 - **Working Branch**：`lumen/cloudbase-nosql-implement-01-fix-r9`
 - **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md)（已追加 §12 RF-R9-01/02/03 Supplement）
 - **Gate Evidence**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md)
