@@ -37,6 +37,11 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+// RF-R9-01: Import SDK public types directly so the adapter's Storage
+// return types are derived from the installed @cloudbase/node-sdk package
+// (not handwritten mirrors that can drift). See IDeleteFileResult /
+// IGetFileUrlResult usage in CloudBaseApp interface below.
+import type { IDeleteFileResult, IGetFileUrlResult } from '@cloudbase/node-sdk';
 import type {
   PersistenceDependencies,
   Project,
@@ -140,16 +145,57 @@ interface CloudBaseTransaction {
   rollback(reason?: unknown): Promise<unknown>;
 }
 
+/**
+ * RF-R9-01: Top-level error shape returned by the SDK at runtime when the
+ * CloudBase backend API returns an error.
+ *
+ * Source: @cloudbase/node-sdk@3.18.3 src/storage/index.ts (lines 163-174
+ * for deleteFile, 231-239 for getTempFileURL):
+ *   .then(res => {
+ *     if (res.code) {
+ *       return res  // ← raw error with top-level code/message, NO fileList
+ *     }
+ *     return { fileList: res.data.delete_list, requestId: res.requestId }
+ *   })
+ *
+ * This runtime shape is NOT captured in the SDK's TypeScript type
+ * declarations (IDeleteFileResult.fileList / IGetFileUrlResult.fileList
+ * are declared as required). The adapter MUST handle this shape to fail
+ * closed with a stable domain error instead of throwing
+ * `TypeError: Cannot read properties of undefined (reading 'find')`.
+ */
+interface SdkStorageTopLevelError {
+  code: string;
+  message: string;
+  requestId?: string;
+}
+
+/**
+ * RF-R9-01: Adapter-level return types derived from installed SDK public types.
+ *
+ * - Success branch: directly uses SDK-exported `IDeleteFileResult` /
+ *   `IGetFileUrlResult` (imported at top of file). Not a handwritten mirror
+ *   — if the SDK types change, the adapter fails to compile.
+ * - Error branch: captures the runtime top-level error shape
+ *   (`SdkStorageTopLevelError`) that the SDK returns when the backend API
+ *   fails but TypeScript types don't declare.
+ */
+type DeleteFileReturn = IDeleteFileResult | SdkStorageTopLevelError;
+type GetTempFileURLReturn = IGetFileUrlResult | SdkStorageTopLevelError;
+
 interface CloudBaseApp {
   database(): CloudBaseDatabase;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
-  // FIX-R9 C-01: Use installed SDK's real Storage contract.
-  // @cloudbase/node-sdk IDeleteFileResult.fileList[].code: string
-  // @cloudbase/node-sdk IFileUrlInfo.code: string
-  // Official docs: success code is the string "SUCCESS" (NOT numeric 0).
-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; statusMessage?: string }> }>;
-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; tempFileURL: string; statusMessage?: string }> }>;
+  // RF-R9-01: SDK-derived return types — success branch uses SDK public
+  // types directly (IDeleteFileResult / IGetFileUrlResult); union with
+  // SdkStorageTopLevelError captures the runtime gap where the SDK
+  // returns raw `res` (top-level code/message, NO fileList) when the
+  // backend API fails. The success branch IS the SDK type, not a Pick /
+  // mirror, so any drift in @cloudbase/node-sdk types is caught at
+  // compile time.
+  deleteFile(opts: { fileList: string[] }): Promise<DeleteFileReturn>;
+  getTempFileURL(opts: { fileList: string[] }): Promise<GetTempFileURLReturn>;
 }
 
 interface CloudBaseDatabase {
@@ -176,6 +222,29 @@ function unwrapDocumentData<T>(data: unknown): T | null {
     return data.length > 0 ? (data[0] as T) : null;
   }
   return data as T;
+}
+
+/**
+ * RF-R9-02: Type guard for the SDK's runtime top-level error shape.
+ *
+ * When the CloudBase backend API fails, the SDK returns a raw response
+ * `{ code, message, requestId? }` with NO `fileList` — even though
+ * TypeScript types declare `fileList` as required. This guard detects
+ * that shape so the adapter can fail closed with a stable domain error
+ * (`STORAGE_TOPLEVEL_ERROR`) instead of throwing
+ * `TypeError: Cannot read properties of undefined (reading 'find')`.
+ *
+ * The guard checks for the ABSENCE of a valid `fileList` array — if
+ * `fileList` is missing or not an array, the response is a top-level error.
+ * The `message` field content does NOT affect this determination (fail-closed
+ * regardless of message text).
+ */
+function isSdkTopLevelError(res: unknown): res is SdkStorageTopLevelError {
+  return (
+    typeof res === 'object' &&
+    res !== null &&
+    !Array.isArray((res as { fileList?: unknown }).fileList)
+  );
 }
 
 /**
@@ -1422,12 +1491,25 @@ export function createCloudBaseNoSqlPersistence(
         // Compensating delete: try to remove the orphaned object.
         try {
           const compRes = await getApp().deleteFile({ fileList: [fileID] });
+          // RF-R9-02: Handle SDK runtime top-level error shape.
+          // When the backend API fails, the SDK returns { code, message }
+          // with NO fileList. Fail closed with a stable domain error.
+          if (isSdkTopLevelError(compRes)) {
+            throw new Error(
+              `COMPENSATION_DELETE_FAILED: STORAGE_TOPLEVEL_ERROR code=${compRes.code} msg=${compRes.message}`
+            );
+          }
           // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
           // Only accept the result matching the requested fileID.
           const compItem = compRes.fileList.find((f) => f.fileID === fileID);
           if (!compItem || compItem.code !== 'SUCCESS') {
+            // RF-R9-01: SDK's IDeleteFileResult.fileList[number] type is
+            // { code: string; fileID: string } — does NOT declare statusMessage.
+            // The backend API may include this diagnostic field at runtime;
+            // access it via a safe cast.
+            const compMsg = (compItem as { statusMessage?: string } | undefined)?.statusMessage ?? '';
             throw new Error(
-              `COMPENSATION_DELETE_FAILED: code=${compItem?.code ?? 'NO_RESULT'} msg=${compItem?.statusMessage ?? ''}`
+              `COMPENSATION_DELETE_FAILED: code=${compItem?.code ?? 'NO_RESULT'} msg=${compMsg}`
             );
           }
           // Compensation succeeded — throw the original metadata error.
@@ -1468,6 +1550,16 @@ export function createCloudBaseNoSqlPersistence(
       const res = await getApp().getTempFileURL({
         fileList: [fileID],
       });
+      // RF-R9-02: Handle SDK runtime top-level error shape.
+      // When the backend API fails, the SDK returns { code, message } with
+      // NO fileList. Fail closed with a stable domain error instead of
+      // throwing TypeError from undefined.fileList. The message content
+      // does NOT affect fail-closed behavior.
+      if (isSdkTopLevelError(res)) {
+        throw new Error(
+          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: code=${res.code} msg=${res.message}`
+        );
+      }
       // FIX-R9 C-01: SDK returns string code "SUCCESS". Only accept the
       // result matching the requested fileID; reject unknown codes.
       const item = res.fileList.find((f) => f.fileID === fileID);
@@ -1519,6 +1611,16 @@ export function createCloudBaseNoSqlPersistence(
         throw e;
       }
       const res = await getApp().deleteFile({ fileList: [fileID] });
+      // RF-R9-02: Handle SDK runtime top-level error shape.
+      // When the backend API fails, the SDK returns { code, message } with
+      // NO fileList. Fail closed with a stable domain error instead of
+      // throwing TypeError from undefined.fileList. Metadata is preserved
+      // for retry. The message content does NOT affect fail-closed behavior.
+      if (isSdkTopLevelError(res)) {
+        throw new Error(
+          `STORAGE_TOPLEVEL_ERROR: ${key}: fileID=${fileID}: code=${res.code} msg=${res.message}`
+        );
+      }
       // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
       // Only accept the result matching the requested fileID. If the
       // result is missing or code != "SUCCESS" (and not a "not found"
@@ -1530,7 +1632,13 @@ export function createCloudBaseNoSqlPersistence(
         );
       }
       if (item.code !== 'SUCCESS') {
-        const msg = item.statusMessage ?? '';
+        // RF-R9-01: SDK's IDeleteFileResult.fileList[number] type is
+        // { code: string; fileID: string } — does NOT declare statusMessage.
+        // The backend API may include this diagnostic field at runtime;
+        // access it via a safe cast. The message content does NOT affect
+        // top-level failure handling (fail-closed via isSdkTopLevelError
+        // above); it only affects the "not found" idempotent check here.
+        const msg = (item as { statusMessage?: string }).statusMessage ?? '';
         // "not found" / "no such file" = already deleted, acceptable.
         const lower = msg.toLowerCase();
         if (!lower.includes('not found') && !lower.includes('no such file')) {
@@ -1574,6 +1682,17 @@ export function createCloudBaseNoSqlPersistence(
       // metadata exists — verify remote object actually exists
       try {
         const res = await getApp().getTempFileURL({ fileList: [fileID] });
+        // RF-R9-02: Handle SDK runtime top-level error shape.
+        // When the backend API fails, the SDK returns { code, message } with
+        // NO fileList. Fail closed (return false) instead of throwing
+        // TypeError. Metadata is preserved. The message content does NOT
+        // affect fail-closed behavior.
+        if (isSdkTopLevelError(res)) {
+          console.warn(
+            `[objects.exists] STORAGE_TOPLEVEL_ERROR: key=${key} fileID=${fileID} code=${res.code} msg=${res.message}`
+          );
+          return false;
+        }
         // FIX-R9 C-01: SDK returns string code "SUCCESS". Match fileID.
         const item = res.fileList.find((f) => f.fileID === fileID);
         if (!item) return false;

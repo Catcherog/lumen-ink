@@ -405,3 +405,252 @@ describe('FIX-R9 M-01: ledgerUpdateFailed signal', () => {
     await deps.close();
   });
 });
+
+/**
+ * RF-R9-02: SDK top-level failure contract tests (fail-closed).
+ *
+ * GPT verdict (FIX_REQUIRED) required:
+ *  "为 getTempFileURL() 和 deleteFile() 增加实际 SDK 类型允许的顶层错误响应测试，
+ *   至少证明：
+ *   - 顶层失败时绝不视为成功；
+ *   - 不删除 metadata；
+ *   - 不删除 cleanup ledger；
+ *   - 返回或抛出稳定的领域错误；
+ *   - message 不影响 fail-closed 行为。"
+ *
+ * Background: @cloudbase/node-sdk@3.18.3 src/storage/index.ts (lines 163-174,
+ * 231-239) returns raw `res` (with top-level `code`/`message`, NO `fileList`)
+ * when the backend API returns an error — even though TypeScript types declare
+ * `fileList` as required. The adapter MUST detect this shape and fail closed
+ * with a stable domain error (STORAGE_TOPLEVEL_ERROR) instead of throwing
+ * `TypeError: Cannot read properties of undefined (reading 'find')`.
+ *
+ * Test technique: `as never` is used to inject the runtime top-level error
+ * shape that TypeScript types don't capture. This is intentional — we are
+ * testing a real SDK runtime contract that the type declarations miss.
+ */
+describe('FIX-R9 RF-R9-02: SDK top-level failure contract (fail-closed)', () => {
+  let setup: Awaited<ReturnType<typeof makeReadyDeps>>;
+  beforeEach(async () => {
+    setup = await makeReadyDeps();
+  });
+
+  // --- delete(): top-level failure from deleteFile (STORAGE_REQUEST_FAIL) ---
+
+  it('delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (STORAGE_REQUEST_FAIL), metadata preserved', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-delete-fail.png';
+    await deps.objects.put(key, new Uint8Array([1, 2]), 'image/png');
+
+    // SDK runtime top-level error shape: { code, message } with NO fileList.
+    // This is what the real SDK returns when the backend API fails.
+    vi.spyOn(app, 'deleteFile').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'backend API error',
+    } as never);
+
+    // Must throw a stable domain error (NOT a TypeError from undefined.fileList)
+    await expect(deps.objects.delete(key)).rejects.toThrow(/STORAGE_TOPLEVEL_ERROR/);
+
+    // Metadata MUST be preserved (not deleted) for retry
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- delete(): top-level failure with different code (SYS_ERR) ---
+
+  it('delete throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure (SYS_ERR), different code still fails closed', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-delete-syserr.png';
+    await deps.objects.put(key, new Uint8Array([3, 4]), 'image/png');
+
+    vi.spyOn(app, 'deleteFile').mockResolvedValueOnce({
+      code: 'SYS_ERR',
+      message: 'internal service error',
+    } as never);
+
+    await expect(deps.objects.delete(key)).rejects.toThrow(/STORAGE_TOPLEVEL_ERROR/);
+
+    // Metadata preserved
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- delete(): message content does not affect fail-closed behavior ---
+
+  it('delete top-level failure with different message still fails closed (message does not affect fail-closed)', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-delete-msg2.png';
+    await deps.objects.put(key, new Uint8Array([5, 6]), 'image/png');
+
+    vi.spyOn(app, 'deleteFile').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'completely different error message text',
+    } as never);
+
+    // Different message, same fail-closed behavior
+    await expect(deps.objects.delete(key)).rejects.toThrow(/STORAGE_TOPLEVEL_ERROR/);
+
+    // Metadata preserved
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- getSignedUrl(): top-level failure from getTempFileURL ---
+
+  it('getSignedUrl throws STORAGE_TOPLEVEL_ERROR when SDK returns top-level failure, metadata preserved', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-url-fail.png';
+    await deps.objects.put(key, new Uint8Array([7, 8]), 'image/png');
+
+    vi.spyOn(app, 'getTempFileURL').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'backend API error',
+    } as never);
+
+    // Must throw a stable domain error (NOT TypeError from undefined.fileList)
+    await expect(deps.objects.getSignedUrl(key)).rejects.toThrow(/STORAGE_TOPLEVEL_ERROR/);
+
+    // Metadata preserved
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- getSignedUrl(): message content does not affect fail-closed behavior ---
+
+  it('getSignedUrl top-level failure with different message still fails closed (message does not affect fail-closed)', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-url-msg2.png';
+    await deps.objects.put(key, new Uint8Array([9, 10]), 'image/png');
+
+    vi.spyOn(app, 'getTempFileURL').mockResolvedValueOnce({
+      code: 'SYS_ERR',
+      message: 'different message for getTempFileURL',
+    } as never);
+
+    // Different code + message, same fail-closed behavior
+    await expect(deps.objects.getSignedUrl(key)).rejects.toThrow(/STORAGE_TOPLEVEL_ERROR/);
+
+    // Metadata preserved
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- put() compensation delete: top-level failure preserves orphaned file ---
+
+  it('put compensation delete: top-level failure from deleteFile preserves orphaned file', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-put-compfail.png';
+    const expectedFileID = predictFileID(key);
+
+    // Make metadata save fail (triggers compensation delete path)
+    state.saveMetadataShouldFail = true;
+
+    // Compensation delete returns top-level failure (NO fileList)
+    vi.spyOn(app, 'deleteFile').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'backend API error during compensation',
+    } as never);
+
+    let caught: Error | null = null;
+    try {
+      await deps.objects.put(key, new Uint8Array([11, 12]), 'image/png');
+    } catch (e) {
+      caught = e as Error;
+    }
+
+    // Must throw OBJECT_METADATA_AND_COMPENSATION_FAILED (stable domain error)
+    expect(caught).not.toBeNull();
+    expect(caught!.message).toMatch(/OBJECT_METADATA_AND_COMPENSATION_FAILED/);
+    expect(caught!.message).toContain(expectedFileID);
+
+    // Orphaned file remains in Storage (compensation failed due to top-level error)
+    expect(state.storage.files.has(expectedFileID)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- exists(): top-level failure returns false (fail-closed, no throw) ---
+
+  it('exists returns false when SDK returns top-level failure (fail-closed, no throw, metadata preserved)', async () => {
+    const { deps, app, state } = setup;
+    const key = 'assets/toplevel-exists-fail.png';
+    await deps.objects.put(key, new Uint8Array([13, 14]), 'image/png');
+
+    vi.spyOn(app, 'getTempFileURL').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'backend API error',
+    } as never);
+
+    // exists() must return false (fail-closed) — NOT throw TypeError
+    const result = await deps.objects.exists(key);
+    expect(result).toBe(false);
+
+    // Metadata MUST be preserved (not deleted)
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has(key)).toBe(true);
+
+    await deps.close();
+  });
+
+  // --- deleteProject: top-level failure does NOT remove cleanup ledger ---
+
+  it('deleteProject: top-level failure on object delete does NOT remove cleanup ledger', async () => {
+    const { deps, app, state } = setup;
+    const service = new ProjectService(deps, dummyExecutor);
+
+    // Setup: project + asset + object
+    await deps.projects.create({
+      id: 'p-toplevel',
+      name: 'test-toplevel-ledger',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      activeVersionId: 'v-toplevel',
+    });
+    await deps.objects.put('key-toplevel', new Uint8Array([15]), 'image/png');
+    await deps.assets.create({
+      id: 'a-toplevel',
+      projectId: 'p-toplevel',
+      storageKey: 'key-toplevel',
+      mimeType: 'image/png',
+      sizeBytes: 1,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Inject top-level failure on deleteFile for the asset's storageKey
+    vi.spyOn(app, 'deleteFile').mockResolvedValueOnce({
+      code: 'STORAGE_REQUEST_FAIL',
+      message: 'backend API error during project delete',
+    } as never);
+
+    const result = await service.deleteProject('p-toplevel');
+
+    // Project metadata is deleted (DB transaction succeeds)
+    expect(result.deleted).toBe(true);
+
+    // The failed key MUST be in cleanupFailures (NOT in completedKeys)
+    expect(result.cleanupFailures).toContain('key-toplevel');
+
+    // Cleanup ledger MUST still contain the key (NOT removed)
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p-toplevel')).toBe(true);
+    const ledgerDoc = cleanupColl?.docs.get('p-toplevel') as { keys?: string[] } | undefined;
+    expect(ledgerDoc?.keys).toContain('key-toplevel');
+
+    // Object metadata MUST also be preserved (not deleted, since remote delete failed)
+    const metaColl = state.database.collections.get('prod_object_metadata');
+    expect(metaColl?.docs.has('key-toplevel')).toBe(true);
+
+    await deps.close();
+  });
+});
