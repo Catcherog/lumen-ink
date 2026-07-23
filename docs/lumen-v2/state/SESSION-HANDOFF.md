@@ -80,4 +80,47 @@
 
 ---
 
+## EVIDENCE-CORRECTION-01（2026-07-23，GPT FIX_REQUIRED 后的证据校正）
+
+- **任务**：`LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Trae 报告**：[docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01-TRAE-REPORT.md)
+- **证据目录**：`docs/lumen-v2/evidence/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01/`
+
+### 关键校正
+
+1. **LAST_CODEX_AUDITED_SHA = `a858d7f`**（FIX-R3 state commit，Codex 审计基于 `87d0ba5 → 627bd7e → a858d7f` 范围，依据 FIX-R4 Codex Audit 报告）
+2. **最终 Codex Diff 范围 = `a858d7f..HEAD`**（覆盖 13 个提交，包含 FIX-R8 `0439924` 和 HEAD `b7ec38d`）
+3. **完整 production-code diff 已保存**为 `.patch` 文件（66KB，3 文件，+938/-117）
+4. **分类 diff 已保存**：production / test / mock / config / scripts / docs
+5. **8/8 门禁 PASS**，原始输出已保存（含命令、工作目录、exit code）
+6. **精确测试数**：442 server / 35 files + 194 client / 10 files = 636 total；13 个新测试名称已列出
+7. **AC-04 评估**：有 3 个测试但**非真并发**（使用 mock state injection）；DEFERRED_TO_FINAL_CODEX
+8. **SDK/OCC 假设**：A-01（真实 SDK 重试）和 A-02（真实 OCC read-set）改为 ASSUMPTION_TO_VERIFY
+9. **idemId/versionId 外泄**：错误消息含内部 ID，routes catch 块返回 `err.message`；非凭据；DEFERRED_TO_FINAL_CODEX
+10. **SESSION-HANDOFF.md 删除解释**：实际 +65/-934（非 1866）；8 次提交渐进压缩；历史在 git log + per-round reports 中保留
+11. **AC 矩阵**：精确状态（PASS / PASS_WITH_LIMITATION / PASS_REGISTERED_BLOCKER / DEFERRED_TO_FINAL_CODEX）
+12. **仓库状态**：Local HEAD = Remote HEAD = `b7ec38d`；worktree clean；readyForPreview=false
+
+### 本轮未修改
+
+- ❌ 未修改生产代码
+- ❌ 未修改测试代码
+- ❌ 未修改 mock 代码
+- ❌ 未调用 Codex
+- ❌ 未合并 main
+- ❌ 未部署
+- ❌ 未执行真实 CloudBase 写入
+- ❌ 未切换 readyForPreview=true
+
+### GPT 下一步
+
+1. 证据复审 EVIDENCE-CORRECTION-01 Trae 报告
+2. 验证 12 项 EC 是否全部满足
+3. 通过后生成限域 Codex READ_ONLY 审计提示词
+4. Codex 审计范围：`a858d7f..HEAD` production-code diff
+
+---
+
 **EVIDENCE PROVIDED BY TRAE; NOT YET INDEPENDENTLY VERIFIED.**

@@ -1,0 +1,23 @@
+﻿diff --git a/.gitignore b/.gitignore
+index c616f40..5a6fcd8 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -40,3 +40,6 @@ src/server/data/
+ # 协作包临时文件（不应提交到仓库）
+ _lumen-v12-extract/
+ *.zip
++
++# Git worktrees（本地开发工件，不应提交）
++.worktrees/
+diff --git a/src/server/vitest.config.ts b/src/server/vitest.config.ts
+index b1e430a..4994639 100644
+--- a/src/server/vitest.config.ts
++++ b/src/server/vitest.config.ts
+@@ -16,6 +16,7 @@ export default defineConfig({
+       '**/node_modules/**',
+       '**/.git/**',
+       '**/dist/**',
++      '**/.worktrees/**',
+     ],
+   },
+ });

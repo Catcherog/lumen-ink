@@ -1,0 +1,251 @@
+﻿diff --git a/scripts/verify-preview-isolation.ts b/scripts/verify-preview-isolation.ts
+new file mode 100644
+index 0000000..4de0a2b
+--- /dev/null
++++ b/scripts/verify-preview-isolation.ts
+@@ -0,0 +1,245 @@
++#!/usr/bin/env tsx
++/**
++ * LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R6 (AC-R6-05/06):
++ * Preview Isolation Smoke Harness.
++ *
++ * This is a REAL executable entry point — NOT a test file. It imports the
++ * PRODUCTION safety functions from `select.ts` and verifies that:
++ *
++ *  1. The production functions can be imported without errors (import-path
++ *     integrity — catches missing dependencies, circular imports, etc.).
++ *  2. The functions correctly REJECT invalid Preview configurations
++ *     (synthetic bad configs — verifies the safety logic is wired).
++ *  3. The functions correctly ACCEPT valid configurations.
++ *  4. The CURRENT runtime environment (process.env) passes the gate.
++ *
++ * Gate behavior:
++ *  - Exit 0: all checks passed (safe to proceed with SDK initialization).
++ *  - Exit 1: any check failed (SDK initialization must NOT proceed).
++ *
++ * Usage:
++ *   npx tsx scripts/verify-preview-isolation.ts
++ *
++ * This script is added to the gate command (AC-R6-06):
++ *   Gate 9: cd src/server && npx tsx ../../scripts/verify-preview-isolation.ts
++ *
++ * The script does NOT:
++ *  - Initialize the CloudBase SDK (only calls pure safety functions).
++ *  - Make any network calls.
++ *  - Write to any database or storage.
++ *  - Read any real credentials beyond process.env inspection.
++ */
++
++import {
++  isPreviewEnvironment,
++  validatePreviewIsolation,
++} from '../src/server/infrastructure/persistence/select.js';
++
++// ---------------------------------------------------------------------------
++// Self-tests: verify the production functions correctly reject bad configs.
++// These are SYNTHETIC inputs — they do NOT use real env vars.
++// ---------------------------------------------------------------------------
++
++interface SelfTest {
++  name: string;
++  fn: () => void;
++  expectThrow: boolean;
++  expectedErrorFragment?: string;
++}
++
++const selfTests: SelfTest[] = [
++  {
++    name: 'isPreviewEnvironment: VERCEL_ENV=preview → true',
++    fn: () => {
++      const result = isPreviewEnvironment({
++        VERCEL: '1',
++        VERCEL_ENV: 'preview',
++      });
++      if (result !== true) throw new Error(`expected true, got ${result}`);
++    },
++    expectThrow: false,
++  },
++  {
++    name: 'isPreviewEnvironment: VERCEL_ENV=production → false (not blocked)',
++    fn: () => {
++      const result = isPreviewEnvironment({
++        VERCEL: '1',
++        VERCEL_ENV: 'production',
++      });
++      if (result !== false) throw new Error(`expected false, got ${result}`);
++    },
++    expectThrow: false,
++  },
++  {
++    name: 'isPreviewEnvironment: VERCEL=1, VERCEL_ENV missing → throw (fail closed)',
++    fn: () => {
++      isPreviewEnvironment({ VERCEL: '1' });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'VERCEL_ENV_REQUIRED_OR_INVALID',
++  },
++  {
++    name: 'isPreviewEnvironment: VERCEL=1, VERCEL_ENV=unknown → throw (fail closed)',
++    fn: () => {
++      isPreviewEnvironment({ VERCEL: '1', VERCEL_ENV: 'staging' });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'VERCEL_ENV_REQUIRED_OR_INVALID',
++  },
++  {
++    name: 'validatePreviewIsolation: Preview ns == Production ns → throw',
++    fn: () => {
++      validatePreviewIsolation({
++        dataNamespace: 'preview-data',
++        storagePrefix: 'preview-storage',
++        productionNamespace: 'preview-data',
++        productionStoragePrefix: 'prod-storage',
++      });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'PREVIEW_PRODUCTION_NAMESPACE_EQUAL',
++  },
++  {
++    name: 'validatePreviewIsolation: Preview prefix == Production prefix → throw',
++    fn: () => {
++      validatePreviewIsolation({
++        dataNamespace: 'preview-data',
++        storagePrefix: 'shared-prefix',
++        productionNamespace: 'prod-data',
++        productionStoragePrefix: 'shared-prefix',
++      });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'PREVIEW_STORAGE_PREFIX_EQUAL',
++  },
++  {
++    name: 'validatePreviewIsolation: Preview ns contains "prod" → throw',
++    fn: () => {
++      validatePreviewIsolation({
++        dataNamespace: 'prod-preview-data',
++        storagePrefix: 'preview-storage',
++        productionNamespace: 'prod-data',
++        productionStoragePrefix: 'prod-storage',
++      });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'PREVIEW_NAMESPACE_CONTAINS_PROD',
++  },
++  {
++    name: 'validatePreviewIsolation: missing productionNamespace → throw',
++    fn: () => {
++      validatePreviewIsolation({
++        dataNamespace: 'preview-data',
++        storagePrefix: 'preview-storage',
++        productionNamespace: '',
++        productionStoragePrefix: 'prod-storage',
++      });
++    },
++    expectThrow: true,
++    expectedErrorFragment: 'PRODUCTION_NAMESPACE_REQUIRED',
++  },
++  {
++    name: 'validatePreviewIsolation: valid isolation → pass (no throw)',
++    fn: () => {
++      validatePreviewIsolation({
++        dataNamespace: 'preview-data',
++        storagePrefix: 'preview-storage',
++        productionNamespace: 'prod-data',
++        productionStoragePrefix: 'prod-storage',
++      });
++    },
++    expectThrow: false,
++  },
++];
++
++// ---------------------------------------------------------------------------
++// Current-env check: verify the actual runtime environment is safe.
++// ---------------------------------------------------------------------------
++
++function checkCurrentEnv(): void {
++  const env = process.env as Record<string, string | undefined>;
++
++  // If not a Vercel/Preview environment, the gate is a no-op (exit 0).
++  // This is the normal local-dev / CI case.
++  if (!env.VERCEL && env.CLOUDBASE_PREVIEW_MODE !== '1') {
++    console.log('[verify-preview-isolation] Not a Vercel/Preview environment (no VERCEL/CLOUDBASE_PREVIEW_MODE). Gate is a no-op.');
++    return;
++  }
++
++  // Determine if this is a Preview environment using the PRODUCTION function.
++  // This will throw VERCEL_ENV_REQUIRED_OR_INVALID if VERCEL=1 but VERCEL_ENV
++  // is missing/unknown — fail closed.
++  const isPreview = isPreviewEnvironment(env);
++
++  if (!isPreview) {
++    console.log('[verify-preview-isolation] Production environment (VERCEL_ENV=production). Gate skipped — Production is never blocked.');
++    return;
++  }
++
++  console.log('[verify-preview-isolation] Preview environment detected. Running isolation gate...');
++
++  // Run the isolation gate using the PRODUCTION function.
++  // This will throw if Preview namespace/prefix collide with Production.
++  validatePreviewIsolation({
++    dataNamespace: env.CLOUDBASE_DATA_NAMESPACE ?? '',
++    storagePrefix: env.CLOUDBASE_STORAGE_PREFIX ?? '',
++    productionNamespace: env.CLOUDBASE_PRODUCTION_DATA_NAMESPACE ?? '',
++    productionStoragePrefix: env.CLOUDBASE_PRODUCTION_STORAGE_PREFIX ?? '',
++  });
++
++  console.log('[verify-preview-isolation] Preview isolation gate PASSED. Safe to initialize CloudBase SDK.');
++}
++
++// ---------------------------------------------------------------------------
++// Main entry point
++// ---------------------------------------------------------------------------
++
++function main(): void {
++  let failures = 0;
++
++  // --- Self-tests ---
++  console.log('--- Self-tests (synthetic configs) ---');
++  for (const test of selfTests) {
++    try {
++      test.fn();
++      if (test.expectThrow) {
++        console.error(`  FAIL: ${test.name} — expected throw but did not throw`);
++        failures++;
++      } else {
++        console.log(`  PASS: ${test.name}`);
++      }
++    } catch (err) {
++      const msg = (err as Error).message ?? '';
++      if (test.expectThrow) {
++        if (test.expectedErrorFragment && !msg.includes(test.expectedErrorFragment)) {
++          console.error(`  FAIL: ${test.name} — threw but wrong error: expected "${test.expectedErrorFragment}", got "${msg}"`);
++          failures++;
++        } else {
++          console.log(`  PASS: ${test.name}`);
++        }
++      } else {
++        console.error(`  FAIL: ${test.name} — unexpected throw: ${msg}`);
++        failures++;
++      }
++    }
++  }
++
++  // --- Current-env check ---
++  console.log('--- Current environment check ---');
++  try {
++    checkCurrentEnv();
++  } catch (err) {
++    console.error(`  FAIL: Current environment failed gate: ${(err as Error).message}`);
++    failures++;
++  }
++
++  // --- Summary ---
++  if (failures > 0) {
++    console.error(`\n[verify-preview-isolation] ${failures} check(s) FAILED. SDK initialization must NOT proceed.`);
++    process.exit(1);
++  }
++  console.log(`\n[verify-preview-isolation] All checks PASSED.`);
++  process.exit(0);
++}
++
++main();

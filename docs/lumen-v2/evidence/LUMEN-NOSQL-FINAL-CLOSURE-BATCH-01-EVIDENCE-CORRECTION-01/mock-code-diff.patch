@@ -1,0 +1,468 @@
+﻿diff --git a/src/server/infrastructure/persistence/cloudbase.nosql.mock.ts b/src/server/infrastructure/persistence/cloudbase.nosql.mock.ts
+index 3b4b11f..120e2a2 100644
+--- a/src/server/infrastructure/persistence/cloudbase.nosql.mock.ts
++++ b/src/server/infrastructure/persistence/cloudbase.nosql.mock.ts
+@@ -45,8 +45,8 @@ export interface MockCloudBaseApp {
+   database(): MockDatabaseHandle;
+   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
+   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
+-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: unknown[] }>;
+-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; tempFileURL: string }> }>;
++  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; statusMessage?: string }> }>;
++  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; tempFileURL: string; statusMessage?: string }> }>;
+ }
+ 
+ export interface MockDatabaseHandle {
+@@ -274,6 +274,81 @@ export interface MockCloudBaseState {
+   database: MockDatabase;
+   storage: MockStorage;
+   envId: string;
++  /**
++   * FIX-R4: Incremented every time runTransaction() is called. Tests use this
++   * to verify that withCurrentOrNewTransaction reuses the outer transaction
++   * instead of opening a nested one (P0-02 regression guard).
++   */
++  runTransactionCount: number;
++  /**
++   * FIX-R4: When true, commit() throws COMMIT_FAILED. Tests use this to
++   * verify that a commit failure rolls back all buffered writes.
++   */
++  commitShouldFail: boolean;
++  /**
++   * FIX-R4: When true, the first commit attempt throws a
++   * DATABASE_TRANSACTION_CONFLICT error and runTransaction retries the
++   * callback. The second attempt succeeds. Tests use this to verify retry
++   * behavior on conflict.
++   */
++  retryOnConflict: boolean;
++  /**
++   * FIX-R8-CLOSURE: When true, EVERY commit attempt throws
++   * DATABASE_TRANSACTION_CONFLICT. Unlike retryOnConflict (which is
++   * consumed after one attempt), persistentConflict is NOT consumed —
++   * all MAX_TX_ATTEMPTS attempts fail, and runTransaction throws the
++   * conflict error. Tests use this to verify retry exhaustion behavior:
++   * errors must propagate and recovery state must not be lost.
++   */
++  persistentConflict: boolean;
++  /**
++   * FIX-R4: Storage fault injection — when true, uploadFile() throws.
++   */
++  uploadShouldFail: boolean;
++  /**
++   * FIX-R4: When true, set() on object_metadata collections throws. Tests
++   * use this to verify that a metadata write failure does not leave an
++   * orphaned Storage object.
++   */
++  saveMetadataShouldFail: boolean;
++  /**
++   * FIX-R4 Workstream G: When true, remove() on object_metadata collections
++   * throws. Tests use this to verify that a metadata delete failure (after
++   * remote object was already deleted) preserves metadata for retry/sweeper.
++   */
++  deleteMetadataShouldFail: boolean;
++  /**
++   * FIX-R4: Per-fileID status codes for deleteFile(). Non-zero = failure
++   * (the mock throws for that fileID).
++   */
++  deleteFileStatuses: Record<string, number>;
++  /**
++   * FIX-R4: Per-fileID status codes for getTempFileURL(). Non-zero = failure
++   * (the mock throws for that fileID).
++   */
++  getTempFileURLStatuses: Record<string, number>;
++  /**
++   * FIX-R4: fileIDs that don't exist in remote Storage. downloadFile()
++   * throws FILE_NOT_FOUND for these; getTempFileURL() returns an empty URL.
++   * Used for exists() and error-path testing.
++   */
++  remoteObjectMissing: Set<string>;
++  /**
++   * FIX-R5: When true, transactions track document reads and check for
++   * conflicts on commit (optimistic concurrency control). If a document
++   * read during the transaction has been modified in committed state by
++   * another transaction, the commit throws DATABASE_TRANSACTION_CONFLICT.
++   * Used by T1 deterministic interleaving test.
++   */
++  occReadTracking: boolean;
++  /**
++   * FIX-R5: Optional async hook called by the mock just before applying
++   * the transaction's write log on commit. Tests use this to inject
++   * committed-state changes (e.g., a tombstone from Phase A) between
++   * a child transaction's read and its commit, simulating concurrent
++   * interleaving without real threads.
++   */
++  preCommitHook?: () => Promise<void>;
+ }
+ 
+ export function createMockCloudBaseState(envId: string): MockCloudBaseState {
+@@ -281,6 +356,18 @@ export function createMockCloudBaseState(envId: string): MockCloudBaseState {
+     database: { collections: new Map() },
+     storage: { files: new Map() },
+     envId,
++    runTransactionCount: 0,
++    commitShouldFail: false,
++    retryOnConflict: false,
++    persistentConflict: false,
++    uploadShouldFail: false,
++    saveMetadataShouldFail: false,
++    deleteMetadataShouldFail: false,
++    deleteFileStatuses: {},
++    getTempFileURLStatuses: {},
++    remoteObjectMissing: new Set(),
++    occReadTracking: false,
++    preCommitHook: undefined,
+   };
+ }
+ 
+@@ -293,6 +380,14 @@ function getCollection(state: MockCloudBaseState, name: string): MockCollection
+   return c;
+ }
+ 
++/**
++ * FIX-R4: Check if a collection name corresponds to object_metadata.
++ * Collection names are namespace-prefixed (e.g. `prod_object_metadata`).
++ */
++function isMetadataCollection(collectionName: string): boolean {
++  return collectionName.includes('object_metadata');
++}
++
+ // --- Transaction write log ------------------------------------------------
+ //
+ // During a transaction, writes are buffered in a per-transaction log.
+@@ -387,6 +482,10 @@ function createCollectionHandle(
+           return { updated: 1 };
+         },
+         async set(data: Record<string, unknown>) {
++          // FIX-R4: saveMetadataShouldFail fault injection
++          if (state.saveMetadataShouldFail && isMetadataCollection(collectionName)) {
++            throw new Error('SAVE_METADATA_FAILED: injected by mock');
++          }
+           if (txLog) {
+             txLog.push({ collectionName, type: 'set', id, data: { ...data, _id: id } });
+             return { updated: 1, upserted: [id] };
+@@ -397,6 +496,10 @@ function createCollectionHandle(
+           return { updated: existed ? 1 : 0, upserted: existed ? [] : [id] };
+         },
+         async remove() {
++          // FIX-R4 Workstream G: deleteMetadataShouldFail fault injection
++          if (state.deleteMetadataShouldFail && isMetadataCollection(collectionName)) {
++            throw new Error('DELETE_METADATA_FAILED: injected by mock');
++          }
+           if (txLog) {
+             const existing = ensureDoc(state, collectionName, id, txLog);
+             if (!existing) return { deleted: 0 };
+@@ -543,7 +646,8 @@ function createCollectionHandle(
+ function createTransactionCollectionHandle(
+   state: MockCloudBaseState,
+   collectionName: string,
+-  txLog: TransactionOp[]
++  txLog: TransactionOp[],
++  readSet?: Map<string, { collectionName: string; id: string; snapshot: MockDocument | null }>
+ ): MockTransactionCollectionHandle {
+   return {
+     async add(data: Record<string, unknown>): Promise<{ id: string }> {
+@@ -567,6 +671,17 @@ function createTransactionCollectionHandle(
+          */
+         async get() {
+           const doc = ensureDoc(state, collectionName, id, txLog);
++          // FIX-R5: OCC read tracking — record the committed-state
++          // snapshot (NOT the txLog overlay) so commit can detect if
++          // another transaction modified this document.
++          if (readSet && state.occReadTracking) {
++            const committedDoc = getCollection(state, collectionName).docs.get(id) ?? null;
++            readSet.set(`${collectionName}:${id}`, {
++              collectionName,
++              id,
++              snapshot: committedDoc ? { ...committedDoc } : null,
++            });
++          }
+           return { data: doc };
+         },
+         async update(data: Record<string, unknown>) {
+@@ -576,10 +691,18 @@ function createTransactionCollectionHandle(
+           return { updated: 1 };
+         },
+         async set(data: Record<string, unknown>) {
++          // FIX-R4: saveMetadataShouldFail fault injection (transaction path)
++          if (state.saveMetadataShouldFail && isMetadataCollection(collectionName)) {
++            throw new Error('SAVE_METADATA_FAILED: injected by mock (tx)');
++          }
+           txLog.push({ collectionName, type: 'set', id, data: { ...data, _id: id } });
+           return { updated: 1, upserted: [id] };
+         },
+         async remove() {
++          // FIX-R4 Workstream G: deleteMetadataShouldFail fault injection (tx path)
++          if (state.deleteMetadataShouldFail && isMetadataCollection(collectionName)) {
++            throw new Error('DELETE_METADATA_FAILED: injected by mock (tx)');
++          }
+           const existing = ensureDoc(state, collectionName, id, txLog);
+           if (!existing) return { deleted: 0 };
+           txLog.push({ collectionName, type: 'remove', id });
+@@ -604,62 +727,139 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
+       return createCollectionHandle(state, name);
+     },
+     async runTransaction<T>(callback: (tx: MockTransactionHandle) => Promise<T>): Promise<T> {
+-      const txLog: TransactionOp[] = [];
+-      const txHandle: MockTransactionHandle = {
+-        collection(name: string) {
+-          return createTransactionCollectionHandle(state, name, txLog);
+-        },
+-        async commit() {
+-          // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
+-          // operations. Fail closed — do NOT partially apply a txLog that
+-          // exceeds the limit.
+-          const CLOUDBASE_TX_OP_LIMIT = 100;
+-          if (txLog.length > CLOUDBASE_TX_OP_LIMIT) {
+-            throw new Error(
+-              `CLOUDBASE_TX_LIMIT_EXCEEDED: transaction has ${txLog.length} operations, ` +
+-              `limit is ${CLOUDBASE_TX_OP_LIMIT}. Project deletion must fail closed.`
+-            );
+-          }
+-          // NOSQL-R2-08 scenario 3: Optimistic concurrency control.
+-          // Before applying the txLog, check if any 'add' operation's _id
+-          // already exists in the committed state (meaning another
+-          // transaction committed the same key first). If so, throw E11000
+-          // so the caller's catch block can retry and fetch the winner.
+-          for (const op of txLog) {
+-            if (op.type === 'add') {
+-              const coll = getCollection(state, op.collectionName);
+-              if (coll.docs.has(op.id!)) {
+-                throw new Error('E11000 duplicate key error');
++      // FIX-R4: Increment the call counter so tests can assert that
++      // withCurrentOrNewTransaction reuses the outer transaction instead
++      // of opening a nested one (P0-02 regression guard).
++      state.runTransactionCount++;
++      // FIX-R4: Simulate the real SDK's internal retry on conflict.
++      // When retryOnConflict is true, the first commit throws a
++      // DATABASE_TRANSACTION_CONFLICT error; the mock retries the
++      // callback internally and the second attempt succeeds. The flag
++      // is consumed after the first attempt so subsequent transactions
++      // are unaffected.
++      const MAX_TX_ATTEMPTS = 3;
++      let lastError: unknown;
++      for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
++        const txLog: TransactionOp[] = [];
++        // FIX-R5: OCC read tracking — records documents read during this
++        // transaction so commit can detect conflicts.
++        const readSet = new Map<string, { collectionName: string; id: string; snapshot: MockDocument | null }>();
++        const txHandle: MockTransactionHandle = {
++          collection(name: string) {
++            return createTransactionCollectionHandle(state, name, txLog, readSet);
++          },
++          async commit() {
++            // FIX-R3 AC-05: CloudBase single-transaction limit is 100 doc
++            // operations. Fail closed — do NOT partially apply a txLog that
++            // exceeds the limit.
++            const CLOUDBASE_TX_OP_LIMIT = 100;
++            if (txLog.length > CLOUDBASE_TX_OP_LIMIT) {
++              throw new Error(
++                `CLOUDBASE_TX_LIMIT_EXCEEDED: transaction has ${txLog.length} operations, ` +
++                `limit is ${CLOUDBASE_TX_OP_LIMIT}. Project deletion must fail closed.`
++              );
++            }
++            // NOSQL-R2-08 scenario 3: Optimistic concurrency control.
++            // Before applying the txLog, check if any 'add' operation's _id
++            // already exists in the committed state (meaning another
++            // transaction committed the same key first). If so, throw E11000
++            // so the caller's catch block can retry and fetch the winner.
++            for (const op of txLog) {
++              if (op.type === 'add') {
++                const coll = getCollection(state, op.collectionName);
++                if (coll.docs.has(op.id!)) {
++                  throw new Error('E11000 duplicate key error');
++                }
+               }
+             }
+-          }
+-          // Apply txLog to committed state
+-          for (const op of txLog) {
+-            const coll = getCollection(state, op.collectionName);
+-            if (op.type === 'add' || op.type === 'set') {
+-              coll.docs.set(op.id!, { ...(op.data as MockDocument), _id: op.id! });
+-            } else if (op.type === 'update') {
+-              const existing = coll.docs.get(op.id!);
+-              if (existing) {
+-                coll.docs.set(op.id!, applyUpdate(existing, op.data as Record<string, unknown>));
++            // FIX-R4: commitShouldFail — always throw, no retry. Tests use
++            // this to verify that a commit failure rolls back all buffered
++            // writes without partially applying them.
++            if (state.commitShouldFail) {
++              throw new Error('COMMIT_FAILED: injected by mock');
++            }
++            // FIX-R4: retryOnConflict — first commit attempt throws a
++            // conflict error. The flag is consumed so the retry succeeds.
++            if (state.retryOnConflict) {
++              state.retryOnConflict = false;
++              throw new Error('DATABASE_TRANSACTION_CONFLICT: injected by mock');
++            }
++            // FIX-R8-CLOSURE: persistentConflict — EVERY commit attempt
++            // throws a conflict error. Unlike retryOnConflict, this flag
++            // is NOT consumed. All MAX_TX_ATTEMPTS attempts fail, and
++            // runTransaction exits the loop and throws the last conflict
++            // error. Tests use this to verify retry exhaustion behavior.
++            if (state.persistentConflict) {
++              throw new Error('DATABASE_TRANSACTION_CONFLICT: persistent (injected by mock)');
++            }
++            // FIX-R5: preCommitHook — allows tests to inject committed-
++            // state changes between a transaction's reads and its commit.
++            // This simulates concurrent interleaving without real threads.
++            if (state.preCommitHook) {
++              await state.preCommitHook();
++              state.preCommitHook = undefined; // consume the hook
++            }
++            // FIX-R5: OCC conflict detection — if any document read
++            // during this transaction has been modified in committed
++            // state (by the preCommitHook or another committed
++            // transaction), throw DATABASE_TRANSACTION_CONFLICT.
++            if (state.occReadTracking) {
++              for (const [key, entry] of readSet) {
++                const coll = getCollection(state, entry.collectionName);
++                const currentDoc = coll.docs.get(entry.id) ?? null;
++                const snapshotJson = entry.snapshot ? JSON.stringify(entry.snapshot) : 'null';
++                const currentJson = currentDoc ? JSON.stringify(currentDoc) : 'null';
++                if (snapshotJson !== currentJson) {
++                  throw new Error(
++                    `DATABASE_TRANSACTION_CONFLICT: document ${key} was modified ` +
++                    `by another transaction after this transaction read it. ` +
++                    `Snapshot: ${snapshotJson.slice(0, 100)}, Current: ${currentJson.slice(0, 100)}`
++                  );
++                }
+               }
+-            } else if (op.type === 'remove') {
+-              coll.docs.delete(op.id!);
+             }
++            // Apply txLog to committed state
++            for (const op of txLog) {
++              const coll = getCollection(state, op.collectionName);
++              if (op.type === 'add' || op.type === 'set') {
++                coll.docs.set(op.id!, { ...(op.data as MockDocument), _id: op.id! });
++              } else if (op.type === 'update') {
++                const existing = coll.docs.get(op.id!);
++                if (existing) {
++                  coll.docs.set(op.id!, applyUpdate(existing, op.data as Record<string, unknown>));
++                }
++              } else if (op.type === 'remove') {
++                coll.docs.delete(op.id!);
++              }
++            }
++          },
++          async rollback() {
++            txLog.length = 0;
++          },
++        };
++        try {
++          const result = await callback(txHandle);
++          await txHandle.commit();
++          return result;
++        } catch (e) {
++          await txHandle.rollback();
++          // Only retry on DATABASE_TRANSACTION_CONFLICT; re-throw all
++          // other errors (E11000, COMMIT_FAILED, CLOUDBASE_TX_LIMIT_EXCEEDED,
++          // SAVE_METADATA_FAILED, etc.) immediately.
++          if (
++            e instanceof Error &&
++            e.message.includes('DATABASE_TRANSACTION_CONFLICT') &&
++            attempt < MAX_TX_ATTEMPTS
++          ) {
++            lastError = e;
++            continue;
+           }
+-        },
+-        async rollback() {
+-          txLog.length = 0;
+-        },
+-      };
+-      try {
+-        const result = await callback(txHandle);
+-        await txHandle.commit();
+-        return result;
+-      } catch (e) {
+-        await txHandle.rollback();
+-        throw e;
++          throw e;
++        }
+       }
++      // Unreachable — the loop either returns a result or throws on the
++      // first non-retryable error. Guard for type safety.
++      throw lastError ?? new Error('RUN_TRANSACTION_EXHAUSTED: unreachable');
+     },
+     command,
+   };
+@@ -669,30 +869,65 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
+       return databaseHandle;
+     },
+     async uploadFile(opts: { cloudPath: string; fileContent: Buffer }) {
++      // FIX-R4: uploadShouldFail fault injection — tests use this to verify
++      // that a failed upload does not leave an orphaned metadata record.
++      if (state.uploadShouldFail) {
++        throw new Error('UPLOAD_FAILED: injected by mock');
++      }
+       const fileID = `cloud://${state.envId}/${opts.cloudPath}`;
+       state.storage.files.set(fileID, { content: opts.fileContent, cloudPath: opts.cloudPath });
+       return { fileID };
+     },
+     async downloadFile(opts: { fileID: string }) {
++      // FIX-R4: remoteObjectMissing — fileIDs flagged as missing throw
++      // FILE_NOT_FOUND even if they exist in the local mock map. Used for
++      // exists() and error-path testing.
++      if (state.remoteObjectMissing.has(opts.fileID)) {
++        throw new Error(`FILE_NOT_FOUND: ${opts.fileID}`);
++      }
+       const file = state.storage.files.get(opts.fileID);
+       if (!file) throw new Error(`FILE_NOT_FOUND: ${opts.fileID}`);
+       return { fileContent: file.content };
+     },
+     async deleteFile(opts: { fileList: string[] }) {
+-      for (const fileID of opts.fileList) {
+-        state.storage.files.delete(fileID);
+-      }
+-      return { fileList: opts.fileList.map(() => ({})) };
++      // FIX-R4 Workstream G: Return per-fileID status codes instead of
++      // throwing. Real CloudBase deleteFile returns { fileList: [{ fileID,
++      // code, statusMessage }] } where code 0 = SUCCESS. Non-zero codes
++      // indicate failure; the object is NOT deleted in that case.
++      const fileList = opts.fileList.map((fileID) => {
++        const code = state.deleteFileStatuses[fileID] ?? 0;
++        if (code === 0) {
++          state.storage.files.delete(fileID);
++          return { fileID, code: 0, statusMessage: 'SUCCESS' };
++        }
++        return { fileID, code, statusMessage: 'DELETE_FAILED' };
++      });
++      return { fileList };
+     },
+     async getTempFileURL(opts: { fileList: string[] }) {
+-      return {
+-        fileList: opts.fileList.map((fileID) => ({
+-          fileID,
+-          tempFileURL: state.storage.files.has(fileID)
+-            ? `https://mock-temp-url/${fileID}`
+-            : '',
+-        })),
+-      };
++      // FIX-R4 Workstream G: Return per-fileID status codes instead of
++      // throwing. Real CloudBase getTempFileURL returns { fileList: [{
++      // fileID, code, tempFileURL, statusMessage }] }.
++      const fileList = opts.fileList.map((fileID) => {
++        const code = state.getTempFileURLStatuses[fileID] ?? 0;
++        if (code !== 0) {
++          return {
++            fileID,
++            code,
++            tempFileURL: '',
++            statusMessage: 'GET_URL_FAILED',
++          };
++        }
++        // remoteObjectMissing returns an empty URL (simulating a missing
++        // remote object) with code 0 — the URL fetch "succeeded" but the
++        // object is gone.
++        const tempFileURL =
++          state.remoteObjectMissing.has(fileID) || !state.storage.files.has(fileID)
++            ? ''
++            : `https://mock-temp-url/${fileID}`;
++        return { fileID, code: 0, tempFileURL, statusMessage: 'SUCCESS' };
++      });
++      return { fileList };
+     },
+   };
+ }
