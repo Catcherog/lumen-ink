@@ -1,9 +1,28 @@
 # Gate Results - LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01
 
+> ## ⚠️ SUPERSEDED HEAD value (corrected by EVIDENCE-CORRECTION-02)
+>
+> The `HEAD: b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5` recorded below was captured at
+> 2026-07-23 11:55:58 +08:00, **before** the EVIDENCE-CORRECTION-01 docs-only commit
+> (`87bb3b1`) was created. By the time that commit was pushed, HEAD had advanced to
+> `87bb3b1`, so the EC-12 claim "Local HEAD = Remote HEAD = b7ec38d; worktree clean"
+> was internally inconsistent.
+>
+> EVIDENCE-CORRECTION-02 corrects this by introducing explicit fields:
+> - `LAST_CODEX_AUDITED_SHA = a858d7f`
+> - `LAST_PRODUCTION_CHANGE_SHA = b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5` (the value below)
+> - `CURRENT_PACKET_HEAD = <actual HEAD after EVIDENCE-CORRECTION-02 commit>`
+>
+> The gate outputs below remain valid evidence that the codebase passed at `b7ec38d`
+> (which equals LAST_PRODUCTION_CHANGE_SHA). Only the "HEAD" label is stale.
+> See `docs/lumen-v2/evidence/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02/`
+> for re-captured gate output against the actual current HEAD.
+
 **Captured**: 2026-07-23 11:55:58 +08:00
 **Working Directory**: D:\360Downloads\Trae 项目\picture-edit
 **Branch**: lumen/nosql-final-closure-batch-01-trae
-**HEAD**: b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5
+**HEAD (stale — see banner above)**: b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5
+**Corrected label**: LAST_PRODUCTION_CHANGE_SHA = b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5
 
 ---
 

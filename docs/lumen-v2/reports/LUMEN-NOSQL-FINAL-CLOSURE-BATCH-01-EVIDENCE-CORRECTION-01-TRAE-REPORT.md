@@ -1,5 +1,23 @@
 # LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01 — Trae Report
 
+> ## ⚠️ SUPERSEDED by EVIDENCE-CORRECTION-02 (2026-07-23)
+>
+> The following values in this report are **STALE** and have been corrected by
+> `LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02`:
+>
+> | Stale value in this report | Corrected value (per EVIDENCE-CORRECTION-02) |
+> |---|---|
+> | `HEAD = b7ec38d` / `Local HEAD = b7ec38d` / `Remote HEAD = b7ec38d` | `b7ec38d` is **LAST_PRODUCTION_CHANGE_SHA**, not HEAD. The actual HEAD is captured as `CURRENT_PACKET_HEAD` in EVIDENCE-CORRECTION-02. |
+> | `a858d7f..HEAD = a858d7f..b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5` | `a858d7f..<CURRENT_PACKET_HEAD>` — HEAD is the EVIDENCE-CORRECTION-02 commit, not `b7ec38d` |
+> | `13 commits` in `a858d7f..HEAD` | **14 commits** (verified via `git rev-list --count a858d7f..HEAD` = 14 at EVIDENCE-CORRECTION-02 start; will be 15 after the EVIDENCE-CORRECTION-02 commit) |
+> | `b7ec38d (HEAD) FINAL-CLOSURE-BATCH-01 ...` | `b7ec38d` = LAST_PRODUCTION_CHANGE_SHA (feat FINAL-CLOSURE-BATCH-01); not the current HEAD |
+>
+> **Why superseded**: EVIDENCE-CORRECTION-01 was committed as `87bb3b1` (docs-only), which advanced HEAD from `b7ec38d` to `87bb3b1`. The report's EC-12 verification was internally inconsistent (claimed worktree clean + HEAD=b7ec38d, but those cannot both hold after the commit). EVIDENCE-CORRECTION-02 introduces explicit fields `LAST_CODEX_AUDITED_SHA`, `LAST_PRODUCTION_CHANGE_SHA`, and `CURRENT_PACKET_HEAD` to prevent recurrence.
+>
+> **Canonical source of truth**: See `docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02-TRAE-REPORT.md` and the desktop completion packet `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`.
+>
+> The body of this report is preserved unchanged as a historical record. Do not rely on the HEAD/commit-count values below without consulting EVIDENCE-CORRECTION-02.
+
 **Task ID**: `LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01`
 **Project**: picture-edit / lumen-v2
 **Risk Level**: HIGH

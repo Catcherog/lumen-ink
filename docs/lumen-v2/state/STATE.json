@@ -574,8 +574,45 @@
       "EC-12: Local HEAD = Remote HEAD = b7ec38d; worktree clean; readyForPreview=false; branch=lumen/nosql-final-closure-batch-01-trae"
     ],
     "evidenceCorrection01StopConditions": "No Codex invoked; no merge to main; no deployment; no real CloudBase writes; readyForPreview remains false; no git history rewrite; no production code modified; no test code modified; AC-04 does not require production interface changes",
+    "evidenceCorrection01SupersededBy": "evidenceCorrection02",
+    "evidenceCorrection01SupersededReason": "EC-01 report's EC-02/EC-12 contained stale references: claimed HEAD=b7ec38d and 13 commits in a858d7f..HEAD; both wrong after EC-01 commit (87bb3b1) advanced HEAD past b7ec38d and made count 14. EVIDENCE-CORRECTION-02 introduces three explicit fields (LAST_CODEX_AUDITED_SHA / LAST_PRODUCTION_CHANGE_SHA / CURRENT_PACKET_HEAD) and adds SUPERSESSION BANNERS to EC-01 in-repo files.",
+    "evidenceCorrection02TaskId": "LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02",
+    "evidenceCorrection02Status": "awaiting_gpt_acceptance",
+    "evidenceCorrection02NextActor": "gpt",
+    "evidenceCorrection02RiskLevel": "LOW",
+    "evidenceCorrection02Route": "R2_BATCHED_AUDIT → R3_READ_ONLY (deferred until GPT pass)",
+    "evidenceCorrection02LastCodexAuditedSha": "a858d7f",
+    "evidenceCorrection02LastProductionChangeSha": "b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5",
+    "evidenceCorrection02LastProductionChangeShaSubject": "feat(lumen-v2): LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01 engineering+test+audit closure",
+    "evidenceCorrection02PreCommitHead": "87bb3b1d2061d28442ddb530953ce35e246c52b0",
+    "evidenceCorrection02CurrentPacketHead": "<populated post-push in desktop completion packet>",
+    "evidenceCorrection02CommitCountPreCommit": 14,
+    "evidenceCorrection02CommitCountPostCommit": 15,
+    "evidenceCorrection02CodexAuditRange": "a858d7f..<CURRENT_PACKET_HEAD>",
+    "evidenceCorrection02CodexAuditPathFilter": [
+      "src/server/infrastructure/persistence/cloudbase.nosql.ts",
+      "src/server/infrastructure/persistence/select.ts",
+      "src/server/services/ProjectService.ts"
+    ],
+    "evidenceCorrection02PathFilteredDiffStat": "3 files / +938 / -117 / 1343 diff lines (byte-identical to existing production-code-diff.patch — AC-06 PASS, no regeneration needed)",
+    "evidenceCorrection02TraeReport": "docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02-TRAE-REPORT.md",
+    "evidenceCorrection02Evidence": "docs/lumen-v2/evidence/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02/",
+    "evidenceCorrection02GateResult": "8/8 PASS (Server tsc 0 + Server vitest 442/35 + Client tsc 0 + Client vitest 194/10 + Client eslint 0 + check-lumen-collab 0 + readyForPreview=false + branch!=main)",
+    "evidenceCorrection02Corrections": [
+      "EC-02-01: Introduced LAST_CODEX_AUDITED_SHA=a858d7f / LAST_PRODUCTION_CHANGE_SHA=b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5 / CURRENT_PACKET_HEAD=<post-push SHA> to replace overloaded bare HEAD concept",
+      "EC-02-02: Verified actual commit count a858d7f..HEAD = 14 (NOT 13); EVIDENCE-CORRECTION-01's '13 commits' was off by one (counted a858d7f..b7ec38d but mislabeled b7ec38d as HEAD)",
+      "EC-02-03: Verified b7ec38d is LAST_PRODUCTION_CHANGE_SHA via git diff --name-status b7ec38d..87bb3b1 showing only docs/** paths (ASSUMPTION_TO_VERIFY confirmed)",
+      "EC-02-04: Verified path-filtered production diff byte-identical to existing production-code-diff.patch (3 files / +938 / -117 / 1343 lines); AC-06 PASS; no patch regeneration needed",
+      "EC-02-05: Added SUPERSESSION BANNER to 3 EVIDENCE-CORRECTION-01 in-repo files (Trae Report, COLLAB-COMPLETION-PACKET, gate-results.md) preserving original body unchanged",
+      "EC-02-06: Local HEAD = Remote HEAD = 87bb3b1d2061d28442ddb530953ce35e246c52b0 (pre-commit); will be re-verified post-push to equal CURRENT_PACKET_HEAD",
+      "EC-02-07: readyForPreview remains false (STATE.json cloudbaseNoSqlImplement.readyForPreview unchanged)",
+      "EC-02-08: No production/test/mock/config/scripts changes; all modifications under docs/**",
+      "EC-02-09: Codex audit scope unified as git range a858d7f..<CURRENT_PACKET_HEAD> with 3-file path filter; explicit note that all commits after b7ec38d are docs/evidence-only",
+      "EC-02-10: Desktop completion packet will be rewritten post-push with actual CURRENT_PACKET_HEAD SHA and all four SHA fields (Local HEAD, Remote HEAD, LAST_PRODUCTION_CHANGE_SHA, LAST_CODEX_AUDITED_SHA)"
+    ],
+    "evidenceCorrection02StopConditions": "No production code modified; no test code modified; no mock code modified; no Codex invoked; no merge to main; no deployment; no real CloudBase writes; readyForPreview remains false; no git history rewrite; AC-04 not addressed (out of scope); AC-07 BLOCKER remains registered (not self-resolved)",
     "lastUpdatedAt": "2026-07-23",
     "lastUpdatedBy": "trae",
-    "lastUpdatedAction": "EVIDENCE-CORRECTION-01 complete: corrected diff range to a858d7f..HEAD (covers FIX-R8 0439924); saved full production/test/mock/config/docs diffs as patches; saved raw gate output (8/8 PASS); listed 13 new test names; assessed AC-04 as NOT true concurrency (DEFERRED_TO_FINAL_CODEX); changed SDK/OCC assumptions to ASSUMPTION_TO_VERIFY; checked idemId/versionId leak path (LOW risk, DEFERRED_TO_FINAL_CODEX); explained SESSION-HANDOFF.md compression (+65/-934, intentional); precise AC matrix; no production code modified. Status: awaiting_gpt_acceptance/nextActor=gpt/readyForPreview=false"
+    "lastUpdatedAction": "EVIDENCE-CORRECTION-02 complete: corrected stale HEAD=b7ec38d and '13 commits' references in EVIDENCE-CORRECTION-01 in-repo files via SUPERSESSION BANNERS; introduced three unified SHA fields (LAST_CODEX_AUDITED_SHA=a858d7f, LAST_PRODUCTION_CHANGE_SHA=b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5, CURRENT_PACKET_HEAD=<post-push SHA>); verified actual commit count = 14 (not 13); verified path-filtered production diff byte-identical to existing patch (AC-06 PASS); verified b7ec38d is LAST_PRODUCTION_CHANGE_SHA via docs-only diff after; 8/8 gates PASS; readyForPreview=false unchanged; no production/test/mock changes. Status: awaiting_gpt_acceptance/nextActor=gpt/readyForPreview=false. Desktop completion packet will be rewritten post-push with actual CURRENT_PACKET_HEAD SHA."
   }
 }

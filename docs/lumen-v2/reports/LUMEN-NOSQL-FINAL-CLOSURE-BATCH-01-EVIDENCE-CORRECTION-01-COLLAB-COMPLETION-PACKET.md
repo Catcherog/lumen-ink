@@ -1,5 +1,20 @@
 # picture-edit Collaboration Completion Packet
 
+> ## ⚠️ SUPERSEDED by EVIDENCE-CORRECTION-02 (2026-07-23)
+>
+> This in-repo copy of the EVIDENCE-CORRECTION-01 completion packet has been **superseded**.
+> The following stale values have been corrected by `LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02`:
+>
+> - `HEAD = b7ec38d` → `b7ec38d` is **LAST_PRODUCTION_CHANGE_SHA**, not HEAD
+> - `a858d7f..HEAD = a858d7f..b7ec38d6b93ce671295e8e641a74d4a8c0dc2fa5` → `a858d7f..<CURRENT_PACKET_HEAD>`
+> - `13 commits` in `a858d7f..HEAD` → **14 commits** (verified via `git rev-list --count`)
+>
+> **Canonical source of truth**:
+> - `docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-02-TRAE-REPORT.md`
+> - Desktop: `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md` (rewritten with `CURRENT_PACKET_HEAD`)
+>
+> The body below is preserved unchanged as a historical record.
+
 **Task**: LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-EVIDENCE-CORRECTION-01
 **Project**: picture-edit / lumen-v2
 **Owner**: Trae
