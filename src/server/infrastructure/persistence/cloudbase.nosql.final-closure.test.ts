@@ -413,12 +413,12 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
     setup = await makeReadyDeps();
   });
 
-  // --- AC-06 Test 1: METADATA_MISSING in cleanup loop — key treated as probable success ---
+  // --- AC-06 Test 1: METADATA_MISSING in cleanup loop — key persisted to unresolved record ---
   //
-  // ProjectService.deleteProject treats METADATA_MISSING as probable success
-  // (key added to completedKeys). This is the crash-window recovery semantic:
-  // the metadata was likely deleted by a previous successful delete().
-  it('ProjectService.deleteProject treats METADATA_MISSING as probable success, logs warning', async () => {
+  // FIX-R9 H-01: ProjectService.deleteProject persists METADATA_MISSING keys
+  // to project_unresolved_metadata for durable operational review. The key is
+  // NOT added to completedKeys, remains in the ledger, and is not lost.
+  it('ProjectService.deleteProject persists METADATA_MISSING to unresolved record, logs warning', async () => {
     const { deps, state } = setup;
     const service = new ProjectService(deps, dummyExecutor);
     await deps.projects.create(makeProject('p1'));
@@ -445,6 +445,8 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
     // deleteProject succeeded (metadata was already deleted by deleteCascade).
     expect(result.deleted).toBe(true);
     expect(result.cleanupFailures).toHaveLength(0);
+    // H-01: key-0 is in unresolvedMetadataMissing.
+    expect(result.unresolvedMetadataMissing).toEqual(['key-0']);
 
     // The METADATA_MISSING warning was logged for key-0.
     const metadataWarnings = warnSpy.mock.calls
@@ -453,17 +455,24 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
     expect(metadataWarnings.length).toBeGreaterThan(0);
     expect(metadataWarnings.some((msg) => msg.includes('key-0'))).toBe(true);
 
+    // H-01: Unresolved metadata record was written.
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p1')).toBe(true);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(unresolvedDoc.keys).toEqual(['key-0']);
+
     warnSpy.mockRestore();
     await deps.close();
   });
 
-  // --- AC-06 Test 2: METADATA_MISSING clears ledger (AC-07 BLOCKER condition) ---
+  // --- AC-06 Test 2: METADATA_MISSING key is NOT removed from ledger (H-01 FIX) ---
   //
-  // AC-07: If remote unknown (METADATA_MISSING) clears the ledger, this
-  // must be registered as FINAL_CODEX_BLOCKER. This test verifies the
-  // current behavior: METADATA_MISSING keys ARE removed from the ledger
-  // (treated as completed). This is the BLOCKER condition.
-  it('METADATA_MISSING key is removed from ledger (AC-07 BLOCKER condition verified)', async () => {
+  // FIX-R9 H-01: Previously METADATA_MISSING keys were added to completedKeys
+  // and removed from the ledger (the AC-07 BLOCKER condition). This was
+  // unsafe because the remote object might still exist. H-01 fixes this:
+  // METADATA_MISSING keys are persisted to project_unresolved_metadata and
+  // REMAIN in the cleanup ledger. The ledger is NOT deleted.
+  it('METADATA_MISSING key is NOT removed from ledger (H-01 FIX: unresolved record preserves key)', async () => {
     const { deps, state } = setup;
     const service = new ProjectService(deps, dummyExecutor);
     await deps.projects.create(makeProject('p1'));
@@ -484,20 +493,33 @@ describe('AC-06: Metadata missing but remote object state unknown', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // deleteProject: key-0 → METADATA_MISSING (probable success), key-1 → OBJECT_NOT_FOUND.
-    await service.deleteProject('p1');
+    // deleteProject: key-0 → METADATA_MISSING (persisted to unresolved),
+    // key-1 → OBJECT_NOT_FOUND or success (added to completedKeys).
+    const result = await service.deleteProject('p1');
 
-    // Both keys are treated as completed → ledger is deleted.
+    // H-01: key-0 is in unresolvedMetadataMissing, NOT completedKeys.
+    expect(result.unresolvedMetadataMissing).toEqual(['key-0']);
+
+    // H-01: Ledger is NOT deleted — key-0 remains because remote deletion
+    // was NOT confirmed. The ledger doc still exists.
     const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
-    expect(cleanupColl?.docs.has('p1')).toBe(false);
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    // key-0 remains; key-1 was removed (either OBJECT_NOT_FOUND or success).
+    expect(cleanupDoc.keys).toEqual(['key-0']);
+
+    // H-01: Unresolved metadata record preserves key-0 for operational review.
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p1')).toBe(true);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(unresolvedDoc.keys).toEqual(['key-0']);
 
     warnSpy.mockRestore();
 
-    // AC-07 REGISTRATION: This behavior (METADATA_MISSING clears ledger)
-    // is registered as FINAL_CODEX_BLOCKER in the remaining-risk ledger.
-    // The remote object for key-0 might still exist (metadata was lost,
-    // not confirmed deleted). If the remote object exists, it becomes
-    // orphaned because the ledger no longer tracks it.
+    // AC-07 RESOLVED: The BLOCKER condition (METADATA_MISSING clears ledger)
+    // is fixed. The remote object for key-0 is no longer orphaned — the
+    // ledger still tracks it, and the unresolved record preserves it for
+    // manual/COS-API reconciliation.
 
     await deps.close();
   });

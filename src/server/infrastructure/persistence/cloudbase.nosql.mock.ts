@@ -45,8 +45,8 @@ export interface MockCloudBaseApp {
   database(): MockDatabaseHandle;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; statusMessage?: string }> }>;
-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: number; tempFileURL: string; statusMessage?: string }> }>;
+  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; statusMessage?: string }> }>;
+  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; tempFileURL: string; statusMessage?: string }> }>;
 }
 
 export interface MockDatabaseHandle {
@@ -318,15 +318,17 @@ export interface MockCloudBaseState {
    */
   deleteMetadataShouldFail: boolean;
   /**
-   * FIX-R4: Per-fileID status codes for deleteFile(). Non-zero = failure
-   * (the mock throws for that fileID).
+   * FIX-R9 C-01: Per-fileID status codes for deleteFile(). String codes
+   * matching real SDK contract: "SUCCESS" = success, any other string =
+   * failure. Default (unset) = "SUCCESS".
    */
-  deleteFileStatuses: Record<string, number>;
+  deleteFileStatuses: Record<string, string>;
   /**
-   * FIX-R4: Per-fileID status codes for getTempFileURL(). Non-zero = failure
-   * (the mock throws for that fileID).
+   * FIX-R9 C-01: Per-fileID status codes for getTempFileURL(). String codes
+   * matching real SDK contract: "SUCCESS" = success, any other string =
+   * failure. Default (unset) = "SUCCESS".
    */
-  getTempFileURLStatuses: Record<string, number>;
+  getTempFileURLStatuses: Record<string, string>;
   /**
    * FIX-R4: fileIDs that don't exist in remote Storage. downloadFile()
    * throws FILE_NOT_FOUND for these; getTempFileURL() returns an empty URL.
@@ -890,27 +892,24 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
       return { fileContent: file.content };
     },
     async deleteFile(opts: { fileList: string[] }) {
-      // FIX-R4 Workstream G: Return per-fileID status codes instead of
-      // throwing. Real CloudBase deleteFile returns { fileList: [{ fileID,
-      // code, statusMessage }] } where code 0 = SUCCESS. Non-zero codes
-      // indicate failure; the object is NOT deleted in that case.
+      // FIX-R9 C-01: Real SDK returns string code "SUCCESS" on success.
+      // @cloudbase/node-sdk IDeleteFileResult.fileList[].code: string
       const fileList = opts.fileList.map((fileID) => {
-        const code = state.deleteFileStatuses[fileID] ?? 0;
-        if (code === 0) {
+        const code = state.deleteFileStatuses[fileID] ?? 'SUCCESS';
+        if (code === 'SUCCESS') {
           state.storage.files.delete(fileID);
-          return { fileID, code: 0, statusMessage: 'SUCCESS' };
+          return { fileID, code: 'SUCCESS', statusMessage: 'SUCCESS' };
         }
         return { fileID, code, statusMessage: 'DELETE_FAILED' };
       });
       return { fileList };
     },
     async getTempFileURL(opts: { fileList: string[] }) {
-      // FIX-R4 Workstream G: Return per-fileID status codes instead of
-      // throwing. Real CloudBase getTempFileURL returns { fileList: [{
-      // fileID, code, tempFileURL, statusMessage }] }.
+      // FIX-R9 C-01: Real SDK returns string code "SUCCESS" on success.
+      // @cloudbase/node-sdk IFileUrlInfo.code: string
       const fileList = opts.fileList.map((fileID) => {
-        const code = state.getTempFileURLStatuses[fileID] ?? 0;
-        if (code !== 0) {
+        const code = state.getTempFileURLStatuses[fileID] ?? 'SUCCESS';
+        if (code !== 'SUCCESS') {
           return {
             fileID,
             code,
@@ -919,13 +918,13 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
           };
         }
         // remoteObjectMissing returns an empty URL (simulating a missing
-        // remote object) with code 0 — the URL fetch "succeeded" but the
-        // object is gone.
+        // remote object) with code "SUCCESS" — the URL fetch "succeeded"
+        // but the object is gone.
         const tempFileURL =
           state.remoteObjectMissing.has(fileID) || !state.storage.files.has(fileID)
             ? ''
             : `https://mock-temp-url/${fileID}`;
-        return { fileID, code: 0, tempFileURL, statusMessage: 'SUCCESS' };
+        return { fileID, code: 'SUCCESS', tempFileURL, statusMessage: 'SUCCESS' };
       });
       return { fileList };
     },

@@ -59,6 +59,20 @@ export interface DeleteProjectResult {
   deleted: true;
   /** Storage keys whose object deletion failed; metadata is already gone. */
   cleanupFailures: string[];
+  /**
+   * FIX-R9 H-01: Storage keys where objects.delete() threw METADATA_MISSING
+   * (metadata gone, fileID unrecoverable, remote state unknown). These keys
+   * are persisted to project_unresolved_metadata for operational review and
+   * are NOT removed from the cleanup ledger. They cannot be retried via the
+   * normal sweeper (no fileID).
+   */
+  unresolvedMetadataMissing: string[];
+  /**
+   * FIX-R9 M-01: True when removeCleanupKeys() failed. The cleanup ledger
+   * may still contain already-deleted keys; the caller should signal
+   * retry-required to the client or schedule a ledger reconciliation.
+   */
+  ledgerUpdateFailed: boolean;
 }
 
 function generateId(prefix: string): string {
@@ -325,6 +339,7 @@ export class ProjectService {
       getCleanupKeys?(id: string): Promise<string[]>;
       removeCleanupKeys?(id: string, removedKeys: string[]): Promise<string[]>;
       deleteCleanupKeys?(id: string): Promise<void>;
+      markUnresolvedMetadata?(id: string, keys: string[]): Promise<void>;
     };
 
     let storageKeys: string[] = [];
@@ -361,6 +376,10 @@ export class ProjectService {
     // (which IS confirmed remote deletion via SDK status code).
     const cleanupFailures: string[] = [];
     const completedKeys: string[] = [];
+    // FIX-R9 H-01: METADATA_MISSING keys must NOT be added to completedKeys.
+    // They are persisted to project_unresolved_metadata for operational
+    // review and remain in the cleanup ledger (not removed).
+    const unresolvedMetadataMissing: string[] = [];
     for (const key of storageKeys) {
       try {
         await this.deps.objects.delete(key);
@@ -375,17 +394,16 @@ export class ProjectService {
           completedKeys.push(key);
           continue;
         }
-        // FIX-R8 AC-03: METADATA_MISSING — metadata is gone, cannot confirm
-        // remote deletion. In the cleanup ledger context, this most likely
-        // means a previous objects.delete() succeeded (crash-window). We
-        // add to completedKeys for ledger cleanup, but explicitly warn that
-        // remote deletion is NOT confirmed. This distinguishes the semantic
-        // from OBJECT_NOT_FOUND (which IS confirmed).
+        // FIX-R9 H-01: METADATA_MISSING — metadata is gone, fileID is
+        // unrecoverable, remote deletion NOT confirmed. These keys CANNOT
+        // be retried (no fileID). They must NOT be added to completedKeys
+        // (which would remove them from the ledger). Instead, persist them
+        // to project_unresolved_metadata for durable operational review.
         if (msg.includes('METADATA_MISSING')) {
           console.warn(
-            `[ProjectService.deleteProject] METADATA_MISSING key=${key}: remote deletion NOT confirmed, treating as probable success for crash-window recovery`
+            `[ProjectService.deleteProject] METADATA_MISSING key=${key}: remote deletion NOT confirmed, persisting to unresolved record for operational review`
           );
-          completedKeys.push(key);
+          unresolvedMetadataMissing.push(key);
           continue;
         }
         const diagnosticId = generateDiagnosticId();
@@ -397,10 +415,33 @@ export class ProjectService {
       }
     }
 
+    // FIX-R9 H-01: Persist unresolved metadata-missing keys to a durable
+    // record. Duck-typed — only CloudBase adapter implements this method.
+    if (
+      unresolvedMetadataMissing.length > 0 &&
+      typeof repo.markUnresolvedMetadata === 'function'
+    ) {
+      try {
+        await repo.markUnresolvedMetadata(projectId, unresolvedMetadataMissing);
+      } catch (err) {
+        // Best-effort persistence — log but do not fail the delete. The
+        // keys remain in cleanupFailures-equivalent state (still in ledger).
+        console.warn(
+          `[ProjectService.deleteProject] markUnresolvedMetadata failed for ${projectId}`,
+          err
+        );
+      }
+    }
+
     // FIX-R6 (AC-R6-01/02): Update the cleanup ledger AFTER Storage
     // cleanup attempts. Successfully-deleted keys are removed; failed
     // keys remain for sweeper recovery. When the ledger becomes empty,
     // the adapter deletes the doc.
+    //
+    // FIX-R9 M-01: If removeCleanupKeys fails, set ledgerUpdateFailed=true
+    // so the caller knows the ledger may contain stale already-deleted keys
+    // and can signal retry-required. Do NOT silently swallow the failure.
+    let ledgerUpdateFailed = false;
     if (typeof repo.removeCleanupKeys === 'function') {
       try {
         await repo.removeCleanupKeys!(projectId, completedKeys);
@@ -409,9 +450,11 @@ export class ProjectService {
         // The ledger may still contain already-deleted keys, which the
         // sweeper will treat as idempotent success (OBJECT_NOT_FOUND).
         // We don't fail the deleteProject call — metadata is gone and
-        // Storage is cleaned.
+        // Storage is cleaned — but we signal ledgerUpdateFailed so the
+        // caller can schedule reconciliation.
+        ledgerUpdateFailed = true;
         console.warn(
-          `[ProjectService.deleteProject] removeCleanupKeys failed for ${projectId}`,
+          `[ProjectService.deleteProject] removeCleanupKeys failed for ${projectId} (ledgerUpdateFailed=true)`,
           err
         );
       }
@@ -426,11 +469,11 @@ export class ProjectService {
       try {
         await repo.deleteCleanupKeys!(projectId);
       } catch {
-        // Best-effort.
+        ledgerUpdateFailed = true;
       }
     }
 
-    return { deleted: true, cleanupFailures };
+    return { deleted: true, cleanupFailures, unresolvedMetadataMissing, ledgerUpdateFailed };
   }
 }
 

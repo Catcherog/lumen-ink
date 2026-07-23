@@ -144,8 +144,12 @@ interface CloudBaseApp {
   database(): CloudBaseDatabase;
   uploadFile(opts: { cloudPath: string; fileContent: Buffer }): Promise<{ fileID: string }>;
   downloadFile(opts: { fileID: string }): Promise<{ fileContent: Buffer }>;
-  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code?: number; statusMessage?: string }> }>;
-  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code?: number; tempFileURL: string; statusMessage?: string }> }>;
+  // FIX-R9 C-01: Use installed SDK's real Storage contract.
+  // @cloudbase/node-sdk IDeleteFileResult.fileList[].code: string
+  // @cloudbase/node-sdk IFileUrlInfo.code: string
+  // Official docs: success code is the string "SUCCESS" (NOT numeric 0).
+  deleteFile(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; statusMessage?: string }> }>;
+  getTempFileURL(opts: { fileList: string[] }): Promise<{ fileList: Array<{ fileID: string; code: string; tempFileURL: string; statusMessage?: string }> }>;
 }
 
 interface CloudBaseDatabase {
@@ -283,6 +287,13 @@ function makeCollections(namespace: string): Record<string, string> {
     // the transaction so a future sweeper can retry orphaned bytes if the
     // process crashes between metadata commit and object deletion.
     projectCleanupKeys: `${prefix}project_cleanup_keys`,
+    // FIX-R9 H-01: Unresolved metadata-missing record. When objects.delete()
+    // throws METADATA_MISSING (metadata gone, fileID unrecoverable, remote
+    // state unknown), the key is written here for durable operational review.
+    // These keys CANNOT be retried via the normal sweeper (no fileID), so
+    // they must NOT be added to completedKeys or removed from the cleanup
+    // ledger. This record preserves them for manual/COS-API reconciliation.
+    projectUnresolvedMetadata: `${prefix}project_unresolved_metadata`,
   };
 }
 
@@ -549,6 +560,16 @@ export function createCloudBaseNoSqlPersistence(
      * whether to retry or hand off to the sweeper.
      */
     removeCleanupKeys(id: string, removedKeys: string[]): Promise<string[]>;
+    /**
+     * FIX-R9 H-01: Persist metadata-missing keys to a durable unresolved
+     * record. These keys cannot be retried (fileID is gone with the missing
+     * metadata) and must NOT be added to completedKeys. The record survives
+     * for manual/COS-API reconciliation of potentially orphaned remote objects.
+     *
+     * Infrastructure-internal method — NOT part of the frozen interface.
+     * ProjectService uses duck-typing to check if this method exists.
+     */
+    markUnresolvedMetadata(id: string, keys: string[]): Promise<void>;
   } = {
     async create(input: Project): Promise<Project> {
       assertReady();
@@ -828,6 +849,29 @@ export function createCloudBaseNoSqlPersistence(
           .update({ keys: cmd.set(remaining) });
         return remaining;
       });
+    },
+
+    /**
+     * FIX-R9 H-01: Mark keys as unresolved metadata-missing.
+     * These keys are written to project_unresolved_metadata for durable
+     * operational review. The keys remain in the cleanup ledger (not
+     * removed via completedKeys) so the sweeper does NOT falsely declare
+     * them complete.
+     *
+     * This method does NOT use a transaction — it is a simple upsert.
+     * Concurrent calls append keys via read-merge-write.
+     */
+    async markUnresolvedMetadata(id: string, keys: string[]): Promise<void> {
+      assertReady();
+      if (keys.length === 0) return;
+      // Read existing unresolved keys, merge, and write back.
+      const coll = getDb().collection(COLLECTIONS.projectUnresolvedMetadata);
+      const existing = await coll.doc(id).get();
+      const existingDoc = unwrapDocumentData<{ keys: string[] }>(existing.data);
+      const existingKeys = new Set(existingDoc?.keys ?? []);
+      for (const k of keys) existingKeys.add(k);
+      // set() is an upsert — pass the raw value, not a command operator.
+      await coll.doc(id).set({ keys: [...existingKeys] });
     },
   };
 
@@ -1378,13 +1422,12 @@ export function createCloudBaseNoSqlPersistence(
         // Compensating delete: try to remove the orphaned object.
         try {
           const compRes = await getApp().deleteFile({ fileList: [fileID] });
-          // FIX-R4 Workstream G: Check per-fileID status code. The SDK
-          // returns { fileList: [{ fileID, code, statusMessage }] } without
-          // throwing; a non-zero code means the object was NOT deleted.
-          const compItem = compRes.fileList[0];
-          if (compItem && (compItem.code ?? 0) !== 0) {
+          // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
+          // Only accept the result matching the requested fileID.
+          const compItem = compRes.fileList.find((f) => f.fileID === fileID);
+          if (!compItem || compItem.code !== 'SUCCESS') {
             throw new Error(
-              `COMPENSATION_DELETE_FAILED: code=${compItem.code} msg=${compItem.statusMessage ?? ''}`
+              `COMPENSATION_DELETE_FAILED: code=${compItem?.code ?? 'NO_RESULT'} msg=${compItem?.statusMessage ?? ''}`
             );
           }
           // Compensation succeeded — throw the original metadata error.
@@ -1425,11 +1468,14 @@ export function createCloudBaseNoSqlPersistence(
       const res = await getApp().getTempFileURL({
         fileList: [fileID],
       });
-      if (res.fileList.length === 0) throw new Error(`OBJECT_NOT_FOUND: ${key}`);
-      const item = res.fileList[0];
-      const code = item.code ?? 0;
-      if (code !== 0) {
-        throw new Error(`SIGNED_URL_FAILED: ${key}: fileID=${fileID}: code=${code}`);
+      // FIX-R9 C-01: SDK returns string code "SUCCESS". Only accept the
+      // result matching the requested fileID; reject unknown codes.
+      const item = res.fileList.find((f) => f.fileID === fileID);
+      if (!item) {
+        throw new Error(`OBJECT_NOT_FOUND: ${key}: fileID=${fileID}: no matching result from SDK`);
+      }
+      if (item.code !== 'SUCCESS') {
+        throw new Error(`SIGNED_URL_FAILED: ${key}: fileID=${fileID}: code=${item.code}`);
       }
       if (!item.tempFileURL) {
         throw new Error(`SIGNED_URL_EMPTY: ${key}: fileID=${fileID}`);
@@ -1473,19 +1519,24 @@ export function createCloudBaseNoSqlPersistence(
         throw e;
       }
       const res = await getApp().deleteFile({ fileList: [fileID] });
-      // Check SDK status codes. code 0 = SUCCESS; non-zero = failure.
-      const item = res.fileList[0];
-      if (item) {
-        const code = item.code ?? 0;
-        if (code !== 0) {
-          const msg = item.statusMessage ?? '';
-          // "not found" / "no such file" = already deleted, acceptable.
-          const lower = msg.toLowerCase();
-          if (!lower.includes('not found') && !lower.includes('no such file')) {
-            throw new Error(
-              `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: code=${code} msg=${msg}`
-            );
-          }
+      // FIX-R9 C-01: SDK returns string code "SUCCESS" on success.
+      // Only accept the result matching the requested fileID. If the
+      // result is missing or code != "SUCCESS" (and not a "not found"
+      // idempotent case), do NOT delete metadata — preserve for retry.
+      const item = res.fileList.find((f) => f.fileID === fileID);
+      if (!item) {
+        throw new Error(
+          `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: no matching result from SDK`
+        );
+      }
+      if (item.code !== 'SUCCESS') {
+        const msg = item.statusMessage ?? '';
+        // "not found" / "no such file" = already deleted, acceptable.
+        const lower = msg.toLowerCase();
+        if (!lower.includes('not found') && !lower.includes('no such file')) {
+          throw new Error(
+            `OBJECT_DELETE_PARTIAL: ${key}: fileID=${fileID}: code=${item.code} msg=${msg}`
+          );
         }
       }
       // Remote delete succeeded — now delete metadata.
@@ -1523,12 +1574,12 @@ export function createCloudBaseNoSqlPersistence(
       // metadata exists — verify remote object actually exists
       try {
         const res = await getApp().getTempFileURL({ fileList: [fileID] });
-        if (res.fileList.length === 0) return false;
-        const item = res.fileList[0];
-        const code = item.code ?? 0;
-        if (code !== 0) {
+        // FIX-R9 C-01: SDK returns string code "SUCCESS". Match fileID.
+        const item = res.fileList.find((f) => f.fileID === fileID);
+        if (!item) return false;
+        if (item.code !== 'SUCCESS') {
           console.warn(
-            `[objects.exists] metadata exists but remote object missing: key=${key} fileID=${fileID} code=${code}`
+            `[objects.exists] metadata exists but remote object missing: key=${key} fileID=${fileID} code=${item.code}`
           );
           return false;
         }

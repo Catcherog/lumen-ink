@@ -5,9 +5,9 @@
  * getSignedUrl, exists) handle CloudBase Storage SDK failures correctly:
  *
  *  - put: upload failure, metadata failure with/without compensation success
- *  - delete: request throws, partial failure (non-zero status code),
+ *  - delete: request throws, partial failure (non-SUCCESS status code),
  *    metadata delete failure after remote success
- *  - getSignedUrl: non-zero status code from SDK
+ *  - getSignedUrl: non-SUCCESS status code from SDK
  *  - exists: three-state distinction (metadata missing, remote missing,
  *    both present)
  *
@@ -17,8 +17,8 @@
  *  - state.uploadShouldFail: uploadFile() throws
  *  - state.saveMetadataShouldFail: set() on object_metadata throws
  *  - state.deleteMetadataShouldFail: remove() on object_metadata throws
- *  - state.deleteFileStatuses: per-fileID non-zero codes from deleteFile()
- *  - state.getTempFileURLStatuses: per-fileID non-zero codes from getTempFileURL()
+ *  - state.deleteFileStatuses: per-fileID non-SUCCESS string codes from deleteFile()
+ *  - state.getTempFileURLStatuses: per-fileID non-SUCCESS string codes from getTempFileURL()
  *  - state.remoteObjectMissing: fileIDs flagged as missing in remote Storage
  */
 
@@ -130,10 +130,10 @@ describe('FIX-R4 Workstream G: Storage fault injection', () => {
     const bytes = new Uint8Array([40, 50]);
     state.saveMetadataShouldFail = true;
 
-    // Make compensation delete fail by setting a non-zero status code
+    // Make compensation delete fail by setting a non-SUCCESS status code
     // for the predicted fileID
     const expectedFileID = predictFileID(key);
-    state.deleteFileStatuses[expectedFileID] = 1;
+    state.deleteFileStatuses[expectedFileID] = 'DELETE_FAILED';
 
     // Single call — capture the error to verify fileID is included
     let caught: Error | null = null;
@@ -197,8 +197,8 @@ describe('FIX-R4 Workstream G: Storage fault injection', () => {
     await deps.objects.put(key, bytes, 'image/png');
     const expectedFileID = predictFileID(key);
 
-    // Make deleteFile return a non-zero status code for this fileID
-    state.deleteFileStatuses[expectedFileID] = -1;
+    // Make deleteFile return a non-SUCCESS status code for this fileID
+    state.deleteFileStatuses[expectedFileID] = 'DELETE_FAILED';
 
     await expect(deps.objects.delete(key)).rejects.toThrow(/OBJECT_DELETE_PARTIAL/);
 
@@ -206,7 +206,7 @@ describe('FIX-R4 Workstream G: Storage fault injection', () => {
     const metaCollection = state.database.collections.get('prod_object_metadata');
     expect(metaCollection?.docs.has(key)).toBe(true);
 
-    // The mock does NOT delete the file when code is non-zero
+    // The mock does NOT delete the file when code is non-SUCCESS
     expect(state.storage.files.has(expectedFileID)).toBe(true);
 
     await deps.close();
@@ -228,7 +228,7 @@ describe('FIX-R4 Workstream G: Storage fault injection', () => {
 
     await expect(deps.objects.delete(key)).rejects.toThrow(/DELETE_METADATA_FAILED/);
 
-    // Remote object was deleted (deleteFile returned code 0)
+    // Remote object was deleted (deleteFile returned code "SUCCESS")
     expect(state.storage.files.has(expectedFileID)).toBe(false);
 
     // Metadata is preserved for sweeper retry
@@ -249,8 +249,8 @@ describe('FIX-R4 Workstream G: Storage fault injection', () => {
     await deps.objects.put(key, bytes, 'image/png');
     const expectedFileID = predictFileID(key);
 
-    // Make getTempFileURL return a non-zero status code
-    state.getTempFileURLStatuses[expectedFileID] = -1;
+    // Make getTempFileURL return a non-SUCCESS status code
+    state.getTempFileURLStatuses[expectedFileID] = 'GET_URL_FAILED';
 
     await expect(deps.objects.getSignedUrl(key)).rejects.toThrow(/SIGNED_URL_FAILED/);
 

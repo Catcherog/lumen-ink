@@ -1065,11 +1065,13 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
 
     const result1 = await service.deleteProject('p1');
 
-    // Service swallows removeCleanupKeys error → returns success with no
-    // cleanupFailures (Storage deletes all succeeded; only the ledger update
-    // failed, which is a non-fatal best-effort operation).
+    // FIX-R9 M-01: Service no longer silently swallows removeCleanupKeys
+    // errors. It returns success (Storage is cleaned) but sets
+    // ledgerUpdateFailed=true so the caller knows the ledger may contain
+    // stale already-deleted keys and can schedule reconciliation.
     expect(result1.deleted).toBe(true);
     expect(result1.cleanupFailures).toHaveLength(0);
+    expect(result1.ledgerUpdateFailed).toBe(true);
 
     // --- Verify crash-window state (the gap AC-R6-04 requires us to cover) ---
 
@@ -1092,23 +1094,38 @@ describe('FIX-R6/FIX-R7: ProjectService cleanup ledger lifecycle (AC-R6-01..04)'
 
     failRemoveCleanupKeys = false;
 
-    // AC-R6-04: Second attempt via REAL service.deleteProject() path.
-    // - deleteCascade is a no-op on already-deleted project (cleans stale
-    //   tombstone if any, but project is already gone)
+    // FIX-R9 H-01: Second attempt via REAL service.deleteProject() path.
+    // - deleteCascade is a no-op on already-deleted project
     // - getCleanupKeys reads remaining ledger (both keys still there)
-    // - Storage delete hits OBJECT_NOT_FOUND → idempotent success
-    //   (service layer recognizes OBJECT_NOT_FOUND and adds to completedKeys)
-    // - removeCleanupKeys succeeds → ledger empty → doc deleted
+    // - Storage delete hits METADATA_MISSING (metadata was deleted in Phase 1
+    //   by objects.delete). With H-01, METADATA_MISSING keys go to
+    //   unresolvedMetadataMissing (NOT completedKeys) because remote deletion
+    //   cannot be confirmed. The keys remain in the ledger for manual/COS-API
+    //   reconciliation.
+    // - removeCleanupKeys succeeds with empty completedKeys (no-op on ledger)
     const result2 = await service.deleteProject('p1');
     expect(result2.deleted).toBe(true);
     expect(result2.cleanupFailures).toHaveLength(0);
+    // H-01: Both keys are in unresolvedMetadataMissing (metadata gone from Phase 1)
+    expect(result2.unresolvedMetadataMissing.sort()).toEqual([...storageKeys].sort());
+    // removeCleanupKeys succeeded (no fault this time)
+    expect(result2.ledgerUpdateFailed).toBe(false);
 
     // --- Verify final state ---
 
-    // Ledger is now gone (all keys cleaned → doc deleted by removeCleanupKeys)
-    expect(cleanupColl?.docs.has('p1')).toBe(false);
+    // H-01: Ledger is NOT gone — both keys remain because METADATA_MISSING
+    // keys are not added to completedKeys. They require manual reconciliation.
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc2 = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(cleanupDoc2.keys.sort()).toEqual([...storageKeys].sort());
 
-    // Storage objects remain gone (idempotent retry did not recreate them)
+    // H-01: Unresolved metadata record preserves both keys for operational review
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p1')).toBe(true);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(unresolvedDoc.keys.sort()).toEqual([...storageKeys].sort());
+
+    // Storage metadata remains gone (Phase 1 already deleted it)
     for (const key of storageKeys) {
       expect(state.database.collections.get('prod_object_metadata')?.docs.has(key)).toBe(false);
     }
@@ -1400,10 +1417,12 @@ describe('FIX-R8 AC-03: METADATA_MISSING semantic distinction', () => {
     await deps.close();
   });
 
-  // AC-03: ProjectService.deleteProject() treats METADATA_MISSING as
-  // probable success for crash-window recovery (adds to completedKeys) but
-  // logs a warning that remote deletion is NOT confirmed.
-  it('ProjectService.deleteProject() treats METADATA_MISSING as probable success, logs warning', async () => {
+  // FIX-R9 H-01: ProjectService.deleteProject() persists METADATA_MISSING keys
+  // to project_unresolved_metadata for durable operational review. The key is
+  // NOT added to completedKeys and remains in the cleanup ledger so it is not
+  // lost. This fixes the AC-07 BLOCKER where METADATA_MISSING cleared the
+  // ledger while remote deletion was unconfirmed.
+  it('ProjectService.deleteProject() persists METADATA_MISSING to unresolved record, preserves ledger', async () => {
     const { deps, state } = setup;
     const service = new ProjectService(deps, dummyExecutor);
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1421,11 +1440,13 @@ describe('FIX-R8 AC-03: METADATA_MISSING semantic distinction', () => {
     metaColl?.docs.delete('key-0');
 
     // Now call service.deleteProject() — it reads the ledger, tries
-    // objects.delete('key-0'), gets METADATA_MISSING, treats as probable
-    // success, logs warning, removes from ledger.
+    // objects.delete('key-0'), gets METADATA_MISSING, persists to
+    // unresolved record, logs warning, KEEPS key in ledger.
     const result = await service.deleteProject('p1');
     expect(result.deleted).toBe(true);
     expect(result.cleanupFailures).toHaveLength(0);
+    // H-01: key-0 is in unresolvedMetadataMissing, NOT in cleanupFailures.
+    expect(result.unresolvedMetadataMissing).toEqual(['key-0']);
 
     // Warning logged with METADATA_MISSING + "remote deletion NOT confirmed".
     const metadataMissingCalls = warnSpy.mock.calls.filter((c) =>
@@ -1437,8 +1458,18 @@ describe('FIX-R8 AC-03: METADATA_MISSING semantic distinction', () => {
     );
     expect(notConfirmedCalls.length).toBeGreaterThan(0);
 
-    // Ledger is cleaned (key-0 treated as completed).
-    expect(state.database.collections.get('prod_project_cleanup_keys')?.docs.has('p1')).toBe(false);
+    // H-01: Ledger is NOT cleaned — key-0 remains because it was not
+    // confirmed deleted. The ledger doc still exists with key-0.
+    const cleanupColl = state.database.collections.get('prod_project_cleanup_keys');
+    expect(cleanupColl?.docs.has('p1')).toBe(true);
+    const cleanupDoc = cleanupColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(cleanupDoc.keys).toEqual(['key-0']);
+
+    // H-01: Unresolved metadata record was written for durable review.
+    const unresolvedColl = state.database.collections.get('prod_project_unresolved_metadata');
+    expect(unresolvedColl?.docs.has('p1')).toBe(true);
+    const unresolvedDoc = unresolvedColl?.docs.get('p1') as unknown as { keys: string[] };
+    expect(unresolvedDoc.keys).toEqual(['key-0']);
 
     warnSpy.mockRestore();
     await deps.close();
