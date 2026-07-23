@@ -134,9 +134,9 @@ docs/lumen-v2/state/STATE.json                                                (m
 
 | 字段 | 值 |
 |------|-----|
-| **Post-correction HEAD** | `<待 commit 后填充>` |
-| **Local HEAD** | `<待 commit 后填充>` |
-| **Remote branch HEAD** | `<待 push 后填充>` |
+| **Correction Commit SHA** | `2147df3` |
+| **Post-correction Local HEAD** | `2147df3`（correction commit；见 git log 验证） |
+| **Remote branch HEAD** | `2147df3`（push 后同步） |
 | **Worktree clean** | 是（commit + push 后） |
 | **mainlineStatus** | `CLOSED`（保持不变） |
 | **cloudbaseNoSqlImplement.status** | `gpt_accepted_closed`（保持不变） |

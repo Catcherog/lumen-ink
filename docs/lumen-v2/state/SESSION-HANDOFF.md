@@ -49,7 +49,8 @@ GPT 最终裁决（2026-07-24）发现 3 个非阻塞文档问题，已全部校
 - **FINAL_IMPLEMENTATION_SHA**：`499717b` (full: `499717baca5f61e4819bbde557795b103bd0b946`)
 - **Closure Commit SHA**：`ecd4973` (full: `ecd49734289d27e619ccecc1782894cdf1d39734`)
 - **GPT Review Commit SHA**：`658c5d7` (full: `658c5d70f9d350517e05cda7c86c7c1136e3d4c2`)
-- **Post-correction HEAD**：`<待 commit 后填充>`（docs-only 校正 commit）
+- **Correction Commit SHA**：`2147df3`（docs-only 校正 commit）
+- **Post-correction Local HEAD**：`2147df3`（见 git log 验证）
 - **Local HEAD = Remote HEAD**：是（push 后验证）
 - **Worktree clean**：是（commit + push 后）
 
