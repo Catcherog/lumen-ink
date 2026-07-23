@@ -147,10 +147,10 @@
   "publicRepoSafety": "required",
   "cloudbaseNoSqlImplement": {
     "taskId": "LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01",
-    "status": "awaiting_gpt_acceptance",
+    "status": "ready_for_final_gpt_review",
     "nextActor": "gpt",
     "riskLevel": "HIGH",
-    "traeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R8-TRAE-REPORT.md",
+    "traeReport": "docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-TRAE-REPORT.md",
     "pocEvidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/poc-gate-p0.md",
     "completionPackage": "C:\\Users\\Catcher\\Desktop\\协作文件夹\\picture-edit-collab-completion.md",
     "envId": "zeh-d7glqc07me2155c61",
@@ -160,9 +160,9 @@
     "gateP0Status": "PASS",
     "gateP1ImplementationStatus": "COMPLETE",
     "pendingAc": [],
-    "codexStatus": "REQUIRED_AFTER_FIX_R6_GPT_REVIEW_PASS",
+    "codexStatus": "DEFERRED_UNTIL_GPT_FINAL_REVIEW_PASS",
     "readyForPreview": false,
-    "previewBlockedReason": "R5 GPT verdict FIX_REQUIRED (changes_requested): cleanup ledger deleted before Storage cleanup (P1-01), no real Smoke Harness (P2-01), AC-37 SHA incorrect (P2-02), deployment statement incorrect (P2-03); FIX-R6 implemented, awaiting GPT evidence review + Codex limited audit",
+    "previewBlockedReason": "FINAL-CLOSURE-BATCH-01 complete; awaiting GPT final evidence review + Codex limited READ_ONLY audit; AC-07 BLOCKER (METADATA_MISSING clears ledger) registered as FINAL_CODEX_BLOCKER for Codex evaluation",
     "fixR1Verdict": "FIX_REQUIRED",
     "fixR1ReviewPath": "docs/lumen-v2/reviews/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R1-GPT-REVIEW.md",
     "fixR1DefectCount": 8,
@@ -503,8 +503,55 @@
     "fixR8GptReviewPending": true,
     "fixR8CodexStatus": "REQUIRED_AFTER_GPT_REVIEW_PASS",
     "fixR8CodexScope": "verify FIX-R8 concurrency hardening fixes: deleteCascade ledger ownership under concurrent Phase B; removeCleanupKeys runTransaction atomicity; METADATA_MISSING vs OBJECT_NOT_FOUND semantic distinction; PRODUCTION_STORAGE_PREFIX_REQUIRED fail-closed (read-only, no modifications)",
+    "finalClosureBatch01TaskId": "LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01",
+    "finalClosureBatch01Status": "ready_for_final_gpt_review",
+    "finalClosureBatch01NextActor": "gpt",
+    "finalClosureBatch01RiskLevel": "HIGH",
+    "finalClosureBatch01Route": "R2_BATCHED_AUDIT",
+    "finalClosureBatch01BaselineSha": "b61b6e0",
+    "finalClosureBatch01Branch": "lumen/nosql-final-closure-batch-01-trae",
+    "finalClosureBatch01TraeReport": "docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-TRAE-REPORT.md",
+    "finalClosureBatch01PreviewRunbook": "docs/lumen-v2/runbooks/preview-deployment-readiness.md",
+    "finalClosureBatch01PortfolioCaseStudy": "docs/lumen-v2/portfolio/lumen-portfolio-case-study.md",
+    "finalClosureBatch01GateResult": "Server tsc exit 0 + 442 server tests PASS + Client tsc exit 0 + 194 client tests PASS + Client lint PASS + check-lumen-collab PASS (+13 new server tests vs R8: final-closure concurrency/retry/metadata/init)",
+    "finalClosureBatch01FilesChanged": [
+      "src/server/infrastructure/persistence/cloudbase.nosql.ts (modified: line 911 silent fallback replaced with IDEMPOTENT_VERSION_INCONSISTENT_STATE throw)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.mock.ts (modified: added persistentConflict flag for retry exhaustion testing)",
+      "src/server/infrastructure/persistence/cloudbase.nosql.final-closure.test.ts (new: 13 tests covering AC-04/05/06/10)",
+      "src/server/vitest.config.ts (modified: added .worktrees/** to exclude list)",
+      ".gitignore (modified: added .worktrees/)",
+      "docs/lumen-v2/runbooks/preview-deployment-readiness.md (new: Preview runbook, section C)",
+      "docs/lumen-v2/portfolio/lumen-portfolio-case-study.md (new: Portfolio case study, section D)",
+      "docs/lumen-v2/reports/LUMEN-NOSQL-FINAL-CLOSURE-BATCH-01-TRAE-REPORT.md (new: final audit package, section E)",
+      "docs/lumen-v2/state/STATE.json (modified: finalClosureBatch01 fields added)",
+      "docs/lumen-v2/state/SESSION-HANDOFF.md (modified: updated to FINAL-CLOSURE state)"
+    ],
+    "finalClosureBatch01StopConditions": "readyForPreview=false unchanged; no merge to main; no real CloudBase writes; no real Secrets; no Preview/Production deployment; no interface modification; AC-07 BLOCKER registered not self-resolved",
+    "finalClosureBatch01CodexStatus": "DEFERRED_UNTIL_GPT_FINAL_REVIEW_PASS",
+    "finalClosureBatch01CodexScope": "Final Codex READ_ONLY audit: R1→HEAD production code diff; deleteCascade ledger ownership; different-snapshot concurrent safety; removeCleanupKeys atomicity + retry exhaustion; METADATA_MISSING/remote unknown semantics (AC-07 BLOCKER); crash-window recovery; Preview isolation fail-closed; test invariant coverage; interface bypass/fallback/side-effect leakage",
+    "finalClosureBatch01RemainingRisks": {
+      "CLOSED": ["R-001 through R-009 (see Trae Report Section 7.1)"],
+      "DEFERRED_TO_FINAL_CODEX": [
+        "D-001: METADATA_MISSING clears ledger (AC-07 BLOCKER)",
+        "D-002: Phase B non-transactional snapshot reads",
+        "D-003: Tombstone barrier failure orphan risk",
+        "D-004: FIX-R4/R5/R6 GPT verdicts remain changes_requested",
+        "D-005: objects.exists() returns false on METADATA_MISSING"
+      ],
+      "BLOCKED_EXTERNAL": [
+        "B-001: Real CloudBase Preview verification (readyForPreview=false)",
+        "B-002: Production deployment",
+        "B-003: PROD-CRON-VERIFY (awaiting user evidence)"
+      ],
+      "FUTURE_DEBT": [
+        "F-001: CloudBase Workflow 60s limit",
+        "F-002: CloudBase CloudRun capacity",
+        "F-003: Cloudflare R2 migration",
+        "F-004: 100-op transaction limit (no pagination)"
+      ]
+    },
     "lastUpdatedAt": "2026-07-23",
     "lastUpdatedBy": "trae",
-    "lastUpdatedAction": "FIX-R8 implementation complete: 4 ACs (deleteCascade concurrent ledger ownership, removeCleanupKeys atomicity via runTransaction, METADATA_MISSING semantic distinction, PRODUCTION_STORAGE_PREFIX_REQUIRED validation). 3 production code files + 2 test files + 1 new Trae Report + 1 new gate evidence + 2 modified state files. 13 new tests + 1 updated test. 429/429 server tests PASS + tsc exit 0 + check-lumen-collab PASS. status transitioned to awaiting_gpt_acceptance/nextActor=gpt; readyForPreview remains false; Codex REQUIRED_AFTER_GPT_REVIEW_PASS (deferred until GPT accepts FIX-R8)"
+    "lastUpdatedAction": "FINAL-CLOSURE-BATCH-01 complete: 911 fallback fix + persistentConflict mock + 13 final-closure tests (AC-04/05/06/10) + Preview runbook + Portfolio case study + final audit package. 442/442 server + 194/194 client tests PASS + tsc exit 0 + check-lumen-collab PASS. status transitioned to ready_for_final_gpt_review/nextActor=gpt; readyForPreview remains false; codexStatus=DEFERRED_UNTIL_GPT_FINAL_REVIEW_PASS; AC-07 BLOCKER (METADATA_MISSING clears ledger) registered as FINAL_CODEX_BLOCKER"
   }
 }

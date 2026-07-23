@@ -16,6 +16,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/.git/**',
       '**/dist/**',
+      '**/.worktrees/**',
     ],
   },
 });

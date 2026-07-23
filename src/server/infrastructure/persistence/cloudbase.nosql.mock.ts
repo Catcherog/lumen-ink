@@ -293,6 +293,15 @@ export interface MockCloudBaseState {
    */
   retryOnConflict: boolean;
   /**
+   * FIX-R8-CLOSURE: When true, EVERY commit attempt throws
+   * DATABASE_TRANSACTION_CONFLICT. Unlike retryOnConflict (which is
+   * consumed after one attempt), persistentConflict is NOT consumed —
+   * all MAX_TX_ATTEMPTS attempts fail, and runTransaction throws the
+   * conflict error. Tests use this to verify retry exhaustion behavior:
+   * errors must propagate and recovery state must not be lost.
+   */
+  persistentConflict: boolean;
+  /**
    * FIX-R4: Storage fault injection — when true, uploadFile() throws.
    */
   uploadShouldFail: boolean;
@@ -350,6 +359,7 @@ export function createMockCloudBaseState(envId: string): MockCloudBaseState {
     runTransactionCount: 0,
     commitShouldFail: false,
     retryOnConflict: false,
+    persistentConflict: false,
     uploadShouldFail: false,
     saveMetadataShouldFail: false,
     deleteMetadataShouldFail: false,
@@ -773,6 +783,14 @@ export function createMockCloudBaseApp(state: MockCloudBaseState): MockCloudBase
             if (state.retryOnConflict) {
               state.retryOnConflict = false;
               throw new Error('DATABASE_TRANSACTION_CONFLICT: injected by mock');
+            }
+            // FIX-R8-CLOSURE: persistentConflict — EVERY commit attempt
+            // throws a conflict error. Unlike retryOnConflict, this flag
+            // is NOT consumed. All MAX_TX_ATTEMPTS attempts fail, and
+            // runTransaction exits the loop and throws the last conflict
+            // error. Tests use this to verify retry exhaustion behavior.
+            if (state.persistentConflict) {
+              throw new Error('DATABASE_TRANSACTION_CONFLICT: persistent (injected by mock)');
             }
             // FIX-R5: preCommitHook — allows tests to inject committed-
             // state changes between a transaction's reads and its commit.

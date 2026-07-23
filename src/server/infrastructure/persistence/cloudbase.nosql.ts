@@ -908,7 +908,18 @@ export function createCloudBaseNoSqlPersistence(
               .get();
             const v = fromDoc<Version>(unwrapDocumentData(existingVersion.data));
             if (v) return v;
-            return version; // fallback: should not happen
+            // FIX-R8-CLOSURE: The idempotency record exists but the
+            // referenced version document is missing. This indicates a
+            // data inconsistency (partial cleanup, corruption, or bug).
+            // Previously this returned the caller's UNPERSISTED input
+            // version — a silent fail-open that could cascade into
+            // referencing a non-existent version. Now we throw an
+            // explicit error so the inconsistency surfaces.
+            throw new Error(
+              `IDEMPOTENT_VERSION_INCONSISTENT_STATE: idempotency record ${idemId} ` +
+              `references version ${recheckDoc.versionId} but the version document is missing. ` +
+              `Possible data inconsistency — manual investigation required.`
+            );
           }
           // FIX-R5: Atomic project writability check inside the
           // transaction — prevents TOCTOU race.
