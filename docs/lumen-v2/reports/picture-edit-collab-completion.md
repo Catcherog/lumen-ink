@@ -69,8 +69,14 @@ GPT 对原始 FIX-R9 下发 `FIX_REQUIRED` verdict，要求 3 项闭合 C-01 的
 - **顶层错误判定逻辑**：`isSdkTopLevelError()` 类型守卫（见 RF-R9-02）
 - **新增测试名称**：8 个（见 RF-R9-02）
 - **Server 测试总数**：462（vs 原始 R9 454，+8 RF-R9-02）
-- **Local/Remote HEAD**：`0f0d0ae`（push 后回填，local == remote 已验证）
-- **Worktree clean**：已确认 — 仅 2 个修改文件（`cloudbase.nosql.ts`、`cloudbase.nosql.storage.contract.r9.test.ts`）
+- **SHA 口径（EVIDENCE-CORRECTION-04 校正）**：
+  - `RF_IMPLEMENTATION_SHA=48f2f56`（承载代码+测试的 feat 提交）
+  - `RF_EVIDENCE_COMMIT_SHA=0f0d0ae`（Trae Report + gate evidence + state 的 docs 提交）
+  - `SHA_BACKFILL_COMMIT_SHA=e1a2576`（纯 SHA 回填 docs 提交）
+  - `CURRENT_REVIEW_HEAD`：捕获于仓库外桌面完成包（**不写入 Git 跟踪文件**，避免 SHA 回填循环）
+  - **先前错误声明已校正**：此前声称 "Local/Remote HEAD=0f0d0ae" 是错误的——0f0d0ae 是证据提交 SHA，不是当前 HEAD
+- **WORKTREE_CLEAN=true**（已确认，git status --porcelain 为空）
+- **RF_IMPLEMENTATION_FILES_CHANGED=2**（`cloudbase.nosql.ts`、`cloudbase.nosql.storage.contract.r9.test.ts`，均在 commit 48f2f56）— 此前混淆 "worktree clean" 与 "仅 2 个修改文件" 的表述已校正
 - **`readyForPreview=false`**：已确认（STATE.json `cloudbaseNoSqlImplement.readyForPreview`）
 
 ---
@@ -86,7 +92,10 @@ GPT 对原始 FIX-R9 下发 `FIX_REQUIRED` verdict，要求 3 项闭合 C-01 的
 | Route | R2_BATCHED_AUDIT |
 | Base SHA | `939e9e9` |
 | Implementation SHA (original R9) | `e55b84d` (e55b84de13c08c0bdbd2307111e7f488f785bea0) |
-| RF-R9-01/02/03 SHA | `0f0d0ae` |
+| RF Implementation SHA (48f2f56) | `48f2f56`（代码+测试 feat 提交）|
+| RF Evidence Commit SHA (0f0d0ae) | `0f0d0ae`（docs 提交：report+evidence+state）|
+| SHA Backfill Commit (e1a2576) | `e1a2576`（纯 SHA 回填 docs 提交）|
+| CURRENT_REVIEW_HEAD | 仓库外桌面完成包捕获（不写入跟踪文件）|
 | Branch | `lumen/cloudbase-nosql-implement-01-fix-r9` |
 | Defects Source | GPT `FIX_REQUIRED` verdict on LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 |
 | Defects Resolved | C-01 (Critical), H-01 (High), M-01 (Medium) |

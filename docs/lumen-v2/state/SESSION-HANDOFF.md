@@ -8,13 +8,37 @@
 - **Risk Level**：HIGH
 - **Base SHA**：`939e9e9`
 - **Implementation SHA**：`e55b84d`（原始 FIX-R9 — C-01/H-01/M-01）
-- **RF-R9-01/02/03 SHA**：`0f0d0ae`（SDK 派生类型 + 8 顶层失败合同测试）
+- **RF-R9-01/02/03 SHA 口径（EVIDENCE-CORRECTION-04 校正）**：
+  - `RF_IMPLEMENTATION_SHA=48f2f56`（代码+测试 feat 提交）
+  - `RF_EVIDENCE_COMMIT_SHA=0f0d0ae`（docs 提交：report+evidence+state）
+  - `SHA_BACKFILL_COMMIT_SHA=e1a2576`（纯 SHA 回填 docs 提交）
+  - `CURRENT_REVIEW_HEAD`：仓库外桌面完成包捕获（**不写入 Git 跟踪文件**，避免 SHA 回填循环）
+  - 先前声称 "RF-R9-01/02/03 SHA=0f0d0ae" 混淆了证据提交 SHA 与实现 SHA，已校正
 - **Working Branch**：`lumen/cloudbase-nosql-implement-01-fix-r9`
 - **Trae 报告**：[docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-TRAE-REPORT.md)（已追加 §12 RF-R9-01/02/03 Supplement）
 - **Gate Evidence**：[docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md](file:///d:/360Downloads/Trae%20%E9%A1%B9%E7%9B%AE/picture-edit/docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01/fix-r9-gate-results.md)
 - **完成包**：`C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`
 - **readyForPreview**：`false`（必须继续保持，禁止配置 Preview / Production / 合并 main）
 - **Codex**：`REQUIRED_AFTER_GPT_REVIEW_PASS`（GPT FIX-R9 证据复审通过后，由 Codex 执行一次限域 READ_ONLY 总审计）
+
+### EVIDENCE-CORRECTION-04（2026-07-23，GPT FIX_REQUIRED — 仅证据包校正）
+
+> GPT 对 RF-R9-01/02/03 下发 `FIX_REQUIRED` verdict：技术闭合证据充分，但**上传完成包 SHA 口径与实际提交历史不一致**（声称 0f0d0ae 为当前 HEAD，实际当前 HEAD 为 e1a2576；且混淆 "worktree clean" 与 "仅 2 个修改文件"）。本任务仅校正证据口径，不修改生产代码或测试。
+
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R9-EVIDENCE-CORRECTION-04`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：LOW（仅证据校正）
+- **In Scope**：仅修正外部完成包和证据口径；不得修改生产代码或测试
+- **SHA 口径（已校正）**：
+  - `RF_IMPLEMENTATION_SHA=48f2f56`（feat 提交：cloudbase.nosql.ts + cloudbase.nosql.storage.contract.r9.test.ts，2 文件）
+  - `RF_EVIDENCE_COMMIT_SHA=0f0d0ae`（docs 提交：Trae Report §12 + gate evidence + state + 完成包）
+  - `SHA_BACKFILL_COMMIT_SHA=e1a2576`（纯 SHA 回填 docs 提交）
+  - `CURRENT_REVIEW_HEAD`：仓库外桌面完成包捕获（**不写入 Git 跟踪文件**，避免 SHA 回填循环）
+- **WORKTREE_CLEAN=true**（git status --porcelain 为空）
+- **RF_IMPLEMENTATION_FILES_CHANGED=2**（区分于 worktree 状态）
+- **AC-EC04-06 证明**：`git diff --name-status 48f2f56..HEAD` 仅含 `docs/**`，无生产代码或测试变化 → 无须重跑 656 测试，保留原始门禁结果（代码基线 48f2f56）
+- **未修改**：生产代码、测试代码、mock 代码、Codex 未调用、未合并 main、未部署、readyForPreview=false
+- **GPT 下一步**：1) 校正通过后签发 EVIDENCE_REVIEW_PASS；2) 激活 Codex 限域 READ_ONLY 总审计
 
 ### 取代关系
 

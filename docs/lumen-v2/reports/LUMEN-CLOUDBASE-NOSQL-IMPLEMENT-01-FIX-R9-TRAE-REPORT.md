@@ -368,3 +368,62 @@ H-01 and M-01 fixes from original FIX-R9 are unchanged. The 3 cascade-boundary +
 ---
 
 **EVIDENCE PROVIDED BY TRAE; NOT YET INDEPENDENTLY VERIFIED.**
+
+---
+
+## 13. EVIDENCE-CORRECTION-04（2026-07-23，GPT FIX_REQUIRED — 仅证据包校正）
+
+### 13.1 触发原因
+
+GPT 对 RF-R9-01/02/03 下发 `FIX_REQUIRED` verdict：RF-R9-01/02 的技术闭合证据基本充分，但**上传完成包 SHA 口径与实际提交历史不一致**，会导致 Codex 使用错误的审计基线。具体问题：
+
+1. **三类 SHA 被混淆**：上传包声称 `RF-R9-01/02/03 Implementation SHA: 0f0d0ae`，但实际承载代码+测试的 feat 提交是 `48f2f56`；`0f0d0ae` 是 docs 证据提交；`e1a2576` 是纯 SHA 回填提交。
+2. **上传包不是最终回填版本**：声称 Local/Remote HEAD = `0f0d0ae`，但当前 HEAD 已为 `e1a2576`。
+3. **混淆 worktree 状态与提交变更范围**：表述 "worktree clean — 仅 2 个修改文件" 混淆了工作区状态（clean）与实现提交的变更文件数（2）。
+
+### 13.2 校正内容（仅证据口径，不修改生产代码或测试）
+
+| 项目 | 校正前（错误）| 校正后（正确）|
+|------|--------------|--------------|
+| RF 实现 SHA | 0f0d0ae | **48f2f56**（feat 提交：cloudbase.nosql.ts + cloudbase.nosql.storage.contract.r9.test.ts）|
+| RF 证据提交 SHA | （未区分）| **0f0d0ae**（docs 提交：Trae Report §12 + gate evidence + state + 完成包）|
+| SHA 回填提交 | （未区分）| **e1a2576**（纯 SHA 回填 docs 提交）|
+| 当前 HEAD | 声称 0f0d0ae | **CURRENT_REVIEW_HEAD 捕获于仓库外桌面完成包**（不写入 Git 跟踪文件，避免回填循环）|
+| Worktree 表述 | "clean — 仅 2 个修改文件" | **WORKTREE_CLEAN=true** + **RF_IMPLEMENTATION_FILES_CHANGED=2**（两个独立事实）|
+
+### 13.3 AC-EC04 验收矩阵
+
+| AC | 要求 | 证据 | 状态 |
+|----|------|------|------|
+| AC-EC04-01 | 实现 SHA = 48f2f56 | `git show --stat 48f2f56` → 2 files (cloudbase.nosql.ts + .storage.contract.r9.test.ts) | PASS |
+| AC-EC04-02 | 证据提交 SHA = 0f0d0ae | `git show --stat 0f0d0ae` → 5 docs files | PASS |
+| AC-EC04-03 | Local HEAD == Remote HEAD | `git rev-parse HEAD` == `git rev-parse origin/lumen/cloudbase-nosql-implement-01-fix-r9`（原始输出见仓库外完成包）| PASS |
+| AC-EC04-04 | git status --porcelain 为空 | 提交+推送后 worktree clean | PASS |
+| AC-EC04-05 | 完成包不再声称 0f0d0ae 是当前 HEAD | 仓库外完成包已校正 | PASS |
+| AC-EC04-06 | 后续提交无生产/测试代码变化 | `git diff --name-status 48f2f56..HEAD` 仅含 `docs/**` | PASS |
+
+### 13.4 原始门禁结果与代码基线
+
+- **代码基线**：`48f2f56`（RF 实现 SHA）
+- **门禁结果**：8/8 PASS（Server tsc 0 + Server vitest 462/462 + Client tsc 0 + Client vitest 194/194 + check-lumen-collab PASS + readyForPreview=false + branch!=main）
+- **无须重跑**：`48f2f56..CURRENT_REVIEW_HEAD` 仅含 `docs/**` 变化，无生产代码或测试变化，保留原始门禁结果
+
+### 13.5 Stop Conditions
+
+- 无生产代码修改
+- 无测试代码修改
+- 无 mock 代码修改
+- Codex 未调用
+- 未合并 main
+- 未部署
+- readyForPreview = false（不变）
+- CURRENT_REVIEW_HEAD 不写入 Git 跟踪文件（避免 SHA 回填循环）
+
+### 13.6 仓库外完成包
+
+权威完成包位于 `C:\Users\Catcher\Desktop\协作文件夹\picture-edit-collab-completion.md`，包含：
+- 4 个 SHA（RF_IMPLEMENTATION_SHA / RF_EVIDENCE_COMMIT_SHA / SHA_BACKFILL_COMMIT_SHA / CURRENT_REVIEW_HEAD）
+- 6 条 git 命令的提交后原始输出
+- WORKTREE_CLEAN=true + RF_IMPLEMENTATION_FILES_CHANGED=2
+- docs-only 证明（48f2f56..CURRENT_REVIEW_HEAD）
+- 原始门禁结果 + 代码基线 48f2f56
