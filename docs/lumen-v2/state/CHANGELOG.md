@@ -1,5 +1,27 @@
 # 10｜变更日志
 
+## 2026-07-23 - LUMEN-NOSQL-FINAL-IMPLEMENTATION-CLOSURE-01 GPT 验收通过，主线 CLOSED
+
+- 触发：GPT 基于最终完成包签发 `EVIDENCE_REVIEW_PASS`。
+- 操作类型：docs(state-only) GPT 验收落盘，不含业务代码。
+- 验收内容：
+  - AC-01～AC-10 全部 PASS（最终实现权威点、Closure Commit、Local/Remote 一致、Worktree clean、收口范围、状态机、求职展示、Preview 门禁、生产验证、历史任务）
+  - 测试覆盖：691 tests（Server 496 + Client 195），8/8 门禁通过
+  - 无 Required Fixes；不得创建 FIX-R11；Codex NOT_REQUIRED
+  - 残余风险划入 USER_ACCEPTED_RESIDUAL_RISK
+- 状态字段更新：
+  - `cloudbaseNoSqlImplement.status`: `implementation_complete` → `gpt_accepted_closed`
+  - `cloudbaseNoSqlImplement.mainlineStatus`: `CLOSED`（新增）
+  - `cloudbaseNoSqlImplement.gptReviewVerdict/Date/Path`: 新增
+  - `fixR10GptReviewWaived`: `true` → `false`（GPT 实际执行了复审，非 waived）
+  - `fixR10GptReviewVerdict/Date/Path`: 新增
+  - `finalImplementationClosure.status`: `implementation_complete` → `gpt_accepted_closed`
+  - `finalImplementationClosure.mainlineStatus`: `CLOSED`（新增）
+- 新增文件：
+  - `docs/lumen-v2/reviews/LUMEN-NOSQL-FINAL-IMPLEMENTATION-CLOSURE-01-GPT-REVIEW.md`（GPT 验收文件）
+- 主线状态：**CLOSED**
+- Next Owner：User / 官网项目负责人
+
 ## 2026-07-21 - POST-MERGE-PARALLEL-ACTIVATION-01 并行激活 HARDEN-001 + PROD-CRON-VERIFY
 
 - 触发：GPT 任务卡 `POST-MERGE-PARALLEL-ACTIVATION-01`，用户授权 R2 路径，HARDEN 高风险部分升级为 R3。
