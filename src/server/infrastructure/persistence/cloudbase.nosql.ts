@@ -450,7 +450,11 @@ export function createCloudBaseNoSqlPersistence(
 
   async function ensureReady(): Promise<void> {
     if (ready) return;
-    const tcb = await import('@cloudbase/node-sdk');
+    const tcbModule = await import('@cloudbase/node-sdk') as unknown as {
+      default?: { init: (config: unknown) => unknown };
+      init?: (config: unknown) => unknown;
+    };
+    const tcb = (tcbModule.default ?? tcbModule) as { init: (config: unknown) => unknown };
     const instance = tcb.init({
       env: options.envId,
       accessKey: options.apiKey,
@@ -458,6 +462,20 @@ export function createCloudBaseNoSqlPersistence(
     app = instance as unknown as CloudBaseApp;
     db = (app as unknown as { database(): CloudBaseDatabase }).database();
     command = db.command;
+
+    // NOSQL-DEPLOY-INIT: CloudBase document collections must exist before the
+    // worker sweeper and auth throttle run queries against them. The SDK exposes
+    // db.createCollection for this purpose; calling it on an existing collection
+    // is idempotent.
+    for (const collectionName of Object.values(COLLECTIONS)) {
+      try {
+        await (db as unknown as { createCollection(name: string): Promise<unknown> }).createCollection(collectionName);
+      } catch (err) {
+        // Best-effort: collection may already exist or creation may be pending.
+        console.warn(`[cloudbase.nosql] collection init skipped for ${collectionName}:`, (err as Error).message);
+      }
+    }
+
     ready = true;
   }
 
