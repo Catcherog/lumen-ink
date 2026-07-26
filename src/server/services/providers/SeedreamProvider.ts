@@ -15,8 +15,12 @@ export class SeedreamProvider implements ImageProvider {
     this.config = config;
   }
 
+  private cleanBom(value: string): string {
+    return value.replace(/^\uFEFF/, '').trim();
+  }
+
   private get apiKey(): string {
-    return this.config.apiKey || process.env.SEEDREAM_API_KEY || process.env.VOLC_API_KEY || '';
+    return this.cleanBom(this.config.apiKey || process.env.SEEDREAM_API_KEY || process.env.VOLC_API_KEY || '');
   }
 
   private get baseUrl(): string {
@@ -87,7 +91,7 @@ export class SeedreamProvider implements ImageProvider {
   }
 
   private buildPrompt(params: { prompt: string; regions?: Array<{ x: number; y: number; width: number; height: number; label?: string }> }): string {
-    let prompt = params.prompt;
+    let prompt = this.cleanBom(params.prompt);
     if (params.regions && params.regions.length > 0) {
       const regionDesc = params.regions
         .map((r, i) => `区域${i + 1}: [x=${r.x}, y=${r.y}, w=${r.width}, h=${r.height}${r.label ? `, label=${r.label}` : ''}]`)
@@ -179,7 +183,7 @@ export class SeedreamProvider implements ImageProvider {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt: fullPrompt,
       size: apiSize,
-      response_format: 'url',
+      response_format: 'b64_json',
       watermark: false,
       stream: false,
     };
@@ -202,7 +206,7 @@ export class SeedreamProvider implements ImageProvider {
       model: params.model || 'doubao-seedream-4-5-251128',
       prompt,
       size: apiSize,
-      response_format: 'url',
+      response_format: 'b64_json',
       watermark: false,
       stream: false,
       sequential_image_generation: 'disabled',
