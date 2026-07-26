@@ -63,12 +63,25 @@ async function productionProviderFactory(
     mimeType: input.mimeType,
     model: job.model ?? provider.config.defaultModel,
   });
-  if (!result.imageData) {
+  let imageBase64 = result.imageData;
+  if (!imageBase64 && result.imageUrl) {
+    // Some deployments return a signed URL instead of base64; fetch the bytes
+    // so the atomic save boundary still operates on durable result bytes.
+    const imageRes = await fetch(result.imageUrl, { signal: AbortSignal.timeout(30000) });
+    if (!imageRes.ok) {
+      throw new Error(
+        `PROVIDER_EMPTY_RESULT: Provider 返回 URL 但无法下载 (${imageRes.status})`
+      );
+    }
+    const imageBuffer = await imageRes.arrayBuffer();
+    imageBase64 = Buffer.from(imageBuffer).toString('base64');
+  }
+  if (!imageBase64) {
     throw new Error(
       'PROVIDER_EMPTY_RESULT: Provider 返回空结果（无 imageData）'
     );
   }
-  const resultBytes = Buffer.from(result.imageData, 'base64');
+  const resultBytes = Buffer.from(imageBase64, 'base64');
   return {
     bytes: new Uint8Array(resultBytes),
     mimeType: result.mimeType ?? input.mimeType,
