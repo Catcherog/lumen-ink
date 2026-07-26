@@ -43,3 +43,5 @@ _lumen-v12-extract/
 
 # Git worktrees（本地开发工件，不应提交）
 .worktrees/
+.vercel
+.env*

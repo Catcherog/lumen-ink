@@ -591,7 +591,6 @@ export function createCloudBaseNoSqlPersistence(
     sizeBytes: number
   ): Promise<void> {
     await collection(COLLECTIONS.objectMetadata).doc(storageKey).set({
-      _id: storageKey,
       fileID,
       mimeType,
       sizeBytes,
@@ -753,7 +752,6 @@ export function createCloudBaseNoSqlPersistence(
         }
         const now = new Date().toISOString();
         await tx.collection(COLLECTIONS.projectTombstones).doc(id).set({
-          _id: id,
           status: 'deleting',
           startedAt: now,
         });
@@ -805,7 +803,6 @@ export function createCloudBaseNoSqlPersistence(
         if (!existingLedger) {
           const now = new Date().toISOString();
           await collection(COLLECTIONS.projectCleanupKeys).doc(id).set({
-            _id: id,
             keys: storageKeys,
             createdAt: now,
           });
@@ -1764,7 +1761,6 @@ export function createCloudBaseNoSqlPersistence(
     async put(key: string, value: AuthThrottleBucket): Promise<void> {
       assertReady();
       await collection(COLLECTIONS.authThrottle).doc(key).set({
-        _id: key,
         ...value,
       });
     },
