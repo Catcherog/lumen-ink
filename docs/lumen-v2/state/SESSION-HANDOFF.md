@@ -1,6 +1,47 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-24，LUMEN-CLOSURE-PACKET-INTEGRITY-CORRECTION-01 docs-only 校正完成，主线保持 CLOSED）
+## 当前状态（2026-07-27，FIX-R11 Preview 部署成功，CloudBase 不可达阻塞 AC-09，待 GPT 决策）
+
+- 日期：2026-07-27
+- **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-PRODUCTION-RUNTIME-COMPATIBILITY`
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **Risk Level**：HIGH
+- **Route**：R2
+- **Codex**：`DEFERRED_CONDITIONAL`（认证安全语义变更，建议 GPT 评估是否需要 Codex 审查）
+- **分支**：`lumen/cloudbase-nosql-implement-01-fix-r11`（从 `8928906` 创建）
+- **HEAD**：`150352d`（3 commits: runtime compatibility + deployment config + auth throttle timeout）
+- **Preview**：`https://lumen-d32fv6kdf-catcher1.vercel.app` (Ready, hkg1)
+- **Trae 报告**：`docs/lumen-v2/reports/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-TRAE-REPORT.md`
+- **门禁证据**：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11/gate-results.md`
+
+### 已通过 AC (11/18)
+
+AC-01 分支创建 ✅ | AC-02 stash 应用 ✅ | AC-03 ws 依赖 ✅ | AC-04 ESM/CJS 互操作 ✅ | AC-05 5 场景测试 ✅ | AC-06 8 门禁全绿 ✅ | AC-07 Preview SHA ✅ | AC-08 HTTP+日志 ✅ | AC-10 认证 7.2s ✅ | AC-11 fail closed 503 ✅ | AC-18 Secret scan 0 ✅
+
+### 阻塞 AC (7/18)
+
+- **AC-09** preview namespace round-trip：CloudBase NoSQL 从 Vercel HK 不可达，认证 503 in 7.2s
+- **AC-12** 分阶段诊断：已定位 DB request 阶段超时（SDK import/init 成功）
+- **AC-13** CloudBase IP 白名单/网络 ACL：需要 CloudBase 控制台访问
+- **AC-14-18** 合并/Production/Protection 恢复：依赖 AC-09
+
+### 关键诊断
+
+- **修复前**：POST /api/auth -> 504 in 60.6s（Vercel Runtime Timeout）
+- **修复后**：POST /api/auth -> 503 in 7.2s（AUTH_THROTTLE_TIMEOUT, fail closed）
+- **根因**：CloudBase NoSQL DB 请求从 Vercel HK (hkg1) 超时；12 个 Preview 环境变量已正确配置
+- **网络路径**：Vercel HK -> CloudBase 上海
+
+### 待 GPT 决策
+
+1. CloudBase 网络可达性解决方案（IP 白名单/代理/区域切换）
+2. 认证安全语义变更是否需要 Codex 审查
+3. 是否在 CloudBase 不可达情况下将代码合并到 main
+4. Production 部署路径决策
+
+---
+
+## 历史状态（2026-07-24，LUMEN-CLOSURE-PACKET-INTEGRITY-CORRECTION-01 docs-only 校正完成，主线保持 CLOSED）
 
 - 日期：2026-07-24
 - **任务**：`LUMEN-CLOSURE-PACKET-INTEGRITY-CORRECTION-01`（docs-only 非阻塞完成包完整性校正）
