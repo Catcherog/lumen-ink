@@ -485,7 +485,13 @@ export function createCloudBaseNoSqlPersistence(
 
   async function ensureReady(): Promise<void> {
     if (ready) return;
-    const tcb = await import('@cloudbase/node-sdk');
+    const tcbModule = await import('@cloudbase/node-sdk');
+    const tcb = (tcbModule as any).default ?? tcbModule;
+    if (typeof tcb?.init !== 'function') {
+      throw new Error(
+        'CLOUDBASE_SDK_INIT_UNAVAILABLE: the @cloudbase/node-sdk module does not expose a callable init() function'
+      );
+    }
     const instance = tcb.init({
       env: options.envId,
       accessKey: options.apiKey,
