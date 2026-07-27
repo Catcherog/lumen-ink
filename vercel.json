@@ -2,6 +2,7 @@
   "buildCommand": "npm run build --prefix src/server && npm run build --prefix src/client",
   "outputDirectory": "src/client/dist",
   "installCommand": "npm install --prefix src/client && npm install --prefix src/server",
+  "regions": ["hkg1"],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
