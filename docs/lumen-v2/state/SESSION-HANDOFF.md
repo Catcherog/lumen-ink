@@ -1,20 +1,75 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-28，LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 并行执行中）
+## 当前状态（2026-07-28，LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 完成，待 GPT 验收）
 
 - 日期：2026-07-28
-- **GPT 裁决**：FIX-R11-R1 `CODEX_REQUIRED` — 并行执行 Lane A (Codex) + Lane B (Trae)
-- **Lane A**：Codex 限域只读安全审查（FIX-R11-R1 代码，独立进行）
-- **Lane B**：`LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01`（Trae 网络对照与证据校正）
-  - **状态**：`ready_for_trae / nextActor=trae`
-  - **分支**：`lumen/cloudbase-connectivity-differential-01-trae`
-  - **目标**：三区域网络对照 + 证据校正 + Probe 生产隔离
+- **任务**：`LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01`（Lane B — Trae 网络对照与证据校正）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **分支**：`lumen/cloudbase-connectivity-differential-01-trae`
+- **HEAD**：`5e0a51a`（probe enhancement + evidence correction）
+- **Risk Level**：MEDIUM
+- **Route**：R2
+- **Trae 报告**：`docs/lumen-v2/reports/LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01-TRAE-REPORT.md`
+- **诊断矩阵**：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01/diagnostic-matrix.md`
 
-### 证据校正（已应用）
+### 三区域网络对照结果
+
+| 区域 | DNS | TCP (两个 IP) | HTTPS/TLS | SDK 构造 | DB 读取 | 结论 |
+|------|-----|----------------|-----------|----------|---------|------|
+| **hkg1** (香港) | 5/5 ✅ | 0/5 ❌ | 0/5 ❌ | 5/5 ✅ | 0/5 ❌ | **阻塞** |
+| **hnd1** (东京) | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | **通过** |
+| **sin1** (新加坡) | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | 5/5 ✅ | **通过** |
+
+### 关键结论
+
+1. **连接问题是 hkg1 单一区域问题**，不是 Vercel 到 CloudBase 的普遍不可达
+2. **hnd1 和 sin1 均实现 5/5 稳定成功**，包括认证 DB 读取（凭据有效性已验证）
+3. **GATEWAY_REQUIRED 未触发**（2/3 区域成功）
+4. **建议**：将 `vercel.json` 区域从 `hkg1` 切换到 `sin1`（或 `hnd1`），无需 Cloud Function 网关
+5. **AC-R1-10 和 AC-R1-11b**：在切换区域后可重测，预期 PASS
+
+### AC 合规（9/9 PASS）
+
+| AC | 描述 | 结果 |
+|----|------|------|
+| AC-01 | Probe 不再将 init 成功描述为凭据有效 | ✅ PASS |
+| AC-02 | Production 环境 /api/probe 返回 404 | ✅ PASS (双重守卫) |
+| AC-03 | 三个 Vercel 区域均有独立结果 | ✅ PASS |
+| AC-04 | 两个 A 记录均分别测试 | ✅ PASS |
+| AC-05 | 每个组合至少重复 5 次 | ✅ PASS |
+| AC-06 | 诊断不产生业务数据写入 | ✅ PASS |
+| AC-07 | 至少一个区域稳定成功 | ✅ PASS (hnd1 + sin1) |
+| AC-08 | 全部失败时输出 GATEWAY_REQUIRED | ✅ PASS (hkg1 输出 true，整体未触发) |
+| AC-09 | Local=Remote、worktree clean、无 Production 变更 | ✅ PASS |
+
+### 证据校正（已应用到 FIX-R11-R1）
 
 1. **AC-R1-11 拆分**：AC-R1-11a (DB 不可用→503, PASS) + AC-R1-11b (DB 正常→401, BLOCKED_EXTERNAL_NETWORK)
-2. **SDK init 表述修正**："SDK init OK (credentials valid)" → "SDK construction: OK (credentials NOT_VALIDATED)"
-3. **根因收窄**："Vercel HK 永久不可达" → "hkg1 本次测试时段不可达，需 hnd1/sin1 对照"
+2. **SDK 术语修正**："SDK init OK (credentials valid)" → "SDK construction: OK (credentials NOT_VALIDATED)"
+3. **根因收窄**："Vercel HK 永久不可达" → "hkg1 本次测试时段不可达" → 已确认 hkg1-specific
+4. **AC-R1-08 修正**：SDK init 0ms 仅证明对象构造，不验证凭据；凭据有效性现由 hnd1/sin1 成功 DB 读取证明
+
+### 并行 Lane 状态
+
+| Lane | Owner | 状态 | 范围 |
+|------|-------|------|------|
+| Lane A — Codex 安全审查 | Codex | 独立进行 | Auth throttle timeout + 安全不变量 + Probe 暴露 (只读) |
+| Lane B — 网络对照 | Trae | **完成**（本报告） | 三区域对照 + 证据校正 |
+
+### Preview 部署 URL
+
+| 区域 | URL |
+|------|-----|
+| hkg1 | `https://lumen-9j3f7boia-catcher1.vercel.app` |
+| hnd1 | `https://lumen-gswr3nyc2-catcher1.vercel.app` |
+| sin1 | `https://lumen-6meq1727z-catcher1.vercel.app` |
+
+### 待 GPT 决策
+
+1. **验收 LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01**：9/9 AC PASS
+2. **区域切换决策**：是否批准将 `vercel.json` 从 `hkg1` 切换到 `sin1`
+3. **AC-R1-10/AC-R1-11b 重测**：区域切换后是否启动重测任务
+4. **Codex Lane A 结果**：等待 Codex 安全审查裁决（AUDIT_PASS / CHANGES_REQUIRED / BLOCKED_INSUFFICIENT_EVIDENCE）
 
 ---
 
