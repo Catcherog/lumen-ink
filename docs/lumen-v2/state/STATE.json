@@ -41,7 +41,7 @@
   "connectivityDifferentialRiskLevel": "MEDIUM",
   "connectivityDifferentialRoute": "R2",
   "connectivityDifferentialBranch": "lumen/cloudbase-connectivity-differential-01-trae",
-  "connectivityDifferentialHead": "5e0a51a",
+  "connectivityDifferentialHead": "97c3f4d",
   "connectivityDifferentialBase": "2d78248",
   "connectivityDifferentialTraeReport": "docs/lumen-v2/reports/LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01-TRAE-REPORT.md",
   "connectivityDifferentialEvidence": "docs/lumen-v2/evidence/LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01/diagnostic-matrix.md",
