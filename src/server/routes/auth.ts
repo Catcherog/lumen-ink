@@ -1,5 +1,5 @@
 /**
- * D-034 Internal Security Floor — Login route with durable throttle.
+ * D-034 Internal Security Floor - Login route with durable throttle.
  *
  * Flow:
  *  1. Check `throttle.isBlocked(ip)` before checking the password. If blocked,
@@ -8,8 +8,13 @@
  *     crosses the block threshold, return 429 with `Retry-After`.
  *  3. On success, call `throttle.recordSuccess(ip)` to clear the bucket.
  *
- * The raw client IP is never persisted by this layer — `createAuthThrottle`
+ * The raw client IP is never persisted by this layer - `createAuthThrottle`
  * hashes it with HMAC-SHA256 before storing.
+ *
+ * FIX-R11 AC-10/AC-11: Throttle calls are wrapped with a bounded timeout.
+ * If the throttle storage (CloudBase NoSQL) is unreachable, the auth attempt
+ * FAILS CLOSED - the request is rejected with 503 instead of skipping the
+ * security check or hanging until the Vercel Function timeout.
  */
 
 import { Router, Request, Response } from 'express';
@@ -20,6 +25,28 @@ import type { RuntimeConfig } from '../config/runtime.js';
 export interface AuthRouterDeps {
   config: RuntimeConfig;
   throttle: AuthThrottle;
+}
+
+/** Bounded timeout for throttle storage calls (AC-10: must return within ~10s). */
+const THROTTLE_TIMEOUT_MS = 8000;
+
+/**
+ * Wrap a promise with a bounded timeout. Rejects with a deterministic error
+ * code if the promise does not settle within `ms` milliseconds.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, errorCode: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${errorCode}: operation timed out after ${ms}ms`)),
+        ms
+      );
+    }),
+  ]);
 }
 
 function getClientIp(req: Request): string {
@@ -37,7 +64,20 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     const ip = getClientIp(req);
 
     // Pre-check: is this IP already blocked?
-    const blockedState = await throttle.isBlocked(ip);
+    // AC-11: If throttle storage is unreachable, fail CLOSED (503) - never
+    // skip the security check and proceed to password verification.
+    let blockedState;
+    try {
+      blockedState = await withTimeout(
+        throttle.isBlocked(ip),
+        THROTTLE_TIMEOUT_MS,
+        'AUTH_THROTTLE_TIMEOUT'
+      );
+    } catch (err) {
+      console.error('[auth] throttle.isBlocked failed:', (err as Error).message);
+      res.status(503).json({ error: '认证服务暂时不可用，请稍后再试' });
+      return;
+    }
     if (blockedState.blocked) {
       const retryAfterSec = Math.max(1, Math.ceil(blockedState.retryAfterMs / 1000));
       res.set('Retry-After', String(retryAfterSec));
@@ -53,13 +93,37 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
     const token = login(password);
     if (token) {
-      await throttle.recordSuccess(ip);
+      // recordSuccess clears the throttle bucket. If the storage is
+      // unreachable, the login still succeeds (password is verified and
+      // isBlocked already passed). The bucket will expire naturally.
+      try {
+        await withTimeout(
+          throttle.recordSuccess(ip),
+          THROTTLE_TIMEOUT_MS,
+          'AUTH_THROTTLE_TIMEOUT'
+        );
+      } catch (err) {
+        console.error('[auth] throttle.recordSuccess failed:', (err as Error).message);
+      }
       res.json({ success: true, token });
       return;
     }
 
-    // Failed login — record and possibly block
-    const failureState = await throttle.recordFailure(ip);
+    // Failed login - record and possibly block.
+    // AC-11: If throttle storage is unreachable, fail CLOSED (503) - do not
+    // reveal whether the password was correct.
+    let failureState;
+    try {
+      failureState = await withTimeout(
+        throttle.recordFailure(ip),
+        THROTTLE_TIMEOUT_MS,
+        'AUTH_THROTTLE_TIMEOUT'
+      );
+    } catch (err) {
+      console.error('[auth] throttle.recordFailure failed:', (err as Error).message);
+      res.status(503).json({ error: '认证服务暂时不可用，请稍后再试' });
+      return;
+    }
     if (failureState.blocked) {
       const retryAfterSec = Math.max(1, Math.ceil(failureState.retryAfterMs / 1000));
       res.set('Retry-After', String(retryAfterSec));
