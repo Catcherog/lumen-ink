@@ -1,6 +1,63 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-28，LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 完成，待 GPT 验收）
+## 当前状态（2026-07-28，LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01 Stop Condition 触发，待 GPT 验收）
+
+- 日期：2026-07-28
+- **任务**：`LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01`（区域切换 hkg1→sin1 + AC 重测）
+- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`（Stop Condition triggered）
+- **分支**：`lumen/lumen-cloudbase-region-switch-retest-01-trae`
+- **HEAD**：`719cb8e`（Commit 1: vercel.json hkg1→sin1）
+- **Risk Level**：MEDIUM
+- **Route**：R2
+- **Trae 报告**：`docs/lumen-v2/reports/LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01-TRAE-REPORT.md`
+- **门禁证据**：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01/gate-results.md`
+- **Preview**：`https://lumen-7rmn0vh4y-catcher1.vercel.app` (Ready, **sin1**)
+
+### AC 结果汇总
+
+| AC | 结果 | 说明 |
+|----|------|------|
+| AC-01~AC-04 | ✅ PASS | 基线、配置变更、Preview sin1、DB 5/5 |
+| AC-05 | ⛔ BLOCKED | AC-R1-10 无法完成（throttle.put bug + env pull 问题） |
+| **AC-06** | **❌ FAIL** | **AC-R1-11b: 5/5 返回 503（预期 401）→ Stop Condition** |
+| AC-07~AC-08 | ✅ PASS | fail-closed 503 回归 + timeout 层级 12000>10000 |
+| AC-09 | ⚠️ PRE-EXISTING | Production /api/probe = 500（app 启动失败，非本轮导致） |
+| AC-10~AC-15 | ✅ PASS | 710 tests + collab check + worktree clean + 不合并 main |
+
+### Stop Condition 根因
+
+**`cloudbase.nosql.ts` 的 `authThrottle.put()` 方法**：
+
+```typescript
+await collection(COLLECTIONS.authThrottle).doc(key).set({
+  _id: key,  // ← BUG: 与 doc(key) 重复
+  ...value,
+});
+```
+
+CloudBase 在文档已存在时拒绝 `_id` 更新（"不能更新_id的值"），导致 `recordFailure()` 抛错 → auth.ts fail-closed → 503。此 bug 在 hkg1 时被 TCP 不可达掩盖。
+
+### Codex Escalation
+
+- **触发条件**：需要修改认证核心逻辑（throttle 存储实现）
+- **修复范围**：移除 `put()` 中的 `_id: key`（1 行变更）
+- **AC-02 约束**：本轮仅允许 vercel.json 变更，不可修复
+
+### 次要问题
+
+1. `vercel env pull` 返回 `""`（所有用户环境变量）→ 无法本地获取 AUTH_PASSWORD
+2. Production /api/probe = 500（pre-existing app 启动失败，全部路由 500）
+
+### 待 GPT 决策
+
+1. **验收区域切换**（AC-01~AC-04, AC-08, AC-10~AC-11 PASS）或驳回
+2. **创建 FIX 任务** 修复 `throttle.put` `_id` bug（Codex scope: auth throttle storage only）
+3. **Fix 后重跑** AC-R1-10、AC-R1-11b
+4. **独立排查** Production 500 问题（pre-existing，非本轮范围）
+
+---
+
+## 历史状态（2026-07-28，LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 完成，待 GPT 验收）
 
 - 日期：2026-07-28
 - **任务**：`LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01`（Lane B — Trae 网络对照与证据校正）

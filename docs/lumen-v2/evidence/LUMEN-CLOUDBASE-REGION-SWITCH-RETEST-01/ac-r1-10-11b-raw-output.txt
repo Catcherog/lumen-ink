@@ -1,0 +1,14 @@
+﻿AUTH_PASSWORD: loaded (value redacted, length=2)
+
+=== AC-R1-11b: Wrong Password -> 401 (5x) ===
+  Attempt 1: expected=401 actual=503 ms=1113
+  Attempt 2: expected=401 actual=503 ms=488
+  Attempt 3: expected=401 actual=503 ms=541
+  Attempt 4: expected=401 actual=503 ms=511
+  Throttle reset (correct login): code=503 ms=561 token=False
+  Attempt 5: expected=401 actual=503 ms=485
+AC-R1-11b RESULT: FAIL (.Count/5 returned 401)
+
+=== AC-R1-10: Create/Read/Delete Round-Trip ===
+  Step 0 (login): code=503 ms=586 jwt=False
+FATAL: Cannot proceed without JWT. AC-R1-10 BLOCKED.
