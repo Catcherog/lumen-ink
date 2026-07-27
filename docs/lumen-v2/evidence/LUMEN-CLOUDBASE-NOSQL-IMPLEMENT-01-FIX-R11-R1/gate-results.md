@@ -174,15 +174,30 @@
 
 ---
 
-## AC-R1-11: Preview Auth Error Codes ✅ PASS (partial)
+## AC-R1-11a: Preview Auth Error Codes — DB Unavailable → 503 ✅ PASS
+
+> **CORRECTION (2026-07-28)**: AC-R1-11 is split into AC-R1-11a and AC-R1-11b per GPT verdict.
+> AC-R1-11a covers the DB-unavailable fail-closed path (503). AC-R1-11b covers the DB-normal
+> wrong-password path (401), which remains blocked by external network.
 
 | Test | Expected | Actual | Result |
 |------|----------|--------|--------|
 | Wrong password (DB unavailable) | 503 | **503** `{"error":"认证服务暂时不可用，请稍后再试"}` | ✅ PASS |
 | Response time | < 10s | ~10s (SDK timeout boundary) | ✅ PASS |
-| Wrong password (DB healthy → 401) | 401 | Cannot test (DB unreachable) | ⚠️ BLOCKED |
 
 **Fail-closed verified**: When CloudBase DB is unreachable, `isBlocked` times out → 503. Password is never checked.
+
+---
+
+## AC-R1-11b: Preview Auth Error Codes — DB Normal + Wrong Password → 401 ❌ BLOCKED
+
+> **CORRECTION (2026-07-28)**: Split from AC-R1-11. Requires DB connectivity to test.
+
+| Test | Expected | Actual | Result |
+|------|----------|--------|--------|
+| Wrong password (DB healthy → 401) | 401 | Cannot test (DB unreachable) | ❌ BLOCKED_EXTERNAL_NETWORK |
+
+**Blocked reason**: CloudBase NoSQL TCP unreachable from Vercel hkg1. Must be retested after network recovery or successful region comparison.
 
 ---
 
@@ -223,9 +238,16 @@
 **Diagnostic chain**:
 1. DNS: ✅ Resolves to `124.223.121.50, 109.244.144.136` (57ms)
 2. TCP: ❌ Connection to `tcb-api.tencentcloudapi.com:443` times out (5000ms)
-3. SDK init: ✅ CloudBase SDK initializes successfully (credentials valid)
+3. SDK construction: ✅ CloudBase SDK constructs successfully (credentials NOT_VALIDATED — tcb.init() only creates app instance, does not make authenticated API call)
 4. DB request: ❌ "connect timeout" (10065ms — SDK native timeout fires)
 
-**Impact**: All CloudBase NoSQL operations from Vercel Preview are blocked. Auth throttle timeouts correctly (fail-closed 503 in ~10s).
+> **CORRECTION (2026-07-28)**: Stage 3 was originally described as "SDK init OK (credentials valid)".
+> This is incorrect per GPT verdict. `tcb.init()` only constructs the SDK app object; credentials
+> can only be validated by a successful authenticated API call (e.g., DB read).
 
-**Codex Escalation**: Per task spec, this finding triggers the Codex Escalation Condition: "诊断证明 Vercel 到 CloudBase 直连在正确 endpoint 和有效凭据下仍不可用" — report to GPT for decision on CloudBase Run/Cloud Function data gateway.
+**Impact**: All CloudBase NoSQL operations from Vercel hkg1 Preview are blocked. Auth throttle timeouts correctly (fail-closed 503 in ~10s).
+
+> **ROOT CAUSE NARROWING (2026-07-28)**: Evidence only supports "hkg1 unreachable in this test period".
+> hnd1/sin1 comparison required before claiming universal Vercel-to-CloudBase unreachability.
+
+**Codex Escalation**: Per task spec, this finding triggers the Codex Escalation Condition.

@@ -1,11 +1,19 @@
 # FIX-R11-R1 Trae Report — Connectivity & Auth Evidence
 
+> **EVIDENCE CORRECTION (2026-07-28)**: Per GPT CODEX_REQUIRED verdict on FIX-R11-R1,
+> the following corrections are applied by LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01:
+> 1. AC-R1-11 is split into AC-R1-11a (DB unavailable → 503) and AC-R1-11b (DB normal → 401)
+> 2. "SDK init OK (credentials valid)" is corrected to "SDK construction: OK (credentials NOT_VALIDATED)"
+>    — tcb.init() only creates an app instance; credentials require a successful authenticated API call
+> 3. Root cause narrowed from "Vercel HK permanently cannot connect" to "hkg1 unreachable in this test period"
+>    — hnd1/sin1 comparison required before universal unreachability can be claimed
+
 **Task ID**: `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-R1-CONNECTIVITY-AND-AUTH-EVIDENCE`
 **Date**: 2026-07-27
 **Branch**: `lumen/cloudbase-nosql-implement-01-fix-r11`
 **HEAD**: `2d78248` (1 commit on top of base `85c6161`)
 **Preview**: `https://lumen-oi0t51ho5-catcher1.vercel.app` (hkg1, Ready)
-**Status**: `awaiting_gpt_acceptance`
+**Status**: `awaiting_gpt_acceptance` (GPT verdict: CODEX_REQUIRED)
 
 ---
 
@@ -47,7 +55,8 @@ Implemented SDK native timeout configuration, auth throttle timeout safety tests
 | AC-R1-08 | ✅ PASS | Environment NORMAL, NoSQL enabled, API Key valid, collections exist, quota OK |
 | AC-R1-09 | ✅ PASS | DB request returns "connect timeout" (non-timeout SDK error) at 10066ms |
 | AC-R1-10 | ❌ BLOCKED | CloudBase unreachable from Vercel HK — TCP timeout to `tcb-api.tencentcloudapi.com:443` |
-| AC-R1-11 | ✅ PASS (partial) | DB unavailable → 503 in ~10s; 401 case blocked by DB unreachability |
+| AC-R1-11a | ✅ PASS | DB unavailable → 503 in ~10s (fail-closed verified). **Corrected from AC-R1-11 partial** |
+| AC-R1-11b | ❌ BLOCKED | DB normal + wrong password → 401. Cannot test (DB unreachable). **Split from AC-R1-11** |
 | AC-R1-12 | ✅ PASS | 8/8 gates: Server 515 + Client 195 = 710 tests, build, collab check, secret scan |
 | AC-R1-13 | ✅ PASS | No merge to main, no Production deployment |
 | AC-R1-14 | ✅ PASS | Codex package at `docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-R1/codex-review-package.md` |
@@ -61,10 +70,19 @@ Implemented SDK native timeout configuration, auth throttle timeout safety tests
 **Diagnostic chain** (from Preview probe):
 1. DNS: ✅ 63ms → `124.223.121.50, 109.244.144.136`
 2. TCP: ❌ 5002ms → "TCP connection timed out"
-3. SDK init: ✅ 0ms (credentials valid)
+3. SDK construction: ✅ 0ms (credentials NOT_VALIDATED — tcb.init() only creates app instance)
 4. DB request: ❌ 10066ms → "connect timeout" (SDK native timeout)
 
-**Impact**: All CloudBase NoSQL operations from Vercel Preview are blocked. Auth throttle correctly fails closed (503 in ~10s).
+> **CORRECTION (2026-07-28)**: Stage 3 was originally described as "SDK init OK (credentials valid)".
+> This is incorrect. `tcb.init()` only constructs the SDK app object; it does NOT make any
+> authenticated API call. Credentials can only be validated by a successful DB read or other
+> authenticated API call. The correct description is "SDK construction: OK (credentials NOT_VALIDATED)".
+
+**Impact**: All CloudBase NoSQL operations from Vercel hkg1 Preview are blocked. Auth throttle correctly fails closed (503 in ~10s).
+
+> **ROOT CAUSE NARROWING (2026-07-28)**: The original report stated "Vercel HK → CloudBase Shanghai TCP 443 超时"
+> as a confirmed root cause. Per GPT verdict, this evidence only supports "hkg1 unreachable in this test period".
+> hnd1/sin1 comparison is required before claiming universal Vercel-to-CloudBase unreachability.
 
 **Codex Escalation Triggered**: Per task spec, report to GPT for decision on CloudBase Run/Cloud Function data gateway.
 

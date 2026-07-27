@@ -200,13 +200,23 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// FIX-R11-R1 AC-R1-06/AC-R1-07: Diagnostic probe for Vercel-to-CloudBase
-// connectivity. Only active when the persistence backend is CloudBase NoSQL
-// (identified by __brand marker). The probe measures DNS, TCP/TLS, SDK init,
+// LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 AC-02: Diagnostic probe for
+// Vercel-to-CloudBase connectivity. Only active when:
+//   1. The persistence backend is CloudBase NoSQL (identified by __brand marker)
+//   2. The environment is NOT Production (VERCEL_ENV !== 'production')
+//
+// The probe measures DNS, TCP/TLS per A record, HTTPS/TLS, SDK construction,
 // and first DB request latency independently, without blocking the auth path.
-// Logs are stripped of credentials — only hostname, stage name, and elapsed ms.
+// Logs are stripped of credentials — only hostname, stage name, masked IPs,
+// and elapsed ms.
+//
+// AC-02: In Production, the probe router is NOT mounted. A secondary guard
+// inside probe.ts also returns 404 if VERCEL_ENV=production. This dual-guard
+// ensures the probe is never accessible in Production even if the mounting
+// logic changes.
 const isNoSqlBackend = (persistenceDeps as unknown as Record<string, unknown>).__brand === 'cloudbase_nosql';
-if (isNoSqlBackend) {
+const isProductionEnv = process.env.VERCEL_ENV === 'production';
+if (isNoSqlBackend && !isProductionEnv) {
   const cloudbaseEnvId = process.env.CLOUDBASE_ENV_ID ?? 'unknown';
   app.use('/api/probe', createProbeRouter({
     noSqlDeps: persistenceDeps as CloudBaseNoSqlDeps,

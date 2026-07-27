@@ -1,10 +1,28 @@
 # SESSION HANDOFF｜窗口交接
 
-## 当前状态（2026-07-28，FIX-R11-R1 实施完成，CloudBase TCP 不可达确认，待 GPT 决策）
+## 当前状态（2026-07-28，LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 并行执行中）
 
 - 日期：2026-07-28
+- **GPT 裁决**：FIX-R11-R1 `CODEX_REQUIRED` — 并行执行 Lane A (Codex) + Lane B (Trae)
+- **Lane A**：Codex 限域只读安全审查（FIX-R11-R1 代码，独立进行）
+- **Lane B**：`LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01`（Trae 网络对照与证据校正）
+  - **状态**：`ready_for_trae / nextActor=trae`
+  - **分支**：`lumen/cloudbase-connectivity-differential-01-trae`
+  - **目标**：三区域网络对照 + 证据校正 + Probe 生产隔离
+
+### 证据校正（已应用）
+
+1. **AC-R1-11 拆分**：AC-R1-11a (DB 不可用→503, PASS) + AC-R1-11b (DB 正常→401, BLOCKED_EXTERNAL_NETWORK)
+2. **SDK init 表述修正**："SDK init OK (credentials valid)" → "SDK construction: OK (credentials NOT_VALIDATED)"
+3. **根因收窄**："Vercel HK 永久不可达" → "hkg1 本次测试时段不可达，需 hnd1/sin1 对照"
+
+---
+
+## 历史状态（2026-07-27，FIX-R11-R1 实施完成，待 GPT 决策）
+
+- 日期：2026-07-27
 - **任务**：`LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-R1-CONNECTIVITY-AND-AUTH-EVIDENCE`
-- **状态**：`awaiting_gpt_acceptance / nextActor=gpt`
+- **状态**：`CODEX_REQUIRED`（GPT 裁决 2026-07-28）
 - **Risk Level**：HIGH
 - **Route**：R2 → bounded Codex audit after implementation
 - **Codex**：`REQUIRED`（Codex Escalation Condition 触发：CloudBase 直连不可用）
@@ -15,28 +33,29 @@
 - **门禁证据**：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-R1/gate-results.md`
 - **Codex 审查包**：`docs/lumen-v2/evidence/LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01-FIX-R11-R1/codex-review-package.md`
 
-### 已通过 AC (13/15)
+### 已通过 AC (13/16 — 拆分后)
 
-AC-R1-01 ✅ | AC-R1-02 ✅ | AC-R1-03 ✅ | AC-R1-04 ✅ | AC-R1-05 ✅ | AC-R1-06 ✅ | AC-R1-07 ✅ | AC-R1-08 ✅ | AC-R1-09 ✅ | AC-R1-11-partial ✅ | AC-R1-12 ✅ | AC-R1-13 ✅ | AC-R1-14 ✅
+AC-R1-01 ✅ | AC-R1-02 ✅ | AC-R1-03 ✅ | AC-R1-04 ✅ | AC-R1-05 ✅ | AC-R1-06 ✅ | AC-R1-07 ✅ | AC-R1-08 ✅ | AC-R1-09 ✅ | AC-R1-11a ✅ | AC-R1-12 ✅ | AC-R1-13 ✅ | AC-R1-14 ✅
 
-### 阻塞 AC (2/15)
+### 阻塞 AC (3/16 — 拆分后)
 
 - **AC-R1-10** create/read/delete round-trip：CloudBase NoSQL TCP 不可达
-- **AC-R1-11-401-case** 正常 DB 状态 401：DB 不可达，无法测试
+- **AC-R1-11b** 正常 DB 状态 401：DB 不可达，无法测试
+- **AC-R1-08** 凭据有效性：SDK init 不验证凭据，需独立控制台证据或成功鉴权请求
 
 ### 关键诊断
 
 ```
 DNS:    ✅ 63ms  → 124.223.121.50, 109.244.144.136
 TCP:    ❌ 5002ms → "TCP connection timed out after 5000ms"
-SDK:    ✅ 0ms   → credentials valid
+SDK:    ✅ 0ms   → SDK construction OK (credentials NOT_VALIDATED)
 DB:     ❌ 10066ms → "connect timeout" (SDK native timeout)
 Total:  15130ms
 ```
 
-- **根因确认**：Vercel HK (hkg1) → CloudBase 上海 TCP 443 超时
+- **根因（收窄后）**：Vercel hkg1 本次测试时段 → CloudBase 上海 TCP 443 超时
 - **Endpoint 正确**：`tcb-api.tencentcloudapi.com`（官方）
-- **凭据有效**：SDK init 成功
+- **凭据状态**：NOT_VALIDATED（SDK init 仅构造 app 对象，不验证凭据）
 - **Auth fail-closed**：错误密码 → 503 in ~10s
 
 ### 实施概要
