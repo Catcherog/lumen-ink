@@ -15,6 +15,19 @@
  * If the throttle storage (CloudBase NoSQL) is unreachable, the auth attempt
  * FAILS CLOSED - the request is rejected with 503 instead of skipping the
  * security check or hanging until the Vercel Function timeout.
+ *
+ * FIX-R11-R1 AC-R1-02/AC-R1-03: The CloudBase SDK is initialized with a
+ * native timeout (default 10000ms). The outer application-level timeout
+ * below (12000ms) MUST be strictly larger than the SDK timeout so the SDK
+ * returns a specific error (e.g. ETIMEDOUT) before Promise.race cuts it off.
+ *
+ * FIX-R11-R1 AC-R1-03: Promise.race does NOT cancel the underlying SDK
+ * request. If the SDK timeout fires after the Promise.race timeout, the
+ * SDK's native timeout is the primary defense against lingering requests.
+ * The outer timeout is a secondary safety net for the case where the SDK
+ * timeout itself hangs (e.g., DNS resolution stall before the HTTP layer).
+ * There is no built-in abort mechanism in @cloudbase/node-sdk; the Vercel
+ * Function's cold-start boundary serves as the ultimate resource isolation.
  */
 
 import { Router, Request, Response } from 'express';
@@ -27,12 +40,24 @@ export interface AuthRouterDeps {
   throttle: AuthThrottle;
 }
 
-/** Bounded timeout for throttle storage calls (AC-10: must return within ~10s). */
-const THROTTLE_TIMEOUT_MS = 8000;
+/**
+ * FIX-R11-R1 AC-R1-02: Outer timeout for throttle storage calls.
+ * MUST be strictly larger than the CloudBase SDK native timeout (default 10000ms)
+ * so the SDK returns a specific error before Promise.race cuts it off.
+ */
+const THROTTLE_TIMEOUT_MS = 12000;
 
 /**
  * Wrap a promise with a bounded timeout. Rejects with a deterministic error
  * code if the promise does not settle within `ms` milliseconds.
+ *
+ * FIX-R11-R1 AC-R1-03: Promise.race does NOT cancel the underlying promise.
+ * The SDK's native timeout (configurable via CloudBaseNoSqlOptions.sdkTimeout,
+ * default 10000ms) is the primary defense against lingering requests. This
+ * outer timeout is a secondary safety net for edge cases where the SDK
+ * timeout itself stalls (e.g., DNS resolution before the HTTP layer).
+ * There is no built-in abort mechanism in @cloudbase/node-sdk; the Vercel
+ * Function's cold-start boundary serves as the ultimate resource isolation.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, errorCode: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -96,6 +121,19 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       // recordSuccess clears the throttle bucket. If the storage is
       // unreachable, the login still succeeds (password is verified and
       // isBlocked already passed). The bucket will expire naturally.
+      //
+      // FIX-R11-R1 AC-R1-05: Security invariant — this is NOT fail-closed.
+      // recordSuccess is a best-effort cleanup. The bucket's TTL-based
+      // expiry (windowMs) is the durable safety net. A failed recordSuccess
+      // does NOT:
+      //   - Invalidate the issued JWT token
+      //   - Re-block the IP (the bucket was already cleared conceptually)
+      //   - Allow the next request to bypass isBlocked (bucket still exists
+      //     with stale failures, but isBlocked only counts failures, not
+      //     successes — so the worst case is a premature 429, not a bypass)
+      // The alternative (failing the login) would create a denial-of-service
+      // vector: an attacker could trigger CloudBase connectivity issues and
+      // lock out legitimate users even with correct passwords.
       try {
         await withTimeout(
           throttle.recordSuccess(ip),

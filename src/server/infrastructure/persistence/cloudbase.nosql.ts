@@ -329,12 +329,27 @@ export interface CloudBaseNoSqlOptions {
   storagePrefix: string;
   /** Optional: signed URL TTL in seconds (default 900 = 15 min). */
   signedUrlTtlSeconds?: number;
+  /**
+   * FIX-R11-R1 AC-R1-02: SDK native timeout for underlying API calls (ms).
+   * Controls the HTTP request timeout for CloudBase API calls. Defaults to
+   * 10000ms (10s). The outer application-level timeout MUST be larger than
+   * this value so the SDK returns a specific error instead of being cut off
+   * by Promise.race.
+   */
+  sdkTimeout?: number;
 }
 
 export interface CloudBaseNoSqlDeps extends PersistenceDependencies {
   __brand: 'cloudbase_nosql';
   ensureReady(): Promise<void>;
   close(): Promise<void>;
+  /**
+   * FIX-R11-R1 AC-R1-06: Expose the raw database instance for diagnostic
+   * probes. This is the same CloudBaseDatabase instance used by the adapter.
+   * Diagnostic code MUST NOT use this for business operations — it is only
+   * for connectivity probes and environment checks.
+   */
+  getRawDatabase(): CloudBaseDatabase;
 }
 
 /**
@@ -492,9 +507,15 @@ export function createCloudBaseNoSqlPersistence(
         'CLOUDBASE_SDK_INIT_UNAVAILABLE: the @cloudbase/node-sdk module does not expose a callable init() function'
       );
     }
+    // FIX-R11-R1 AC-R1-02: SDK native timeout. Default 10000ms (10s).
+    // The outer application-level timeout (auth.ts THROTTLE_TIMEOUT_MS)
+    // MUST be larger than this value so the SDK returns a specific error
+    // (e.g. ETIMEDOUT) instead of being cut off by Promise.race.
+    const sdkTimeout = options.sdkTimeout ?? 10000;
     const instance = tcb.init({
       env: options.envId,
       accessKey: options.apiKey,
+      timeout: sdkTimeout,
     });
     app = instance as unknown as CloudBaseApp;
     db = (app as unknown as { database(): CloudBaseDatabase }).database();
@@ -1990,5 +2011,16 @@ export function createCloudBaseNoSqlPersistence(
     authThrottle,
     ensureReady,
     close,
+    /**
+     * FIX-R11-R1 AC-R1-06: Expose the raw CloudBase database instance for
+     * diagnostic probes. Returns the same CloudBaseDatabase instance used
+     * internally by the adapter. Diagnostic code MUST NOT use this for
+     * business operations — it is only for connectivity probes and
+     * environment checks.
+     */
+    getRawDatabase(): CloudBaseDatabase {
+      assertReady();
+      return db!;
+    },
   };
 }

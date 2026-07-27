@@ -74,6 +74,7 @@ describe('FIX-R11 AC-04/AC-05: CloudBase SDK module interop', () => {
     expect(fakeApp.init).toHaveBeenCalledWith({
       env: 'test-env-id',
       accessKey: 'test-api-key',
+      timeout: 10000, // FIX-R11-R1 AC-R1-02: SDK native timeout
     });
     expect(deps.__brand).toBe('cloudbase_nosql');
   });
@@ -90,6 +91,7 @@ describe('FIX-R11 AC-04/AC-05: CloudBase SDK module interop', () => {
     expect(fakeApp.init).toHaveBeenCalledWith({
       env: 'test-env-id',
       accessKey: 'test-api-key',
+      timeout: 10000, // FIX-R11-R1 AC-R1-02: SDK native timeout
     });
   });
 

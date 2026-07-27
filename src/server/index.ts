@@ -23,10 +23,12 @@ import detectRouter from './routes/detect.js';
 import { createProjectsRouter } from './routes/projects.js';
 import { createJobsRouter } from './routes/jobs.js';
 import { createWorkerRouter } from './routes/worker.js';
+import { createProbeRouter } from './routes/probe.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
 import { getProvider } from './services/providers/ProviderFactory.js';
 import { selectPersistenceByEnv, type CloudBasePersistenceDeps } from './infrastructure/persistence/index.js';
+import type { CloudBaseNoSqlDeps } from './infrastructure/persistence/cloudbase.nosql.js';
 import {
   createLocalJobExecutor,
   createWorkerJobExecutor,
@@ -197,6 +199,20 @@ app.use(express.json({ limit: runtimeConfig.maxUploadBytes }));
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+
+// FIX-R11-R1 AC-R1-06/AC-R1-07: Diagnostic probe for Vercel-to-CloudBase
+// connectivity. Only active when the persistence backend is CloudBase NoSQL
+// (identified by __brand marker). The probe measures DNS, TCP/TLS, SDK init,
+// and first DB request latency independently, without blocking the auth path.
+// Logs are stripped of credentials — only hostname, stage name, and elapsed ms.
+const isNoSqlBackend = (persistenceDeps as unknown as Record<string, unknown>).__brand === 'cloudbase_nosql';
+if (isNoSqlBackend) {
+  const cloudbaseEnvId = process.env.CLOUDBASE_ENV_ID ?? 'unknown';
+  app.use('/api/probe', createProbeRouter({
+    noSqlDeps: persistenceDeps as CloudBaseNoSqlDeps,
+    envId: cloudbaseEnvId,
+  }));
+}
 
 // Auth router does NOT use authMiddleware (it issues tokens, not verifies them).
 app.use('/api/auth', createAuthRouter({ config: runtimeConfig, throttle: authThrottle }));
