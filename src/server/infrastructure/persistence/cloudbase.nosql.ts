@@ -1989,7 +1989,6 @@ export function createCloudBaseNoSqlPersistence(
     async put(key: string, value: AuthThrottleBucket): Promise<void> {
       assertReady();
       await collection(COLLECTIONS.authThrottle).doc(key).set({
-        _id: key,
         ...value,
       });
     },
