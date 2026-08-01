@@ -3,12 +3,20 @@
   "project": "lumen-ink-v2",
   "repository": "https://github.com/Catcherog/lumen-ink.git",
   "defaultBranch": "main",
-  "phase": "region-switch-retest-stop-condition-triggered",
-  "currentTask": "LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01",
-  "currentTaskBatch": "REGION-SWITCH-RETEST",
-  "activeTaskPath": "docs/lumen-v2/tasks/active/LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01.md",
-  "status": "awaiting_gpt_acceptance",
-  "nextActor": "gpt",
+  "phase": "cors-preview-origin-fix-awaiting-replacement-pr",
+  "currentTask": "LUMEN-CORS-PREVIEW-ORIGIN-FIX-01",
+  "currentTaskBatch": "CORS-PREVIEW-ORIGIN-FIX",
+  "activeTaskPath": "docs/lumen-v2/tasks/active/LUMEN-CORS-PREVIEW-ORIGIN-FIX-01.md",
+  "status": "implementation_complete_awaiting_merge",
+  "nextActor": "codex",
+  "CORS_FIX_SHA": "70249e954f0bba729fffc899da1b8fb7bb167d5e",
+  "PREVIEW_CORS_VERIFICATION": "PASS",
+  "AUTH_FUNCTIONAL_VERIFICATION": "BLOCKED_EXTERNAL_NETWORK",
+  "PRODUCTION_ALIAS_MODIFIED": false,
+  "PR_3_STATUS": "SUPERSEDED_PENDING_REPLACEMENT",
+  "CORS_REPLACEMENT_BASE_SHA": "f41f1f26f54e7a0d258cee014f2df8121a153d24",
+  "CORS_REPLACEMENT_BRANCH": "lumen/lumen-cors-preview-origin-fix-01-codex",
+  "CORS_REPLACEMENT_PR_STATUS": "PENDING_CREATION",
   "fixR11Branch": "lumen/cloudbase-nosql-implement-01-fix-r11",
   "fixR11Base": "8928906cd1af93d05a683db0134431634f69402b",
   "fixR11Head": "150352d",
@@ -863,8 +871,8 @@
       "nextNonBlockingTask": "LUMEN-REAL-CLOUDBASE-RELEASE-VALIDATION-01",
       "nextNonBlockingTaskDescription": "Real CloudBase E2E + Preview unlock + Production release validation; independent release gate, does not block current implementation closure"
     },
-    "lastUpdatedAt": "2026-07-28",
-    "lastUpdatedBy": "trae",
-    "lastUpdatedAction": "LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 three-region comparison complete. hkg1 BLOCKED (0/5), hnd1 PASS (5/5, DB read 70-206ms), sin1 PASS (5/5, DB read 113-122ms). Conclusion: hkg1-specific TCP routing issue, NOT universal. Recommendation: switch to sin1. 9/9 AC PASS. Evidence corrections applied to FIX-R11-R1 (AC-R1-11 split, SDK terminology, root cause narrowing). No GATEWAY_REQUIRED triggered. No Production changes. Status: awaiting_gpt_acceptance/nextActor=gpt."
+    "lastUpdatedAt": "2026-08-02",
+    "lastUpdatedBy": "codex",
+    "lastUpdatedAction": "LUMEN-CORS-PREVIEW-ORIGIN-FIX-01 state sync: CORS implementation accepted for replacement PR; PR #3 superseded for mixed UX/CORS scope; Preview CORS PASS; /api/auth functional verification BLOCKED_EXTERNAL_NETWORK by CloudBase timeout; no Production Alias modification."
   }
 }
