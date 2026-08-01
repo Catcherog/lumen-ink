@@ -7,8 +7,10 @@
   "currentTask": "LUMEN-CORS-PREVIEW-ORIGIN-FIX-01",
   "currentTaskBatch": "CORS-PREVIEW-ORIGIN-FIX",
   "activeTaskPath": "docs/lumen-v2/tasks/active/LUMEN-CORS-PREVIEW-ORIGIN-FIX-01.md",
-  "status": "implementation_complete_awaiting_merge",
-  "nextActor": "codex",
+  "status": "awaiting_user_decision",
+  "nextActor": "user",
+  "CORS_TASK_STATUS": "implementation_complete_awaiting_merge",
+  "CORS_TASK_NEXT_ACTOR": "codex",
   "CORS_FIX_SHA": "70249e954f0bba729fffc899da1b8fb7bb167d5e",
   "PREVIEW_CORS_VERIFICATION": "PASS",
   "AUTH_FUNCTIONAL_VERIFICATION": "BLOCKED_EXTERNAL_NETWORK",
@@ -873,6 +875,6 @@
     },
     "lastUpdatedAt": "2026-08-02",
     "lastUpdatedBy": "codex",
-    "lastUpdatedAction": "LUMEN-CORS-PREVIEW-ORIGIN-FIX-01 state sync: CORS implementation accepted for replacement PR; PR #3 superseded for mixed UX/CORS scope; Preview CORS PASS; /api/auth functional verification BLOCKED_EXTERNAL_NETWORK by CloudBase timeout; no Production Alias modification."
+    "lastUpdatedAction": "LUMEN-CORS-PREVIEW-ORIGIN-FIX-01 state sync: task-specific status implementation_complete_awaiting_merge/nextActor codex is recorded; top-level state machine remains awaiting_user_decision/nextActor user for collaboration-check compatibility; PR #3 superseded for mixed UX/CORS scope; Preview CORS PASS; /api/auth functional verification BLOCKED_EXTERNAL_NETWORK by CloudBase timeout; no Production Alias modification."
   }
 }
