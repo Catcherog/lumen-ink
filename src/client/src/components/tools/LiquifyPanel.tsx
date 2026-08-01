@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ToolPanelProps } from './types';
 import { Droplets, Check } from 'lucide-react';
+import { normalizeSemanticLevel, semanticLevelLabel } from '../../features/editor-ux/semanticLevels';
 
 type LiquifyFeature = 'faceSmall' | 'jawLine' | 'noseShrink' | 'philtrumShort' | 'shoulderNarrow' | 'bodyShape';
 
@@ -65,7 +66,7 @@ export default function LiquifyPanel({ state, onSubmit }: ToolPanelProps) {
   const [features, setFeatures] = useState<Record<LiquifyFeature, FeatureState>>(() => {
     const initial: Partial<Record<LiquifyFeature, FeatureState>> = {};
     for (const { key } of FEATURES) {
-      initial[key] = { enabled: false, strength: 30 };
+      initial[key] = { enabled: false, strength: 25 };
     }
     return initial as Record<LiquifyFeature, FeatureState>;
   });
@@ -80,7 +81,7 @@ export default function LiquifyPanel({ state, onSubmit }: ToolPanelProps) {
   const updateStrength = (key: LiquifyFeature, value: number) => {
     setFeatures((prev) => ({
       ...prev,
-      [key]: { ...prev[key], enabled: true, strength: value },
+      [key]: { ...prev[key], enabled: true, strength: normalizeSemanticLevel(value) },
     }));
   };
 
@@ -132,11 +133,12 @@ export default function LiquifyPanel({ state, onSubmit }: ToolPanelProps) {
                   type="range"
                   min={0}
                   max={100}
+                  step={25}
                   value={feature.strength}
                   onChange={(e) => updateStrength(key, Number(e.target.value))}
                   className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                 />
-                <span className="text-xs text-gray-500 dark:text-gray-400 w-8 text-right">{feature.strength}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400 w-10 text-right">{semanticLevelLabel(feature.strength)}</span>
               </div>
             </div>
           );

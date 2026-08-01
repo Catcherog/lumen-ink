@@ -13,7 +13,7 @@ import LegacyHistoryImport from './components/v2/LegacyHistoryImport';
 import useEditor from './hooks/useEditor';
 import { useProject } from './hooks/useProject';
 import { serializeError } from './utils/error';
-import { downloadImage } from './utils/image';
+import { exportCurrentResult, localExportErrorMessage } from './features/editor-ux/localExport';
 import { defaultRecipeBook, compilePrompt } from './utils/recipe';
 import { createProject } from './api/projects';
 import type { ProviderConfig, V2TaskId, EditRecipe } from '../../shared/types';
@@ -192,11 +192,12 @@ export default function AppV2() {
   };
 
   const handleImageUpload = useCallback(async (data: { base64: string; mimeType: string; file: File }) => {
+    const accepted = uploadImage(data);
+    if (!accepted) return;
     setProjectName(stripExtension(data.file.name) || '未命名项目');
     // PERSIST-001: upload to server FIRST so the Project + V0 are durably
     // stored. The viewer continues to use the base64 from the file picker
     // for instant display (no fetch round-trip).
-    uploadImage(data);
     setViewedVersionId(null);
     try {
       await project.upload(data.file, stripExtension(data.file.name) || '未命名项目');
@@ -220,6 +221,24 @@ export default function AppV2() {
   //   不依赖请求体中的 base64，天然避免旧 base64 问题。
   // - P0-02：显式传递 referenceImages，保证编译 Prompt、Recipe 计数与请求 payload 一致
   const handleGeneratePreview = useCallback(() => {
+    if (currentRecipe.taskId === 'export') {
+      const imageData = state.resultImage || state.currentImage;
+      const imageUrl = state.resultImageUrl || state.currentImageUrl;
+      const sourceMimeType = state.resultImage || state.resultImageUrl
+        ? state.resultMimeType
+        : state.currentMimeType;
+      void exportCurrentResult({
+        imageData,
+        imageUrl,
+        sourceMimeType,
+        format: currentRecipe.auxiliary.outputFormat,
+        quality: currentRecipe.auxiliary.outputQuality,
+      }).catch((error) => {
+        dispatch({ type: 'SET_ERROR', payload: localExportErrorMessage(error) });
+      });
+      return;
+    }
+
     const result = compilePrompt(currentRecipe);
 
     // V2 path: server-backed Project exists
@@ -252,7 +271,7 @@ export default function AppV2() {
         ? state.referenceImages
         : undefined,
     });
-  }, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, state.selectedProvider, state.selectedModel, dispatch, project]);
+  }, [currentRecipe, submitEdit, state.currentImage, state.currentImageUrl, state.currentMimeType, state.resultImage, state.resultImageUrl, state.resultMimeType, state.referenceImages, state.selectedProvider, state.selectedModel, dispatch, project]);
 
   // PERSIST-001: Viewer sync — when a V2 Job succeeds, the snapshot refreshes
   // with a new activeVersion. We auto-switch the viewer to the new Version's
@@ -333,23 +352,33 @@ export default function AppV2() {
   // 纯文本结果（response.data.text）不接入导出 handler，因此不计入 canExport。
   const hasOriginal = !!state.originalImage;
   const canCompare = hasOriginal && !!(state.resultImage || state.resultImageUrl);
-  const canExport = !!(state.resultImage || state.resultImageUrl);
+  const canExport = !!(state.resultImage || state.resultImageUrl || state.currentImage || state.currentImageUrl);
 
   const handleCompare = useCallback(() => {
     if (!canCompare) return;
     setViewMode('compare');
   }, [canCompare]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!canExport) return;
-    // 与 ResultViewer.handleDownload 同源：base64 走 downloadImage，URL 走新标签页
-    if (state.resultImage) {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      downloadImage(state.resultImage, state.resultMimeType, `lumen-ink-${timestamp}.png`);
-    } else if (state.resultImageUrl) {
-      window.open(state.resultImageUrl, '_blank');
+    const exportRecipe = recipeBook.export;
+    const imageData = state.resultImage || state.currentImage;
+    const imageUrl = state.resultImageUrl || state.currentImageUrl;
+    const sourceMimeType = state.resultImage || state.resultImageUrl
+      ? state.resultMimeType
+      : state.currentMimeType;
+    try {
+      await exportCurrentResult({
+        imageData,
+        imageUrl,
+        sourceMimeType,
+        format: exportRecipe.auxiliary.outputFormat,
+        quality: exportRecipe.auxiliary.outputQuality,
+      });
+    } catch (error) {
+      dispatch({ type: 'SET_ERROR', payload: localExportErrorMessage(error) });
     }
-  }, [canExport, state.resultImage, state.resultImageUrl, state.resultMimeType]);
+  }, [canExport, recipeBook.export, state.resultImage, state.resultImageUrl, state.resultMimeType, state.currentImage, state.currentImageUrl, state.currentMimeType, dispatch]);
 
   if (!token) {
     return <LoginPage onLogin={handleLogin} />;
