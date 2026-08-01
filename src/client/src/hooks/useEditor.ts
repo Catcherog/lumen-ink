@@ -45,6 +45,10 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         currentImage: action.payload.base64,
         currentImageUrl: null,
         currentMimeType: action.payload.mimeType,
+        resultImage: null,
+        resultImageUrl: null,
+        resultText: null,
+        resultMimeType: 'image/png',
         history: [],
         referenceImages: [],
         error: null,
@@ -108,15 +112,20 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
         currentImage: action.payload.entry.resultImage || null,
         currentImageUrl: action.payload.entry.resultImageUrl || null,
         currentMimeType: action.payload.entry.resultMimeType || 'image/png',
-        history: state.history.slice(0, action.payload.index),
+        resultImage: action.payload.entry.resultImage || null,
+        resultImageUrl: action.payload.entry.resultImageUrl || null,
+        resultText: action.payload.entry.text || null,
+        resultMimeType: action.payload.entry.resultMimeType || 'image/png',
+        history: state.history.slice(0, action.payload.index + 1),
       };
     case 'VIEW_HISTORY': {
       // 仅切换当前查看的图片，不修改 history 数组
       return {
         ...state,
-        currentImage: action.payload.entry.resultImage || null,
-        currentImageUrl: action.payload.entry.resultImageUrl || null,
-        currentMimeType: action.payload.entry.resultMimeType || 'image/png',
+        resultImage: action.payload.entry.resultImage || null,
+        resultImageUrl: action.payload.entry.resultImageUrl || null,
+        resultText: action.payload.entry.text || null,
+        resultMimeType: action.payload.entry.resultMimeType || 'image/png',
       };
     }
     case 'DELETE_HISTORY': {
@@ -198,9 +207,19 @@ export default function useEditor() {
     }
   }, [state.history]);
 
-  const uploadImage = useCallback((data: { base64: string; mimeType: string; file: File }) => {
+  const uploadImage = useCallback((data: { base64: string; mimeType: string; file: File }): boolean => {
+    const hasVisibleSession = !!(
+      state.originalImage ||
+      state.currentImage ||
+      state.currentImageUrl ||
+      state.history.length > 0
+    );
+    if (hasVisibleSession && !window.confirm('替换图片将清空当前编辑历史，是否继续？')) {
+      return false;
+    }
     dispatch({ type: 'UPLOAD_IMAGE', payload: { base64: data.base64, mimeType: data.mimeType } });
-  }, []);
+    return true;
+  }, [state.originalImage, state.currentImage, state.currentImageUrl, state.history.length]);
 
   const setModel = useCallback((model: string) => {
     dispatch({ type: 'SET_MODEL', payload: model });

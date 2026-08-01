@@ -135,8 +135,8 @@ export default function ParamPanel({
               onRestore={onRestoreHistory}
               onView={onViewHistory}
               onDelete={onDeleteHistory}
-              currentImage={state.currentImage}
-              currentImageUrl={state.currentImageUrl}
+              currentImage={state.resultImage}
+              currentImageUrl={state.resultImageUrl}
             />
           </section>
         )}

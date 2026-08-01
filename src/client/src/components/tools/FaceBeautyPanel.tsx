@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ToolPanelProps } from './types';
 import { Sparkles, Check } from 'lucide-react';
+import { normalizeSemanticLevel, semanticLevelLabel } from '../../features/editor-ux/semanticLevels';
 
 interface FaceParams {
   skinBrightness: number;
@@ -21,9 +22,9 @@ const STYLE_ANCHOR = '85mm f/1.4人像镜头，柔光箱45度主光，反光板�
 const QUALITY_ANCHOR = '五官端正，手指正确，无畸变，无水印，无文字';
 
 const PRESETS: Record<PresetKey, FaceParams> = {
-  natural: { skinBrightness: 20, smoothing: 20, faceSlim: 20, eyeEnlarge: 10, blemish: 30, sculptLight: 20 },
-  refined: { skinBrightness: 50, smoothing: 40, faceSlim: 50, eyeEnlarge: 40, blemish: 50, sculptLight: 50 },
-  premium: { skinBrightness: 80, smoothing: 60, faceSlim: 80, eyeEnlarge: 60, blemish: 80, sculptLight: 70 },
+  natural: { skinBrightness: 25, smoothing: 25, faceSlim: 25, eyeEnlarge: 0, blemish: 25, sculptLight: 25 },
+  refined: { skinBrightness: 50, smoothing: 50, faceSlim: 50, eyeEnlarge: 50, blemish: 50, sculptLight: 50 },
+  premium: { skinBrightness: 75, smoothing: 75, faceSlim: 75, eyeEnlarge: 75, blemish: 75, sculptLight: 75 },
 };
 
 const SLIDERS: Array<{ key: keyof FaceParams; label: string }> = [
@@ -108,7 +109,7 @@ export default function FaceBeautyPanel({ state, onSubmit }: ToolPanelProps) {
   const [activePreset, setActivePreset] = useState<ActivePreset>('natural');
 
   const update = (key: keyof FaceParams, value: number) => {
-    setParams((prev) => ({ ...prev, [key]: value }));
+    setParams((prev) => ({ ...prev, [key]: normalizeSemanticLevel(value) }));
     setActivePreset('custom');
   };
 
@@ -154,12 +155,13 @@ export default function FaceBeautyPanel({ state, onSubmit }: ToolPanelProps) {
           <div key={key}>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs text-gray-700 dark:text-gray-300">{label}</label>
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-8 text-right">{params[key]}</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 w-10 text-right">{semanticLevelLabel(params[key])}</span>
             </div>
             <input
               type="range"
               min={0}
               max={100}
+              step={25}
               value={params[key]}
               onChange={(e) => update(key, Number(e.target.value))}
               className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
