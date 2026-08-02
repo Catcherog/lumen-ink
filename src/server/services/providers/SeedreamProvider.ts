@@ -137,7 +137,15 @@ export class SeedreamProvider implements ImageProvider {
         const elapsed = Date.now() - startTime;
         throw Object.assign(new Error(`Seedream API 请求超时（耗时 ${elapsed}ms，size=${size}），建议切换为 1k 出图或稍后重试`), { status: 504 });
       }
-      throw err;
+      // Node.js 原生 fetch (undici) 网络层错误: TypeError: fetch failed
+      // 底层原因在 err.cause 中（如 ECONNRESET, ECONNREFUSED, ENOTFOUND）
+      const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+      const causeCode = cause?.code || '';
+      const detail = causeCode ? `（${causeCode}）` : '';
+      throw Object.assign(
+        new Error(`Seedream API 网络请求失败${detail}，请检查网络连接或稍后重试`),
+        { status: 502 },
+      );
     }
     clearTimeout(timeoutId);
 

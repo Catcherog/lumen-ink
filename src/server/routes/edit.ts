@@ -311,6 +311,15 @@ export function createEditRouter(generationService: GenerationService): Router {
         return;
       }
 
+      // 网络错误（fetch failed / ECONNRESET 等，Provider 已附加 status 502）
+      if (err.status === 502) {
+        res.status(502).json({
+          success: false,
+          error: upstreamMsg || '网络连接失败，请稍后重试',
+        } as EditResponse);
+        return;
+      }
+
       // 服务不可用
       if (err.status && err.status >= 500) {
         res.status(502).json({
