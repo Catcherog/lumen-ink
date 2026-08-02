@@ -79,6 +79,7 @@ export interface UseProjectResult {
   activate(versionId: string): Promise<void>;
   approve(versionId: string): Promise<void>;
   delete(): Promise<void>;
+  clearError(): void;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 1500;
@@ -333,6 +334,10 @@ export function useProject(
     }
   }, [snapshot]);
 
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
   return {
     snapshot,
     activeVersion: snapshot?.activeVersion ?? null,
@@ -347,6 +352,7 @@ export function useProject(
     activate,
     approve,
     delete: deleteProjectFn,
+    clearError,
   };
 }
 

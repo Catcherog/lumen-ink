@@ -83,7 +83,7 @@ export default function ContextPanel({
 
   return (
     <aside
-      className="w-[360px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
+      className="w-[300px] lg:w-[320px] xl:w-[360px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
       data-context-panel
       data-task-id={recipe.taskId}
     >

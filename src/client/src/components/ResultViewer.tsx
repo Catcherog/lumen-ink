@@ -76,8 +76,8 @@ export default function ResultViewer({
   const [isDragOver, setIsDragOver] = useState(false);
   const [imageMenu, setImageMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const compareStageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDragging = useRef(false);
@@ -233,36 +233,52 @@ export default function ResultViewer({
     }
   };
 
-  const handleMouseDown = useCallback(() => {
-    isDragging.current = true;
-  }, []);
-
   const updateSlider = useCallback((clientX: number) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
+    if (!compareStageRef.current) return;
+    const rect = compareStageRef.current.getBoundingClientRect();
     const x = clientX - rect.left;
     const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
     setSliderPosition(percentage);
   }, []);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging.current) return;
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     updateSlider(e.clientX);
   }, [updateSlider]);
 
-  const handleMouseUp = useCallback(() => {
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging.current) return;
+    e.preventDefault();
+    updateSlider(e.clientX);
+  }, [updateSlider]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDragging.current) return;
     isDragging.current = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore release errors
+    }
   }, []);
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    updateSlider(e.touches[0].clientX);
-  }, [updateSlider]);
+  const handleSliderKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.max(0, prev - 1));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.min(100, prev + 1));
+    }
+  }, []);
 
   const imgContainerClasses = (() => {
     if (zoomMode === '1:1') {
-      return 'w-auto h-auto max-w-none max-h-none object-contain';
+      return 'block w-auto h-auto max-w-none max-h-none object-contain';
     }
-    return 'w-full h-full max-w-full max-h-full object-contain';
+    return 'block w-auto h-auto max-w-full max-h-full object-contain';
   })();
 
   // 无内容时的空状态标志
@@ -430,44 +446,59 @@ export default function ResultViewer({
         )}
 
         {resultSrc && effectiveViewMode === 'compare' && hasOriginal ? (
-          <div
-            ref={containerRef}
-            className="absolute inset-0 flex items-center justify-center select-none"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleMouseUp}
-          >
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden select-none">
             {compareMode === 'slider' ? (
-              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+              <div
+                ref={compareStageRef}
+                data-testid="compare-stage"
+                className="relative max-w-full max-h-full"
+                style={{ touchAction: 'none' }}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+              >
+                {/* Sizing image: invisible but participates in layout to set stage dimensions */}
+                <img
+                  src={originalSrc || undefined}
+                  alt=""
+                  className="block max-w-full max-h-full invisible pointer-events-none"
+                  draggable={false}
+                />
+                {/* Result overlay: fills the stage, contained */}
                 <img
                   src={resultSrc}
                   alt="生成结果"
-                  className="absolute inset-0 m-auto max-w-full max-h-full object-contain"
+                  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                   draggable={false}
                 />
+                {/* Original overlay: clipped by slider position */}
                 <img
                   src={originalSrc || undefined}
                   alt="原图"
-                  className="absolute inset-0 m-auto max-w-full max-h-full object-contain"
+                  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                   style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
                   draggable={false}
                 />
+                {/* Slider line + handle */}
                 <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg cursor-col-resize"
+                  className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg cursor-col-resize pointer-events-none"
                   style={{ left: `${sliderPosition}%` }}
                 >
                   <div
-                    className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-md flex items-center justify-center"
-                    onMouseDown={handleMouseDown}
-                    onTouchStart={handleMouseDown}
+                    role="slider"
+                    aria-label="对比滑块位置"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(sliderPosition)}
+                    tabIndex={0}
+                    onKeyDown={handleSliderKeyDown}
+                    className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-md flex items-center justify-center pointer-events-auto cursor-col-resize focus:outline-none focus:ring-2 focus:ring-blue-400"
                   >
                     <ArrowLeftRight className="w-4 h-4 text-gray-600" />
                   </div>
                 </div>
-                <div className="absolute top-3 left-3 px-2 py-1 bg-black/50 text-white text-xs rounded">原图</div>
-                <div className="absolute top-3 right-3 px-2 py-1 bg-black/50 text-white text-xs rounded">结果</div>
+                <div className="absolute top-3 left-3 px-2 py-1 bg-black/50 text-white text-xs rounded pointer-events-none">原图</div>
+                <div className="absolute top-3 right-3 px-2 py-1 bg-black/50 text-white text-xs rounded pointer-events-none">结果</div>
               </div>
             ) : (
               <div className="w-full h-full flex">
@@ -475,7 +506,7 @@ export default function ResultViewer({
                   <img
                     src={originalSrc || undefined}
                     alt="原图"
-                    className="max-w-full max-h-full object-contain"
+                    className="block max-w-full max-h-full object-contain"
                     draggable={false}
                   />
                   <div className="absolute top-3 left-3 px-2 py-1 bg-black/50 text-white text-xs rounded">原图</div>
@@ -484,7 +515,7 @@ export default function ResultViewer({
                   <img
                     src={resultSrc}
                     alt="生成结果"
-                    className="max-w-full max-h-full object-contain"
+                    className="block max-w-full max-h-full object-contain"
                     draggable={false}
                   />
                   <div className="absolute top-3 right-3 px-2 py-1 bg-black/50 text-white text-xs rounded">结果</div>

@@ -328,6 +328,11 @@ export default function AppV2() {
   // Surface useProject errors alongside useEditor errors
   const displayError = state.error || (project.error ? project.error.message : null);
 
+  const handleClearError = useCallback(() => {
+    dispatch({ type: 'SET_ERROR', payload: null });
+    project.clearError();
+  }, [dispatch, project]);
+
   // 顶栏对比/导出：连接 ResultViewer 的真实能力（受控 viewMode + downloadImage 工具）
   // canExport 必须与 handleExport 支持的结果类型完全一致（仅 base64 / URL），
   // 纯文本结果（response.data.text）不接入导出 handler，因此不计入 canExport。
@@ -382,11 +387,22 @@ export default function AppV2() {
 
             <main className="flex-1 min-w-0 min-h-0 relative flex flex-col bg-white dark:bg-gray-900">
               {displayError && (
-                <div className="absolute top-3 left-3 right-3 z-20">
-                  <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl px-4 py-2.5 shadow-sm">
-                    <p className="text-sm text-red-600 dark:text-red-300">
+                <div
+                  role="alert"
+                  className="flex-shrink-0 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2.5"
+                >
+                  <div className="flex items-start gap-2">
+                    <p className="text-sm text-red-600 dark:text-red-300 break-words flex-1 min-w-0">
                       {typeof displayError === 'string' ? displayError : serializeError(displayError)}
                     </p>
+                    <button
+                      type="button"
+                      onClick={handleClearError}
+                      aria-label="关闭错误提示"
+                      className="flex-shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200 text-lg leading-none mt-0.5"
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
               )}

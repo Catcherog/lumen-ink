@@ -59,7 +59,7 @@ export default function TaskRail({ activeTask, onSelectTask }: TaskRailProps) {
   return (
     <nav
       aria-label="V2 任务栏"
-      className="w-[72px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-3 gap-1 overflow-y-auto"
+      className="w-16 xl:w-[72px] flex-shrink-0 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-3 gap-1 overflow-y-auto"
     >
       {TASKS.map((task) => {
         const Icon = task.icon;
