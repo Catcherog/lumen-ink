@@ -7,9 +7,9 @@ Branch: `codex/lumen-ephemeral-demo-runtime-01-fix-r1`
 
 ## Verdict for this implementation round
 
-Implementation complete on the exact latest functionality baseline. The branch
-is ready for GPT acceptance review as a Draft PR candidate. It is not merged and
-not released to Production.
+Implementation complete on the exact latest functionality baseline. Draft PR
+[#7](https://github.com/Catcherog/lumen-ink/pull/7) is open for GPT acceptance
+review. It is not merged and not released to Production.
 
 ## Baseline control
 

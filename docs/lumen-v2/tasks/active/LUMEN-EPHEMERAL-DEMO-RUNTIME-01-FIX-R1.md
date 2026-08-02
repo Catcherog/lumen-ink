@@ -7,6 +7,7 @@
 - Branch: `codex/lumen-ephemeral-demo-runtime-01-fix-r1`
 - Exact base: `origin/lumen/lumen-auth-throttle-id-fix-01-trae@e5fcd089d03fd9d4975cfaf3e85f1d5db9cb3392`
 - Previous implementation: PR #6, kept Draft and superseded by this task
+- Draft PR: [#7](https://github.com/Catcherog/lumen-ink/pull/7), targeting the functionality baseline branch
 - Report: `docs/lumen-v2/reports/LUMEN-EPHEMERAL-DEMO-RUNTIME-01-FIX-R1-CODEX-REPORT.md`
 - Evidence: `docs/lumen-v2/evidence/LUMEN-EPHEMERAL-DEMO-RUNTIME-01-FIX-R1/`
 

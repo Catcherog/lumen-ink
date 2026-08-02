@@ -8,6 +8,7 @@
 - **Status**: `awaiting_gpt_acceptance / nextActor=gpt`
 - **Report**: `docs/lumen-v2/reports/LUMEN-EPHEMERAL-DEMO-RUNTIME-01-FIX-R1-CODEX-REPORT.md`
 - **Evidence**: `docs/lumen-v2/evidence/LUMEN-EPHEMERAL-DEMO-RUNTIME-01-FIX-R1/`
+- **Draft PR**: [#7](https://github.com/Catcherog/lumen-ink/pull/7), open against `lumen/lumen-auth-throttle-id-fix-01-trae`
 - **Local gates**: client 15 files/213 tests, server 46 files/555 tests, client/server build, client lint, and targeted H-01/M-01/M-02 tests pass.
 - **Release boundary**: PR #6 remains Draft/superseded; no merge, production alias change, real Provider write, or production deployment was performed.
 - **State conflict resolved for this user-authorized task**: the inherited state pointer named the older CORS task. That task remains in the history; this active fix task is now the implementation handoff for the rebased branch.
