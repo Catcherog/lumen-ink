@@ -1,5 +1,18 @@
 # SESSION HANDOFF｜窗口交接
 
+## PR #5 UX-only post-merge state closure (2026-08-02)
+
+- **Task ID**: `LUMEN-UX-PR5-POSTMERGE-STATE-CLOSURE-01`
+- **PR #5**: `MERGED` at `9858bed4aeae97682376999e0afd623f80a027b7`.
+- **Base**: `lumen/lumen-auth-throttle-id-fix-01-trae` @ `9f9672bd52ebbf3b42439af642e664b81eb563e0`.
+- **Head**: `codex/lumen-ux-pr-rebase-clean-01` @ `e691e368e2ee26cb3356df45810b1b179e683d72`.
+- **PR #3**: `CLOSED / NOT_MERGED / SUPERSEDED` by PR #5.
+- **Scope**: PR #5 was the reviewed UX-only replacement with exactly 16 changed UX files. This closure changes only `STATE.json` and this handoff; it does not modify production code, tests, CORS files, main, or the Production Alias.
+- **Validation recorded**: client 206/206, server 538/538, typecheck, lint, build, collaboration check, diff check, and Vercel automatic Preview check all PASS. No manual deployment or Production Alias switch was performed.
+- **Closure boundary**: the state-only closure commit is based directly on PR #5 merge SHA above.
+
+---
+
 ## 当前状态（2026-07-28，LUMEN-CLOUDBASE-REGION-SWITCH-RETEST-01 Stop Condition 触发，待 GPT 验收）
 
 - 日期：2026-07-28
