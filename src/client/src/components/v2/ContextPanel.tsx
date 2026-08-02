@@ -10,7 +10,7 @@ import RecipePanel from './recipe/RecipePanel';
 import CompiledPromptPreview from './recipe/CompiledPromptPreview';
 import HistoryPanel from '../HistoryPanel';
 import ReferenceImages from '../ReferenceImages';
-import { Sparkles, Loader2, History, Image as ImageIcon } from 'lucide-react';
+import { Sparkles, Loader2, History, Image as ImageIcon, Download } from 'lucide-react';
 
 interface ContextPanelProps {
   /** 当前任务对应的 Recipe（由 AppV2 根据 activeTask 选取） */
@@ -61,9 +61,13 @@ export default function ContextPanel({
   const editable = V2_TASK_EDITABLE[recipe.taskId];
   // P0-01: 可提交判定必须与 submitEdit 实际支持的输入类型 1:1 对齐。
   // submitEdit 只发送 state.currentImage（base64）；URL-only 结果不可继续编辑。
+  const isExportTask = recipe.taskId === 'export';
   const hasCurrentImage = !!state.currentImage;
   const hasUrlOnlyResult = !state.currentImage && !!state.currentImageUrl;
-  const canSubmit = editable && hasCurrentImage && !state.isLoading;
+  const hasExportableImage = !!(state.resultImage || state.resultImageUrl || state.currentImage || state.currentImageUrl);
+  const canSubmit = isExportTask
+    ? hasExportableImage && !state.isLoading
+    : editable && hasCurrentImage && !state.isLoading;
 
   const showHistory = !!onRestoreHistory && state.history.length > 0;
 
@@ -104,7 +108,7 @@ export default function ContextPanel({
         />
 
         {/* P0-02: 参考图入口（唯一入口，可编辑任务均显示） */}
-        {editable && (
+        {editable && !isExportTask && (
           <section
             className="mt-5"
             data-reference-images-section
@@ -122,9 +126,11 @@ export default function ContextPanel({
         )}
 
         {/* 折叠只读编译 Prompt */}
-        <div className="mt-4">
-          <CompiledPromptPreview compiled={compiled} />
-        </div>
+        {!isExportTask && (
+          <div className="mt-4">
+            <CompiledPromptPreview compiled={compiled} />
+          </div>
+        )}
 
         {/* 历史记录（只读，不影响主操作） */}
         {showHistory && (
@@ -138,8 +144,8 @@ export default function ContextPanel({
               onRestore={onRestoreHistory!}
               onView={onViewHistory}
               onDelete={onDeleteHistory}
-              currentImage={state.currentImage}
-              currentImageUrl={state.currentImageUrl}
+              currentImage={state.resultImage}
+              currentImageUrl={state.resultImageUrl}
             />
           </section>
         )}
@@ -151,7 +157,7 @@ export default function ContextPanel({
           type="button"
           onClick={onSubmit}
           disabled={!canSubmit}
-          aria-label={state.isLoading ? '生成中' : '生成预览'}
+          aria-label={isExportTask ? '导出到本地' : state.isLoading ? '生成中' : '生成预览'}
           data-cta="generate-preview"
           className={`
             w-full py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2
@@ -163,7 +169,12 @@ export default function ContextPanel({
           {state.isLoading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              生成中
+              处理中
+            </>
+          ) : isExportTask ? (
+            <>
+              <Download className="w-4 h-4" />
+              导出到本地
             </>
           ) : (
             <>
@@ -177,13 +188,18 @@ export default function ContextPanel({
             当前任务不发起编辑，请切换到其他任务
           </p>
         )}
-        {editable && !hasCurrentImage && !hasUrlOnlyResult && (
+        {editable && !isExportTask && !hasCurrentImage && !hasUrlOnlyResult && (
           <p className="mt-1.5 text-[11px] text-center text-gray-400 dark:text-gray-500">
             请先上传图片再生成预览
           </p>
         )}
+        {isExportTask && !hasExportableImage && (
+          <p className="mt-1.5 text-[11px] text-center text-gray-400 dark:text-gray-500">
+            请先上传或生成图片再导出
+          </p>
+        )}
         {/* P0-01: URL-only 结果明确不可继续编辑提示 */}
-        {editable && !hasCurrentImage && hasUrlOnlyResult && (
+        {editable && !isExportTask && !hasCurrentImage && hasUrlOnlyResult && (
           <p className="mt-1.5 text-[11px] text-center text-amber-500 dark:text-amber-400">
             当前结果为 URL，无法继续编辑，请下载后重新上传
           </p>
