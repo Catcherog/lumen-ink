@@ -37,6 +37,9 @@ const PROVIDER_ENC_KEY = 'r1-test-enc-key-32-chars-test!!!!';
 
 function makeRuntimeConfig(): RuntimeConfig {
   return {
+    runtimeMode: 'persistent',
+    persistence: 'enabled',
+    authMode: 'password',
     isDeployed: false,
     providerEnvManaged: false,
     authPassword: AUTH_PASSWORD,

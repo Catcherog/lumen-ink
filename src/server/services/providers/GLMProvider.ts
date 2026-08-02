@@ -1,5 +1,6 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
+import { redactString } from '../../security/redaction.js';
 
 const GLM_API_BASE = 'https://open.bigmodel.cn/api/paas/v4';
 const FETCH_TIMEOUT = 50000;
@@ -92,7 +93,7 @@ export class GLMProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('GLM Image API error:', response.status, errorText);
+      console.error('GLM Image API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -193,7 +194,7 @@ export class GLMProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('GLM Chat API error:', response.status, errorText);
+      console.error('GLM Chat API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

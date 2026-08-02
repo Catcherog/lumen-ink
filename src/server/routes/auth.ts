@@ -37,7 +37,7 @@ import type { RuntimeConfig } from '../config/runtime.js';
 
 export interface AuthRouterDeps {
   config: RuntimeConfig;
-  throttle: AuthThrottle;
+  throttle?: AuthThrottle;
 }
 
 /**
@@ -82,6 +82,22 @@ function getClientIp(req: Request): string {
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
   const router = Router();
+
+  if (deps.config.authMode === 'disabled') {
+    router.post('/', (_req: Request, res: Response) => {
+      res.status(409).json({
+        success: false,
+        errorCode: 'AUTH_DISABLED_IN_EPHEMERAL_MODE',
+        message: '临时展示模式不启用登录',
+      });
+    });
+    return router;
+  }
+
+  if (!deps.throttle) {
+    throw new Error('AUTH_THROTTLE_REQUIRED');
+  }
+
   const login = createLogin(authDepsFromConfig(deps.config));
   const { throttle } = deps;
 

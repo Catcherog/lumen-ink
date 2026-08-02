@@ -1,7 +1,15 @@
 import { useReducer, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { serializeError } from '../utils/error';
-import type { EditorState, EditorAction, ReferenceImage, HistoryEntry, RetouchTool, Region } from '../../../shared/types';
+import type {
+  EditorState,
+  EditorAction,
+  ReferenceImage,
+  HistoryEntry,
+  RetouchTool,
+  Region,
+  EphemeralProviderConfig,
+} from '../../../shared/types';
 
 const loadSavedHistory = (): HistoryEntry[] => {
   try {
@@ -169,19 +177,30 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
   }
 }
 
-export default function useEditor() {
+export interface UseEditorOptions {
+  /** Disable all local history reads/writes for the ephemeral public demo. */
+  persistHistory?: boolean;
+  /** Request-scoped BYO provider sent only to the ephemeral edit route. */
+  ephemeralProvider?: EphemeralProviderConfig;
+}
+
+export default function useEditor(options: UseEditorOptions = {}) {
+  const persistHistory = options.persistHistory ?? true;
+  const ephemeralProvider = options.ephemeralProvider;
   const [state, dispatch] = useReducer(reducer, initialState);
 
   // Load saved history on mount
   useEffect(() => {
+    if (!persistHistory) return;
     const saved = loadSavedHistory();
     if (saved.length > 0) {
       dispatch({ type: 'LOAD_HISTORY', payload: saved });
     }
-  }, []);
+  }, [persistHistory]);
 
   // Save history to localStorage whenever it changes
   useEffect(() => {
+    if (!persistHistory) return;
     if (state.history.length > 0) {
       try {
         // Save a lightweight version without base64 image data,
@@ -205,7 +224,7 @@ export default function useEditor() {
     } else {
       localStorage.removeItem('edit_history');
     }
-  }, [state.history]);
+  }, [persistHistory, state.history]);
 
   const uploadImage = useCallback((data: { base64: string; mimeType: string; file: File }): boolean => {
     const hasVisibleSession = !!(
@@ -269,6 +288,7 @@ export default function useEditor() {
         referenceImages: referenceImages.length > 0
           ? referenceImages.map(img => ({ data: img.base64, mimeType: img.mimeType }))
           : undefined,
+        ...(ephemeralProvider ? { provider: ephemeralProvider } : {}),
       }, {
         timeout: 100000,
       });
@@ -301,31 +321,38 @@ export default function useEditor() {
           },
         });
       } else {
-        const errorPayload = typeof response.data.error === 'string'
-          ? response.data.error
-          : serializeError(response.data.error);
+        const errorPayload = typeof response.data.message === 'string'
+          ? response.data.message
+          : typeof response.data.error === 'string'
+            ? response.data.error
+            : serializeError(response.data.error);
         dispatch({ type: 'SET_ERROR', payload: errorPayload || '编辑失败' });
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string };
-      const responseErrorText = serializeError(axiosErr.response?.data) || '';
+      const responseData = axiosErr.response?.data as {
+        message?: string;
+        error?: string;
+        errorCode?: string;
+      } | undefined;
+      const responseErrorText = responseData?.message || responseData?.error || serializeError(responseData) || '';
       if (axiosErr.response?.status === 401 || axiosErr.response?.status === 403) {
-        if (responseErrorText.includes('API Key') || responseErrorText.includes('Key')) {
+        if (responseData?.errorCode || responseErrorText.includes('API Key') || responseErrorText.includes('Key')) {
           dispatch({ type: 'SET_ERROR', payload: 'API Key 无效或已过期' });
         } else {
           dispatch({ type: 'SET_ERROR', payload: '登录已过期，请重新登录' });
         }
       } else if (axiosErr.response?.status === 429) {
         dispatch({ type: 'SET_ERROR', payload: '该 API 额度已用尽，请切换 Provider 或稍后重试' });
-      } else if (axiosErr.response?.data) {
-        dispatch({ type: 'SET_ERROR', payload: serializeError(axiosErr.response.data) });
+      } else if (responseErrorText) {
+        dispatch({ type: 'SET_ERROR', payload: responseErrorText });
       } else {
         dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '网络错误，请检查连接后重试' });
       }
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [state.currentImage, state.currentMimeType, state.selectedModel, state.selectedProvider, state.history, state.referenceImages]);
+  }, [ephemeralProvider, state.currentImage, state.currentMimeType, state.selectedModel, state.selectedProvider, state.history, state.referenceImages]);
 
   const restoreFromHistory = useCallback((entry: HistoryEntry, index: number) => {
     dispatch({

@@ -1,6 +1,7 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
 import sharp from 'sharp';
+import { redactString } from '../../security/redaction.js';
 
 const SEEDREAM_API_BASE = 'https://ark.cn-beijing.volces.com/api/v3';
 // Vercel maxDuration = 90s，超时阈值必须 < 90s 才能保证我们抛出友好错误而非被 Vercel 网关杀成空 504
@@ -143,7 +144,7 @@ export class SeedreamProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Seedream API error:', response.status, errorText);
+      console.error('Seedream API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

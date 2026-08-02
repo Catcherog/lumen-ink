@@ -1,5 +1,21 @@
 export type ProviderType = 'openai' | 'glm' | 'gemini' | 'seedream' | 'jimeng' | 'custom';
 
+export type RuntimeMode = 'persistent' | 'ephemeral-demo';
+export type PersistenceMode = 'enabled' | 'disabled';
+export type AuthMode = 'password' | 'disabled';
+
+export interface PublicRuntimeConfig {
+  runtimeMode: RuntimeMode;
+  persistence: PersistenceMode;
+  auth: AuthMode;
+  features: {
+    authentication: boolean;
+    persistence: boolean;
+    cloudHistory: boolean;
+    manualDownload: boolean;
+  };
+}
+
 export interface ProviderConfig {
   id: string;
   name: string;
@@ -12,6 +28,13 @@ export interface ProviderConfig {
   hasApiKey?: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Request-scoped BYO provider input accepted only by explicit ephemeral-demo. */
+export interface EphemeralProviderConfig {
+  type: Extract<ProviderType, 'openai' | 'glm' | 'gemini' | 'seedream'>;
+  apiKey: string;
+  defaultModel: string;
 }
 
 export interface ProviderModel {
@@ -37,6 +60,8 @@ export interface EditRequest {
   }>;
   model?: string;
   providerId?: string;
+  /** Request-scoped BYO provider; never persisted or accepted in persistent mode. */
+  provider?: EphemeralProviderConfig;
   history?: ConversationTurn[];
   // 可选：区域信息（用于穿帮修复/路人去除）
   regions?: Region[];
