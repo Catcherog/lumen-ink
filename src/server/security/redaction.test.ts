@@ -95,6 +95,26 @@ describe('redactError (D-034 internal security floor)', () => {
     expect(result.publicMessage).toBe('处理请求时发生未知错误');
   });
 
+  it('returns stable public messages for ephemeral demo error codes', () => {
+    const expected: Record<string, string> = {
+      PROVIDER_KEY_MISSING: '请先配置当前会话的 API Key',
+      PROVIDER_AUTH_FAILED: 'API Key 无效或已过期',
+      PROVIDER_MODEL_FORBIDDEN: '当前模型或 Endpoint 没有权限',
+      PROVIDER_RATE_LIMITED: 'Provider 请求受限，请稍后重试',
+      PROVIDER_UNAVAILABLE: 'Provider 服务暂时不可用，请稍后重试',
+      PROVIDER_NETWORK: '无法连接 Provider 服务，请检查网络后重试',
+      EDIT_INPUT_INVALID: '编辑输入无效，请检查图片和参数',
+      EDIT_IMAGE_TOO_LARGE: '图片过大，请压缩后重试',
+      EDIT_RESPONSE_INVALID: 'Provider 返回了无法识别的结果',
+      AUTH_DISABLED_IN_EPHEMERAL_MODE: '临时展示模式不启用登录',
+      PERSISTENCE_DISABLED: '临时展示模式不保存项目或历史',
+    };
+
+    for (const [errorCode, message] of Object.entries(expected)) {
+      expect(redactError(new Error(errorCode), { errorCode }).publicMessage).toBe(message);
+    }
+  });
+
   it('redacts apiKey fields in nested error.response.data', () => {
     const error = new Error('upstream failure') as Error & {
       response?: { status?: number; data?: unknown };

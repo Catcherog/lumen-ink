@@ -5,9 +5,11 @@
  *  1. Load `.env` (local dev only; Vercel injects env vars directly).
  *  2. `loadRuntimeConfig()` — fails fast in deployed mode if any required
  *     secret is missing or weak. Never assigns default secrets to process.env.
- *  3. Configure `providerStore` with the injected encryption key and mode.
- *  4. Build persistence adapter + throttle from the frozen contracts.
- *  5. Wire CORS allowlist, auth middleware, auth router with throttle.
+ *  3. In persistent mode only, configure ProviderStore and build CloudBase/
+ *     local persistence, worker, services, and auth throttle.
+ *  4. In ephemeral-demo mode, wire only request-scoped editing and public
+ *     runtime/auth-disabled routes.
+ *  5. Wire the exact-origin CORS allowlist.
  */
 
 import express from 'express';
@@ -23,10 +25,14 @@ import detectRouter from './routes/detect.js';
 import { createProjectsRouter } from './routes/projects.js';
 import { createJobsRouter } from './routes/jobs.js';
 import { createWorkerRouter } from './routes/worker.js';
+import { createRuntimeRouter } from './routes/runtime.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
 import { getProvider } from './services/providers/ProviderFactory.js';
-import { selectPersistenceByEnv, type CloudBasePersistenceDeps } from './infrastructure/persistence/index.js';
+import {
+  selectPersistenceByEnv,
+  type CloudBasePersistenceDeps,
+} from './infrastructure/persistence/index.js';
 import {
   createLocalJobExecutor,
   createWorkerJobExecutor,
@@ -36,7 +42,12 @@ import { ProjectService } from './services/ProjectService.js';
 import { GenerationService } from './services/GenerationService.js';
 import { loadRuntimeConfig } from './config/runtime.js';
 import { createAuthThrottle } from './security/authThrottle.js';
-import type { GenerationJob, JobExecutor } from './domain/persistence.js';
+import { toPublicRuntimeConfig } from './config/runtime.js';
+import type {
+  GenerationJob,
+  JobExecutor,
+  PersistenceDependencies,
+} from './domain/persistence.js';
 
 /**
  * PERSIST-001 P0-01: production providerFactory for the worker executor.
@@ -115,52 +126,75 @@ dotenv.config();
 // default secrets to process.env — local mode uses safe defaults internally.
 const runtimeConfig = loadRuntimeConfig();
 
-// Configure ProviderStore with injected encryption key and mode flag. In
-// deployed mode this switches to env-managed (no filesystem reads/writes).
-providerStore.configure({
-  isDeployed: runtimeConfig.providerEnvManaged,
-  providerEncryptionKey: runtimeConfig.providerEncryptionKey,
-});
-
-if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
-  console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
-}
-
-// PERSIST-001 P0-01: select persistence adapter by deployment mode.
-// Deployed mode (VERCEL=1) uses CloudBase PostgreSQL + PG Storage with
-// fail-fast config validation. Local mode uses the file-backed adapter.
-const persistenceDeps = selectPersistenceByEnv();
-
-// In deployed mode, the CloudBase adapter must be initialized before any
-// method is invoked. Top-level await is safe in ESM and runs once per cold
-// start. If ensureReady() throws, the boot fails fast with a stable error.
-if (runtimeConfig.isDeployed) {
-  const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
-  await cloudBaseDeps.ensureReady();
-}
-
-// PERSIST-001 P0-01: in deployed mode, use the real worker executor that
-// actually invokes GenerationService.executeJob (with polling + sweeper
-// recovery). In local/dev mode, the local no-op executor is sufficient —
-// Jobs are executed manually in tests or via the legacy /api/edit path.
+// The ephemeral branch must not select a persistence adapter, configure the
+// ProviderStore, initialize a worker, or construct the durable auth throttle.
+// This is deliberately an explicit branch rather than a global fail-open
+// fallback: persistent mode keeps its existing fail-fast behavior.
+let persistenceDeps: PersistenceDependencies | null = null;
 let workerExecutor: WorkerExecutor | null = null;
-let jobExecutor: JobExecutor;
-if (runtimeConfig.isDeployed) {
-  workerExecutor = createWorkerJobExecutor({
-    deps: persistenceDeps,
-    providerFactory: productionProviderFactory,
-    pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 100),
-    leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
-    sweeperIntervalMs: Number(process.env.WORKER_SWEEPER_INTERVAL_MS ?? 500),
-  });
-  jobExecutor = workerExecutor.executor;
-  workerExecutor.start();
-} else {
-  jobExecutor = createLocalJobExecutor();
-}
+let projectService: ProjectService | null = null;
+let generationService: GenerationService | null = null;
+let authThrottle: ReturnType<typeof createAuthThrottle> | null = null;
 
-const projectService = new ProjectService(persistenceDeps, jobExecutor);
-const generationService = new GenerationService(persistenceDeps, jobExecutor);
+if (runtimeConfig.persistence === 'enabled') {
+  // Configure ProviderStore with injected encryption key and mode flag. In
+  // deployed mode this switches to env-managed (no filesystem writes).
+  providerStore.configure({
+    isDeployed: runtimeConfig.providerEnvManaged,
+    providerEncryptionKey: runtimeConfig.providerEncryptionKey,
+  });
+
+  if (
+    !runtimeConfig.isDeployed &&
+    !process.env.SEEDREAM_API_KEY &&
+    !process.env.DEFAULT_PROVIDER_ID
+  ) {
+    console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
+  }
+
+  // PERSIST-001 P0-01: select persistence adapter by deployment mode.
+  // Deployed mode (VERCEL=1) uses CloudBase PostgreSQL + PG Storage with
+  // fail-fast config validation. Local mode uses the file-backed adapter.
+  persistenceDeps = selectPersistenceByEnv();
+
+  // In deployed mode, the CloudBase adapter must be initialized before any
+  // method is invoked. Top-level await is safe in ESM and runs once per cold
+  // start. If ensureReady() throws, the boot fails fast with a stable error.
+  if (runtimeConfig.isDeployed) {
+    const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
+    await cloudBaseDeps.ensureReady();
+  }
+
+  // PERSIST-001 P0-01: in deployed mode, use the real worker executor that
+  // actually invokes GenerationService.executeJob (with polling + sweeper
+  // recovery). In local/dev mode, the local no-op executor is sufficient —
+  // Jobs are executed manually in tests or via the legacy /api/edit path.
+  let jobExecutor: JobExecutor;
+  if (runtimeConfig.isDeployed) {
+    workerExecutor = createWorkerJobExecutor({
+      deps: persistenceDeps,
+      providerFactory: productionProviderFactory,
+      pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 100),
+      leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+      sweeperIntervalMs: Number(process.env.WORKER_SWEEPER_INTERVAL_MS ?? 500),
+    });
+    jobExecutor = workerExecutor.executor;
+    workerExecutor.start();
+  } else {
+    jobExecutor = createLocalJobExecutor();
+  }
+
+  projectService = new ProjectService(persistenceDeps, jobExecutor);
+  generationService = new GenerationService(persistenceDeps, jobExecutor);
+
+  // D-034: Durable login throttle backed by the frozen AuthThrottleRepository.
+  authThrottle = createAuthThrottle({
+    repo: persistenceDeps.authThrottle,
+    jwtSecret: runtimeConfig.jwtSecret,
+    windowMs: runtimeConfig.loginWindowMs,
+    maxFailures: 5,
+  });
+}
 
 // Graceful shutdown: stop the worker timers so the process can exit cleanly.
 if (workerExecutor) {
@@ -174,14 +208,6 @@ if (workerExecutor) {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }
-
-// D-034: Durable login throttle backed by the frozen AuthThrottleRepository.
-const authThrottle = createAuthThrottle({
-  repo: persistenceDeps.authThrottle,
-  jwtSecret: runtimeConfig.jwtSecret,
-  windowMs: runtimeConfig.loginWindowMs,
-  maxFailures: 5,
-});
 
 const app = express();
 
@@ -209,45 +235,81 @@ app.use(
 );
 app.use(express.json({ limit: runtimeConfig.maxUploadBytes }));
 
-// D-034 Task 7: Health endpoint returns ONLY {"status":"ok"}.
-// No environment-variable presence, Provider names/configuration, model
-// names, default flags, or key presence. Internal diagnostics should
-// use authenticated admin endpoints or server logs — never the public
-// health probe.
+// Public health/runtime probes expose only the non-secret runtime feature
+// descriptor. They never include environment-variable presence, Provider
+// configuration, model names, or key presence.
+app.use('/api/runtime', createRuntimeRouter(runtimeConfig));
+
 app.get('/api/health', (_req, res) => {
+  if (runtimeConfig.runtimeMode === 'ephemeral-demo') {
+    res.json({ status: 'ok', ...toPublicRuntimeConfig(runtimeConfig) });
+    return;
+  }
+  // Preserve the existing minimal persistent health contract. Clients that
+  // need feature flags use /api/runtime instead.
   res.json({ status: 'ok' });
 });
 
 // Auth router does NOT use authMiddleware (it issues tokens, not verifies them).
-app.use('/api/auth', createAuthRouter({ config: runtimeConfig, throttle: authThrottle }));
-
-// All routes below require a valid JWT.
-const authMiddleware = createAuthMiddleware({
-  authPassword: runtimeConfig.authPassword,
-  jwtSecret: runtimeConfig.jwtSecret,
-});
-
-app.use('/api/providers', authMiddleware, providersRouter);
-app.use('/api/edit', authMiddleware, createEditRouter(generationService));
-app.use('/api/detect', authMiddleware, detectRouter);
+// In ephemeral-demo mode this is a fast 409 and does not construct or invoke a
+// throttle. Persistent mode retains the durable throttle-backed login route.
 app.use(
-  '/api/projects',
-  authMiddleware,
-  createProjectsRouter({ projectService, generationService })
-);
-app.use('/api/jobs', authMiddleware, createJobsRouter(generationService));
-
-// PERSIST-001 P0-01C: explicit worker-recovery endpoint for Vercel Cron.
-// Auth uses CRON_SECRET bearer token, NOT the user JWT middleware, because
-// cron ticks have no user session. Disabled (503) when CRON_SECRET is unset.
-app.use(
-  '/api/worker',
-  createWorkerRouter({
-    deps: persistenceDeps,
-    providerFactory: productionProviderFactory,
-    leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+  '/api/auth',
+  createAuthRouter({
+    config: runtimeConfig,
+    ...(authThrottle ? { throttle: authThrottle } : {}),
   })
 );
+
+if (runtimeConfig.persistence === 'enabled') {
+  if (!persistenceDeps || !projectService || !generationService || !authThrottle) {
+    throw new Error('PERSISTENCE_BOOT_INCOMPLETE');
+  }
+
+  // All persistent routes below require a valid JWT.
+  const authMiddleware = createAuthMiddleware({
+    authPassword: runtimeConfig.authPassword,
+    jwtSecret: runtimeConfig.jwtSecret,
+  });
+
+  app.use('/api/providers', authMiddleware, providersRouter);
+  app.use('/api/edit', authMiddleware, createEditRouter(generationService));
+  app.use('/api/detect', authMiddleware, detectRouter);
+  app.use(
+    '/api/projects',
+    authMiddleware,
+    createProjectsRouter({ projectService, generationService })
+  );
+  app.use('/api/jobs', authMiddleware, createJobsRouter(generationService));
+
+  // PERSIST-001 P0-01C: explicit worker-recovery endpoint for Vercel Cron.
+  // Auth uses CRON_SECRET bearer token, NOT the user JWT middleware, because
+  // cron ticks have no user session. Disabled (503) when CRON_SECRET is unset.
+  app.use(
+    '/api/worker',
+    createWorkerRouter({
+      deps: persistenceDeps,
+      providerFactory: productionProviderFactory,
+      leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+    })
+  );
+} else {
+  const persistenceDisabled = (_req: express.Request, res: express.Response) => {
+    res.status(409).json({
+      success: false,
+      errorCode: 'PERSISTENCE_DISABLED',
+      message: '临时展示模式不保存项目或历史',
+    });
+  };
+
+  // Provider settings are request-scoped in ephemeral-demo. The durable
+  // ProviderStore and all project/history/job routes stay unreachable.
+  app.use('/api/providers', persistenceDisabled);
+  app.use(
+    '/api/edit',
+    createEditRouter(undefined, { runtimeMode: runtimeConfig.runtimeMode })
+  );
+}
 
 const publicDir = path.join(__dirname, 'public');
 if (fs.existsSync(publicDir)) {
@@ -268,6 +330,30 @@ if (fs.existsSync(publicDir)) {
 
 app.use((req, res) => {
   res.status(404).json({ error: `Cannot ${req.method} ${req.path}` });
+});
+
+// Convert CORS/parser failures into stable public responses. The raw Express
+// error is never returned, so rejected origins and oversized bodies cannot
+// expose stack traces or implementation details.
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const err = error as { message?: string; type?: string };
+  if (err?.message === 'Not allowed by CORS') {
+    res.status(403).json({
+      success: false,
+      errorCode: 'CORS_ORIGIN_NOT_ALLOWED',
+      message: '请求来源不在允许列表中',
+    });
+    return;
+  }
+  if (err?.type === 'entity.too.large') {
+    res.status(413).json({
+      success: false,
+      errorCode: 'EDIT_IMAGE_TOO_LARGE',
+      message: '图片过大，请压缩后重试',
+    });
+    return;
+  }
+  next(error);
 });
 
 export default app;

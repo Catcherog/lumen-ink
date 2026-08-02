@@ -13,7 +13,7 @@ interface EditorHeaderProps {
   projectName: string;
   darkMode: boolean;
   onToggleTheme: () => void;
-  onLogout: () => void;
+  onLogout?: () => void;
   onCompare?: () => void;
   onExport?: () => void;
   onSettings?: () => void;
@@ -128,14 +128,16 @@ export default function EditorHeader({
           {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
 
-        <button
-          type="button"
-          onClick={onLogout}
-          title="退出登录"
-          className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-        >
-          <LogOut className="w-5 h-5" />
-        </button>
+        {onLogout && (
+          <button
+            type="button"
+            onClick={onLogout}
+            title="退出登录"
+            className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        )}
       </div>
     </header>
   );

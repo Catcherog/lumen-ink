@@ -16,6 +16,21 @@
 - **提示词模板库**：按工具过滤，一键填入参数面板。
 - **操作历史**：每步编辑生成历史节点，保存到 localStorage，支持回退。
 
+## 公开临时展示模式
+
+如果目标是让访客直接体验编辑，而不是提供项目协作或云端资产管理，可显式启用：
+
+```env
+LUMEN_RUNTIME_MODE=ephemeral-demo
+PERSISTENCE_BACKEND=disabled
+AUTH_MODE=disabled
+CORS_ALLOWLIST=https://your-public-domain.example
+```
+
+该模式会在启动时跳过 CloudBase、ProviderStore、项目/历史/任务持久化和认证限流；`/api/runtime` 会公开非敏感的功能描述，前端不会显示登录、项目、历史导入或云端版本 UI。访客在“临时编辑设置”中选择受支持的 Provider、模型并输入自己的 API Key，Key 只在当前页面内存中使用，不写入 localStorage、数据库或服务端配置。编辑结果通过“下载结果”保存到本地。
+
+部署时必须配置明确的 `CORS_ALLOWLIST`，不允许使用 `*`。该模式仍然是 BYO Key 的公开演示，不代表平台替用户承担 Provider 费用、认证、限流或结果持久化。
+
 ## 环境要求
 
 - Node.js 18+
