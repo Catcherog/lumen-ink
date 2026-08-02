@@ -21,5 +21,5 @@ Detailed command output is recorded in `docs/lumen-v2/evidence/LUMEN-EPHEMERAL-D
 ## Not verified
 
 - No real Provider API call was made.
-- No Vercel deployment, public HTTP check, DNS/TLS check, CloudBase connection, production write, merge, or push was performed as part of implementation.
+- No Vercel deployment, public HTTP check, DNS/TLS check, CloudBase connection, production write, or merge was performed. The verified branch was pushed only to open Draft PR #6.
 - Browser E2E against a deployed public origin remains a follow-up acceptance boundary.

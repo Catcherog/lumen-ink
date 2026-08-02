@@ -25,4 +25,4 @@ No real Provider or production service write is part of these gates.
 ## Boundary notes
 
 - The frozen repository `STATE.json` still tracks `LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01`; this branch adds an independent task card and does not alter that task's state machine.
-- No Vercel deployment, public URL, real Provider request, CloudBase connection, merge, or push was performed.
+- No Vercel deployment, public URL, real Provider request, CloudBase connection, production write, or merge was performed. The verified branch was pushed only to Draft PR #6.
