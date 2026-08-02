@@ -147,7 +147,10 @@ export class SeedreamProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Seedream API error:', response.status, errorText);
+      // Upstream bodies can echo request credentials or image payloads. Keep
+      // the log at the stable transport boundary; route-level redaction owns
+      // the user-facing diagnostic.
+      console.error('Seedream API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

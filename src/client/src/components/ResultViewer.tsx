@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { downloadImage, validateImageFile, fileToBase64 } from '../utils/image';
+import { downloadImage, downloadImageUrl, validateImageFile, fileToBase64 } from '../utils/image';
 import ImageUploader from './ImageUploader';
 import {
   Eye,
@@ -75,6 +75,7 @@ export default function ResultViewer({
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragOver, setIsDragOver] = useState(false);
   const [imageMenu, setImageMenu] = useState<{ x: number; y: number } | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -168,11 +169,15 @@ export default function ResultViewer({
   }, []);
 
   const handleDownload = () => {
+    setDownloadError(null);
     if (resultImage) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       downloadImage(resultImage, resultMimeType, `glm-edit-${timestamp}.png`);
     } else if (resultImageUrl) {
-      window.open(resultImageUrl, '_blank');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      void downloadImageUrl(resultImageUrl, `glm-edit-${timestamp}.png`).catch(() => {
+        setDownloadError('结果下载失败，请稍后重试');
+      });
     }
   };
 
@@ -389,11 +394,11 @@ export default function ResultViewer({
           {hasResult && (resultImage || resultImageUrl) && (
             <button
               onClick={handleDownload}
-              title={resultImageUrl ? '查看原图' : '下载结果'}
+              title="下载结果"
               className="flex-shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{resultImageUrl ? '查看原图' : '下载结果'}</span>
+              <span className="hidden sm:inline">下载结果</span>
             </button>
           )}
           {lastCallMeta && (
@@ -403,6 +408,12 @@ export default function ResultViewer({
           )}
         </div>
       </div>
+
+      {downloadError && (
+        <div className="px-3 py-1.5 text-xs text-red-600 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-900/40">
+          {downloadError}
+        </div>
+      )}
 
       {/* Canvas */}
       <div

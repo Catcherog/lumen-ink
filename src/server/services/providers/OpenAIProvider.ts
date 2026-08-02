@@ -103,7 +103,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Image API error:', response.status, errorText);
+      console.error('OpenAI Image API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -157,7 +157,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Edit API error:', response.status, errorText);
+      console.error('OpenAI Edit API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -246,7 +246,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Chat API error:', response.status, errorText);
+      console.error('OpenAI Chat API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

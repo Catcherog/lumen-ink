@@ -98,7 +98,7 @@ export class GeminiProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gemini API error:', response.status, errorText);
+      console.error('Gemini API error:', response.status);
       let errorMessage = `Gemini API 错误: ${response.status}`;
       let isApiKeyError = false;
       try {

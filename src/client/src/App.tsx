@@ -7,12 +7,20 @@ import ParamPanel from './components/ParamPanel';
 import ResultViewer from './components/ResultViewer';
 import ApiSettingsButton from './components/ApiSettingsButton';
 import ApiSettingsModal from './components/ApiSettingsModal';
+import EphemeralProviderSettings from './components/EphemeralProviderSettings';
 import ManualWorkflowDialog from './components/ManualWorkflowDialog';
 import useEditor from './hooks/useEditor';
 import { serializeError } from './utils/error';
 import type { ProviderConfig } from '../../shared/types';
 import { PROVIDER_MODELS } from '../../shared/types';
 import type { ProviderModelOption } from '../../shared/types';
+import type { EphemeralProviderConfig } from '../../shared/types';
+import {
+  DEFAULT_EPHEMERAL_PROVIDER,
+  isEphemeralDemo,
+  toEphemeralProviderView,
+  type ClientRuntimeConfig,
+} from './runtime';
 import { Sun, Moon, LogOut, PanelRightOpen, PanelRightClose, Image as ImageIcon } from 'lucide-react';
 
 const CAPABILITY_ICONS: Record<string, string> = {
@@ -29,14 +37,20 @@ function formatModelLabel(model: ProviderModelOption): string {
   return `${model.label} ${icons}`.trim();
 }
 
-export default function App() {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
+export default function App({ runtimeConfig }: { runtimeConfig?: ClientRuntimeConfig }) {
+  const ephemeralDemo = isEphemeralDemo(runtimeConfig);
+  const [token, setToken] = useState<string | null>(() => (
+    ephemeralDemo ? null : localStorage.getItem('auth_token')
+  ));
   const [darkMode, setDarkMode] = useState(false);
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [showMobileRightPanel, setShowMobileRightPanel] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [templatePrompt, setTemplatePrompt] = useState<string | undefined>(undefined);
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [ephemeralProvider, setEphemeralProvider] = useState<EphemeralProviderConfig>(DEFAULT_EPHEMERAL_PROVIDER);
+  const [providers, setProviders] = useState<ProviderConfig[]>(() => (
+    ephemeralDemo ? [toEphemeralProviderView(DEFAULT_EPHEMERAL_PROVIDER)] : []
+  ));
   const [manualWorkflowOpen, setManualWorkflowOpen] = useState(false);
   const [promptInput, setPromptInput] = useState('');
 
@@ -53,7 +67,10 @@ export default function App() {
     setModel,
     setShowApiSettings,
     importExternalResult,
-  } = useEditor();
+  } = useEditor({
+    persistHistory: !ephemeralDemo,
+    ephemeralProvider: ephemeralDemo ? ephemeralProvider : undefined,
+  });
 
   const handlePromptChange = useCallback((value: string) => {
     setPromptInput(value);
@@ -102,7 +119,7 @@ export default function App() {
   }, [token]);
 
   const loadProviders = useCallback(async () => {
-    if (!token) return;
+    if (ephemeralDemo || !token) return;
     try {
       const res = await axios.get('/api/providers');
       const list = Array.isArray(res.data) ? res.data : [];
@@ -110,10 +127,10 @@ export default function App() {
     } catch (err: unknown) {
       dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
     }
-  }, [token, dispatch]);
+  }, [ephemeralDemo, token, dispatch]);
 
   useEffect(() => {
-    if (!token) return;
+    if (ephemeralDemo || !token) return;
     let cancelled = false;
     (async () => {
       try {
@@ -126,7 +143,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, dispatch]);
+  }, [ephemeralDemo, token, dispatch]);
 
   const prevShowApiSettings = useRef(state.showApiSettings);
   useEffect(() => {
@@ -135,6 +152,17 @@ export default function App() {
     }
     prevShowApiSettings.current = state.showApiSettings;
   }, [state.showApiSettings, loadProviders]);
+
+  useEffect(() => {
+    if (!ephemeralDemo) return;
+    setProviders([toEphemeralProviderView(ephemeralProvider)]);
+    if (state.selectedProvider !== 'ephemeral-byo') {
+      setProvider('ephemeral-byo');
+    }
+    if (state.selectedModel !== ephemeralProvider.defaultModel) {
+      setModel(ephemeralProvider.defaultModel);
+    }
+  }, [ephemeralDemo, ephemeralProvider, state.selectedModel, state.selectedProvider, setModel, setProvider]);
 
   // Auto-select default/first enabled provider when list or selection changes
   const prevDefaultRef = useRef<string | null>(null);
@@ -207,7 +235,7 @@ export default function App() {
   };
 
   // Not logged in — show login page
-  if (!token) {
+  if (!ephemeralDemo && !token) {
     return <LoginPage onLogin={handleLogin} />;
   }
 
@@ -282,15 +310,23 @@ export default function App() {
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
 
-              <button
-                onClick={handleLogout}
-                title="退出登录"
-                className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
+              {!ephemeralDemo && (
+                <button
+                  onClick={handleLogout}
+                  title="退出登录"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              )}
             </div>
           </header>
+
+          {ephemeralDemo && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+              临时展示模式：不登录、不保存项目或历史。请先在设置中输入自己的 Provider Key，结果可手动下载。
+            </div>
+          )}
 
           {/* Main workspace */}
           <div className="flex flex-1 overflow-hidden min-h-0">
@@ -354,9 +390,9 @@ export default function App() {
                         dispatch={dispatch}
                         onSubmit={submitEdit}
                         onSelectTemplate={handleSelectTemplate}
-                        onRestoreHistory={restoreFromHistory}
-                        onViewHistory={viewHistory}
-                        onDeleteHistory={deleteHistory}
+                         onRestoreHistory={ephemeralDemo ? undefined : restoreFromHistory}
+                         onViewHistory={ephemeralDemo ? undefined : viewHistory}
+                         onDeleteHistory={ephemeralDemo ? undefined : deleteHistory}
                         externalPrompt={templatePrompt}
                         onPromptConsumed={handlePromptConsumed}
                         onPromptChange={handlePromptChange}
@@ -375,9 +411,9 @@ export default function App() {
                 dispatch={dispatch}
                 onSubmit={submitEdit}
                 onSelectTemplate={handleSelectTemplate}
-                onRestoreHistory={restoreFromHistory}
-                onViewHistory={viewHistory}
-                onDeleteHistory={deleteHistory}
+                onRestoreHistory={ephemeralDemo ? undefined : restoreFromHistory}
+                onViewHistory={ephemeralDemo ? undefined : viewHistory}
+                onDeleteHistory={ephemeralDemo ? undefined : deleteHistory}
                 externalPrompt={templatePrompt}
                 onPromptConsumed={handlePromptConsumed}
                 onPromptChange={handlePromptChange}
@@ -398,16 +434,25 @@ export default function App() {
         </div>
       </ErrorBoundary>
 
-      <ApiSettingsModal
-        isOpen={state.showApiSettings}
-        onClose={() => setShowApiSettings(false)}
-        onProvidersChanged={(savedProviderId?: string) => {
-          loadProviders();
-          if (savedProviderId) {
-            setProvider(savedProviderId);
-          }
-        }}
-      />
+      {ephemeralDemo ? (
+        <EphemeralProviderSettings
+          isOpen={state.showApiSettings}
+          value={ephemeralProvider}
+          onChange={setEphemeralProvider}
+          onClose={() => setShowApiSettings(false)}
+        />
+      ) : (
+        <ApiSettingsModal
+          isOpen={state.showApiSettings}
+          onClose={() => setShowApiSettings(false)}
+          onProvidersChanged={(savedProviderId?: string) => {
+            loadProviders();
+            if (savedProviderId) {
+              setProvider(savedProviderId);
+            }
+          }}
+        />
+      )}
 
       <ManualWorkflowDialog
         isOpen={manualWorkflowOpen}

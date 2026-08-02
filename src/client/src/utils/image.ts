@@ -46,3 +46,27 @@ export function downloadImage(base64: string, mimeType: string, filename: string
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Download a Provider-hosted result into the browser's download flow.
+ * Opening the URL directly is unreliable for signed URLs and can turn a
+ * result into a navigation instead of a user-owned file.
+ */
+export async function downloadImageUrl(url: string, filename: string): Promise<void> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error('DOWNLOAD_FAILED');
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

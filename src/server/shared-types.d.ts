@@ -7,6 +7,22 @@
 
 export type ProviderType = 'openai' | 'glm' | 'gemini' | 'seedream' | 'jimeng' | 'custom';
 
+export type RuntimeMode = 'persistent' | 'ephemeral-demo';
+export type PersistenceMode = 'enabled' | 'disabled';
+export type AuthMode = 'password' | 'disabled';
+
+export interface PublicRuntimeConfig {
+  runtimeMode: RuntimeMode;
+  persistence: PersistenceMode;
+  auth: AuthMode;
+  features: {
+    authentication: boolean;
+    persistence: boolean;
+    cloudHistory: boolean;
+    manualDownload: boolean;
+  };
+}
+
 export interface ProviderConfig {
   id: string;
   name: string;
@@ -19,6 +35,12 @@ export interface ProviderConfig {
   hasApiKey?: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface EphemeralProviderConfig {
+  type: Extract<ProviderType, 'openai' | 'glm' | 'gemini' | 'seedream'>;
+  apiKey: string;
+  defaultModel: string;
 }
 
 export interface ProviderModel {
@@ -44,6 +66,7 @@ export interface EditRequest {
   }>;
   model?: string;
   providerId?: string;
+  provider?: EphemeralProviderConfig;
   history?: Array<{
     role: 'user' | 'assistant';
     content: string | Array<{

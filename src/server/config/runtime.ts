@@ -6,7 +6,7 @@
  * NEVER assigns default secrets to `process.env`; defaults are only used in
  * local/test mode.
  *
- * Required in deployed mode:
+ * Required in deployed persistent mode:
  *  - AUTH_PASSWORD (>= 12 chars)
  *  - JWT_SECRET (>= 32 chars)
  *  - PROVIDER_ENCRYPTION_KEY (>= 32 chars)
@@ -19,6 +19,12 @@
  */
 
 export interface RuntimeConfig {
+  /** Explicit runtime branch. The default is persistent for compatibility. */
+  runtimeMode: import('shared/types.js').RuntimeMode;
+  /** Whether durable persistence services are available to the app. */
+  persistence: import('shared/types.js').PersistenceMode;
+  /** Whether password/JWT authentication is available to the app. */
+  authMode: import('shared/types.js').AuthMode;
   /** True when running on Vercel or with NODE_ENV=production. */
   isDeployed: boolean;
   /** True when Provider create/update/delete routes must return 403. */
@@ -59,11 +65,65 @@ export type EnvSource = Record<string, string | undefined>;
  */
 export function loadRuntimeConfig(env: EnvSource = process.env): RuntimeConfig {
   const isDeployed = env.VERCEL === '1' || env.NODE_ENV === 'production';
+  const runtimeMode = parseRuntimeMode(env.LUMEN_RUNTIME_MODE);
+
+  if (runtimeMode === 'ephemeral-demo') {
+    return loadEphemeralConfig(env, isDeployed);
+  }
 
   if (isDeployed) {
     return loadDeployedConfig(env);
   }
   return loadLocalConfig(env);
+}
+
+function parseRuntimeMode(raw: string | undefined): RuntimeConfig['runtimeMode'] {
+  if (!raw || raw === 'persistent') return 'persistent';
+  if (raw === 'ephemeral-demo') return 'ephemeral-demo';
+  throw new Error(
+    `LUMEN_RUNTIME_MODE_INVALID: ${raw}. Allowed: persistent | ephemeral-demo`
+  );
+}
+
+function assertEphemeralDisabledValue(
+  env: EnvSource,
+  key: 'PERSISTENCE_BACKEND' | 'AUTH_MODE',
+  expectedError: string
+): void {
+  const value = env[key];
+  if (value !== undefined && value !== '' && value !== 'disabled') {
+    throw new Error(expectedError);
+  }
+}
+
+function loadEphemeralConfig(env: EnvSource, isDeployed: boolean): RuntimeConfig {
+  assertEphemeralDisabledValue(
+    env,
+    'PERSISTENCE_BACKEND',
+    'EPHEMERAL_PERSISTENCE_MUST_BE_DISABLED'
+  );
+  assertEphemeralDisabledValue(env, 'AUTH_MODE', 'EPHEMERAL_AUTH_MUST_BE_DISABLED');
+
+  const corsAllowlist = parseCorsAllowlist(env.CORS_ALLOWLIST);
+  if (isDeployed && corsAllowlist.length === 0) {
+    throw new Error('CORS_ALLOWLIST_REQUIRED');
+  }
+
+  return {
+    runtimeMode: 'ephemeral-demo',
+    persistence: 'disabled',
+    authMode: 'disabled',
+    isDeployed,
+    providerEnvManaged: false,
+    authPassword: '',
+    jwtSecret: '',
+    providerEncryptionKey: '',
+    corsAllowlist:
+      corsAllowlist.length > 0 ? corsAllowlist : LOCAL_DEFAULTS.corsAllowlist,
+    maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
+    maxImagePixels: DEFAULT_MAX_IMAGE_PIXELS,
+    loginWindowMs: DEFAULT_LOGIN_WINDOW_MS,
+  };
 }
 
 function loadDeployedConfig(env: EnvSource): RuntimeConfig {
@@ -108,6 +168,9 @@ function loadDeployedConfig(env: EnvSource): RuntimeConfig {
   }
 
   return {
+    runtimeMode: 'persistent',
+    persistence: 'enabled',
+    authMode: 'password',
     isDeployed: true,
     providerEnvManaged: true,
     authPassword,
@@ -123,6 +186,9 @@ function loadDeployedConfig(env: EnvSource): RuntimeConfig {
 function loadLocalConfig(env: EnvSource): RuntimeConfig {
   const corsAllowlist = parseCorsAllowlist(env.CORS_ALLOWLIST);
   return {
+    runtimeMode: 'persistent',
+    persistence: 'enabled',
+    authMode: 'password',
     isDeployed: false,
     providerEnvManaged: false,
     authPassword: env.AUTH_PASSWORD ?? LOCAL_DEFAULTS.authPassword,
@@ -134,6 +200,23 @@ function loadLocalConfig(env: EnvSource): RuntimeConfig {
     maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES,
     maxImagePixels: DEFAULT_MAX_IMAGE_PIXELS,
     loginWindowMs: DEFAULT_LOGIN_WINDOW_MS,
+  };
+}
+
+export function toPublicRuntimeConfig(
+  config: RuntimeConfig
+): import('shared/types.js').PublicRuntimeConfig {
+  const ephemeral = config.runtimeMode === 'ephemeral-demo';
+  return {
+    runtimeMode: config.runtimeMode,
+    persistence: config.persistence,
+    auth: config.authMode,
+    features: {
+      authentication: !ephemeral,
+      persistence: !ephemeral,
+      cloudHistory: !ephemeral,
+      manualDownload: true,
+    },
   };
 }
 

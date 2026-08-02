@@ -92,7 +92,7 @@ export class GLMProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('GLM Image API error:', response.status, errorText);
+      console.error('GLM Image API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -193,7 +193,7 @@ export class GLMProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('GLM Chat API error:', response.status, errorText);
+      console.error('GLM Chat API error:', response.status);
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

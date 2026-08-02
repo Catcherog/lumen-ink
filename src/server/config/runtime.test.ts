@@ -36,6 +36,48 @@ describe('loadRuntimeConfig (D-034 internal security floor)', () => {
   });
 
   describe('deployed mode (VERCEL=1 or NODE_ENV=production)', () => {
+    it('loads explicit ephemeral-demo mode without persistent secrets or CloudBase config', () => {
+      const cfg = loadRuntimeConfig({
+        VERCEL: '1',
+        VERCEL_ENV: 'production',
+        LUMEN_RUNTIME_MODE: 'ephemeral-demo',
+        PERSISTENCE_BACKEND: 'disabled',
+        AUTH_MODE: 'disabled',
+        CORS_ALLOWLIST: 'https://lumen-ink.vercel.app',
+      });
+
+      expect(cfg).toMatchObject({
+        runtimeMode: 'ephemeral-demo',
+        persistence: 'disabled',
+        authMode: 'disabled',
+        isDeployed: true,
+      });
+    });
+
+    it('rejects a persistent backend in explicit ephemeral-demo mode', () => {
+      expect(() =>
+        loadRuntimeConfig({
+          VERCEL: '1',
+          LUMEN_RUNTIME_MODE: 'ephemeral-demo',
+          PERSISTENCE_BACKEND: 'cloudbase-nosql',
+          AUTH_MODE: 'disabled',
+          CORS_ALLOWLIST: 'https://lumen-ink.vercel.app',
+        })
+      ).toThrow('EPHEMERAL_PERSISTENCE_MUST_BE_DISABLED');
+    });
+
+    it('rejects password auth in explicit ephemeral-demo mode', () => {
+      expect(() =>
+        loadRuntimeConfig({
+          VERCEL: '1',
+          LUMEN_RUNTIME_MODE: 'ephemeral-demo',
+          PERSISTENCE_BACKEND: 'disabled',
+          AUTH_MODE: 'password',
+          CORS_ALLOWLIST: 'https://lumen-ink.vercel.app',
+        })
+      ).toThrow('EPHEMERAL_AUTH_MUST_BE_DISABLED');
+    });
+
     it('rejects absent AUTH_PASSWORD', () => {
       expect(() => loadRuntimeConfig({ VERCEL: '1' })).toThrow('AUTH_PASSWORD_REQUIRED');
     });
@@ -123,6 +165,9 @@ describe('loadRuntimeConfig (D-034 internal security floor)', () => {
       expect(cfg.loginWindowMs).toBe(900000);
       expect(cfg.isDeployed).toBe(true);
       expect(cfg.providerEnvManaged).toBe(true);
+      expect(cfg.runtimeMode).toBe('persistent');
+      expect(cfg.persistence).toBe('enabled');
+      expect(cfg.authMode).toBe('password');
     });
 
     it('accepts NODE_ENV=production as deployed mode', () => {

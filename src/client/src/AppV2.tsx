@@ -4,6 +4,7 @@ import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import ResultViewer from './components/ResultViewer';
 import ApiSettingsModal from './components/ApiSettingsModal';
+import EphemeralProviderSettings from './components/EphemeralProviderSettings';
 import EditorHeader from './components/v2/EditorHeader';
 import TaskRail from './components/v2/TaskRail';
 import ContextPanel from './components/v2/ContextPanel';
@@ -13,11 +14,18 @@ import LegacyHistoryImport from './components/v2/LegacyHistoryImport';
 import useEditor from './hooks/useEditor';
 import { useProject } from './hooks/useProject';
 import { serializeError } from './utils/error';
-import { downloadImage } from './utils/image';
+import { downloadImage, downloadImageUrl } from './utils/image';
 import { defaultRecipeBook, compilePrompt } from './utils/recipe';
 import { createProject } from './api/projects';
 import type { ProviderConfig, V2TaskId, EditRecipe } from '../../shared/types';
+import type { EphemeralProviderConfig } from '../../shared/types';
 import type { UploadFn, ImportResult } from './utils/legacyHistory';
+import {
+  DEFAULT_EPHEMERAL_PROVIDER,
+  isEphemeralDemo,
+  toEphemeralProviderView,
+  type ClientRuntimeConfig,
+} from './runtime';
 
 type ViewMode = 'result' | 'original' | 'compare';
 
@@ -26,10 +34,16 @@ function stripExtension(name: string): string {
   return lastDot > 0 ? name.slice(0, lastDot) : name;
 }
 
-export default function AppV2() {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
+export default function AppV2({ runtimeConfig }: { runtimeConfig?: ClientRuntimeConfig }) {
+  const ephemeralDemo = isEphemeralDemo(runtimeConfig);
+  const [token, setToken] = useState<string | null>(() => (
+    ephemeralDemo ? null : localStorage.getItem('auth_token')
+  ));
   const [darkMode, setDarkMode] = useState(false);
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [ephemeralProvider, setEphemeralProvider] = useState<EphemeralProviderConfig>(DEFAULT_EPHEMERAL_PROVIDER);
+  const [providers, setProviders] = useState<ProviderConfig[]>(() => (
+    ephemeralDemo ? [toEphemeralProviderView(DEFAULT_EPHEMERAL_PROVIDER)] : []
+  ));
   const [projectName, setProjectName] = useState('未命名项目');
   const [viewMode, setViewMode] = useState<ViewMode>('result');
 
@@ -78,7 +92,10 @@ export default function AppV2() {
     setModel,
     setShowApiSettings,
     setReferenceImages,
-  } = useEditor();
+  } = useEditor({
+    persistHistory: !ephemeralDemo,
+    ephemeralProvider: ephemeralDemo ? ephemeralProvider : undefined,
+  });
 
   // Set axios default auth header when token changes + handle auth 401 globally
   useEffect(() => {
@@ -110,7 +127,7 @@ export default function AppV2() {
   }, [token]);
 
   const loadProviders = useCallback(async () => {
-    if (!token) return;
+    if (ephemeralDemo || !token) return;
     try {
       const res = await axios.get('/api/providers');
       const list = Array.isArray(res.data) ? res.data : [];
@@ -118,10 +135,10 @@ export default function AppV2() {
     } catch (err: unknown) {
       dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '加载 Provider 列表失败' });
     }
-  }, [token, dispatch]);
+  }, [ephemeralDemo, token, dispatch]);
 
   useEffect(() => {
-    if (!token) return;
+    if (ephemeralDemo || !token) return;
     let cancelled = false;
     (async () => {
       try {
@@ -134,7 +151,7 @@ export default function AppV2() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, dispatch]);
+  }, [ephemeralDemo, token, dispatch]);
 
   const prevShowApiSettings = useRef(state.showApiSettings);
   useEffect(() => {
@@ -143,6 +160,17 @@ export default function AppV2() {
     }
     prevShowApiSettings.current = state.showApiSettings;
   }, [state.showApiSettings, loadProviders]);
+
+  useEffect(() => {
+    if (!ephemeralDemo) return;
+    setProviders([toEphemeralProviderView(ephemeralProvider)]);
+    if (state.selectedProvider !== 'ephemeral-byo') {
+      setProvider('ephemeral-byo');
+    }
+    if (state.selectedModel !== ephemeralProvider.defaultModel) {
+      setModel(ephemeralProvider.defaultModel);
+    }
+  }, [ephemeralDemo, ephemeralProvider, state.selectedModel, state.selectedProvider, setModel, setProvider]);
 
   // Auto-select default/first enabled provider when list or selection changes
   const prevDefaultRef = useRef<string | null>(null);
@@ -193,11 +221,13 @@ export default function AppV2() {
 
   const handleImageUpload = useCallback(async (data: { base64: string; mimeType: string; file: File }) => {
     setProjectName(stripExtension(data.file.name) || '未命名项目');
+    uploadImage(data);
+    setViewedVersionId(null);
+    if (ephemeralDemo) return;
+
     // PERSIST-001: upload to server FIRST so the Project + V0 are durably
     // stored. The viewer continues to use the base64 from the file picker
     // for instant display (no fetch round-trip).
-    uploadImage(data);
-    setViewedVersionId(null);
     try {
       await project.upload(data.file, stripExtension(data.file.name) || '未命名项目');
     } catch (err) {
@@ -205,7 +235,7 @@ export default function AppV2() {
       // state so the user can retry. The error is already in project.error.
       dispatch({ type: 'SET_ERROR', payload: serializeError(err) || '项目上传失败' });
     }
-  }, [uploadImage, project, dispatch]);
+  }, [ephemeralDemo, uploadImage, project, dispatch]);
 
   // FLOW-001: Recipe 变更写回 recipeBook[activeTask]
   const handleRecipeChange = useCallback((next: EditRecipe) => {
@@ -222,8 +252,9 @@ export default function AppV2() {
   const handleGeneratePreview = useCallback(() => {
     const result = compilePrompt(currentRecipe);
 
-    // V2 path: server-backed Project exists
-    if (project.snapshot) {
+    // V2 path: server-backed Project exists. Ephemeral-demo never enters this
+    // branch, so no project/job endpoint can be reached from the public UI.
+    if (!ephemeralDemo && project.snapshot) {
       const idempotencyKey = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       void project.generate({
         prompt: result.prompt,
@@ -252,7 +283,7 @@ export default function AppV2() {
         ? state.referenceImages
         : undefined,
     });
-  }, [currentRecipe, submitEdit, state.currentImage, state.referenceImages, state.selectedProvider, state.selectedModel, dispatch, project]);
+  }, [currentRecipe, ephemeralDemo, submitEdit, state.currentImage, state.referenceImages, state.selectedProvider, state.selectedModel, dispatch, project]);
 
   // PERSIST-001: Viewer sync — when a V2 Job succeeds, the snapshot refreshes
   // with a new activeVersion. We auto-switch the viewer to the new Version's
@@ -260,6 +291,7 @@ export default function AppV2() {
   // Tracks the last synced resultVersionId to avoid re-dispatching on every render.
   const lastSyncedResultIdRef = useRef<string | null>(null);
   useEffect(() => {
+    if (ephemeralDemo) return;
     const job = project.activeJob;
     const snapshot = project.snapshot;
     if (!job || !snapshot) return;
@@ -284,7 +316,7 @@ export default function AppV2() {
         history: state.history, // preserve legacy history
       },
     });
-  }, [project.activeJob, project.snapshot, dispatch, state.history]);
+  }, [ephemeralDemo, project.activeJob, project.snapshot, dispatch, state.history]);
 
   // PERSIST-001: When the user clicks a Version chip, switch the viewer to
   // that Version's signed URL without dispatching SET_RESULT (which would
@@ -340,18 +372,21 @@ export default function AppV2() {
     setViewMode('compare');
   }, [canCompare]);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!canExport) return;
-    // 与 ResultViewer.handleDownload 同源：base64 走 downloadImage，URL 走新标签页
-    if (state.resultImage) {
+    try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      downloadImage(state.resultImage, state.resultMimeType, `lumen-ink-${timestamp}.png`);
-    } else if (state.resultImageUrl) {
-      window.open(state.resultImageUrl, '_blank');
+      if (state.resultImage) {
+        downloadImage(state.resultImage, state.resultMimeType, `lumen-ink-${timestamp}.png`);
+      } else if (state.resultImageUrl) {
+        await downloadImageUrl(state.resultImageUrl, `lumen-ink-${timestamp}.png`);
+      }
+    } catch {
+      dispatch({ type: 'SET_ERROR', payload: '结果下载失败，请稍后重试' });
     }
-  }, [canExport, state.resultImage, state.resultImageUrl, state.resultMimeType]);
+  }, [canExport, dispatch, state.resultImage, state.resultImageUrl, state.resultMimeType]);
 
-  if (!token) {
+  if (!ephemeralDemo && !token) {
     return <LoginPage onLogin={handleLogin} />;
   }
 
@@ -365,14 +400,20 @@ export default function AppV2() {
             projectName={displayProjectName}
             darkMode={darkMode}
             onToggleTheme={() => setDarkMode((v) => !v)}
-            onLogout={handleLogout}
+            onLogout={ephemeralDemo ? undefined : handleLogout}
             onSettings={() => setShowApiSettings(true)}
-            onImportLegacy={() => setLegacyImportOpen(true)}
+            onImportLegacy={ephemeralDemo ? undefined : () => setLegacyImportOpen(true)}
             onCompare={handleCompare}
             onExport={handleExport}
             canCompare={canCompare}
             canExport={canExport}
           />
+
+          {ephemeralDemo && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
+              临时展示模式：不登录、不保存项目或历史。请先在设置中输入自己的 Provider Key，结果可手动下载。
+            </div>
+          )}
 
           <div className="flex flex-1 min-h-0 overflow-hidden">
             <TaskRail
@@ -391,12 +432,13 @@ export default function AppV2() {
                 </div>
               )}
 
-              {/* PERSIST-001: Job status overlay — shown when a V2 Job is active */}
-              <JobStatusPanel
-                job={project.activeJob}
-                onCancel={handleCancelJob}
-                onRetry={handleRetryJob}
-              />
+              {!ephemeralDemo && (
+                <JobStatusPanel
+                  job={project.activeJob}
+                  onCancel={handleCancelJob}
+                  onRetry={handleRetryJob}
+                />
+              )}
 
               <ResultViewer
                 originalImage={state.originalImage}
@@ -422,35 +464,45 @@ export default function AppV2() {
               onSubmit={handleGeneratePreview}
               referenceImages={state.referenceImages}
               onReferenceImagesChange={setReferenceImages}
-              onRestoreHistory={restoreFromHistory}
-              onViewHistory={viewHistory}
-              onDeleteHistory={deleteHistory}
+              onRestoreHistory={ephemeralDemo ? undefined : restoreFromHistory}
+              onViewHistory={ephemeralDemo ? undefined : viewHistory}
+              onDeleteHistory={ephemeralDemo ? undefined : deleteHistory}
             />
           </div>
 
-          {/* PERSIST-001: Server-backed Version strip — replaces placeholder */}
-          <VersionStrip
-            snapshot={project.snapshot}
-            viewedVersionId={viewedVersionId}
-            onViewVersion={handleViewVersion}
-            onActivate={handleActivateVersion}
-            onApprove={handleApproveVersion}
-          />
+          {!ephemeralDemo && (
+            <VersionStrip
+              snapshot={project.snapshot}
+              viewedVersionId={viewedVersionId}
+              onViewVersion={handleViewVersion}
+              onActivate={handleActivateVersion}
+              onApprove={handleApproveVersion}
+            />
+          )}
         </div>
       </ErrorBoundary>
 
-      <ApiSettingsModal
-        isOpen={state.showApiSettings}
-        onClose={() => setShowApiSettings(false)}
-        onProvidersChanged={(savedProviderId?: string) => {
-          loadProviders();
-          if (savedProviderId) {
-            setProvider(savedProviderId);
-          }
-        }}
-      />
+      {ephemeralDemo ? (
+        <EphemeralProviderSettings
+          isOpen={state.showApiSettings}
+          value={ephemeralProvider}
+          onChange={setEphemeralProvider}
+          onClose={() => setShowApiSettings(false)}
+        />
+      ) : (
+        <ApiSettingsModal
+          isOpen={state.showApiSettings}
+          onClose={() => setShowApiSettings(false)}
+          onProvidersChanged={(savedProviderId?: string) => {
+            loadProviders();
+            if (savedProviderId) {
+              setProvider(savedProviderId);
+            }
+          }}
+        />
+      )}
 
-      {legacyImportOpen && (
+      {!ephemeralDemo && legacyImportOpen && (
         <LegacyHistoryImport
           upload={legacyUpload}
           onImported={(result: ImportResult) => {

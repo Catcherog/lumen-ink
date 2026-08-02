@@ -16,10 +16,11 @@ import { Router, Request, Response } from 'express';
 import { createLogin, authDepsFromConfig } from '../middleware/auth.js';
 import type { AuthThrottle } from '../security/authThrottle.js';
 import type { RuntimeConfig } from '../config/runtime.js';
+import { redactError } from '../security/redaction.js';
 
 export interface AuthRouterDeps {
   config: RuntimeConfig;
-  throttle: AuthThrottle;
+  throttle?: AuthThrottle;
 }
 
 function getClientIp(req: Request): string {
@@ -30,6 +31,27 @@ function getClientIp(req: Request): string {
 
 export function createAuthRouter(deps: AuthRouterDeps): Router {
   const router = Router();
+
+  if (deps.config.authMode === 'disabled') {
+    router.post('/', (_req: Request, res: Response) => {
+      const redacted = redactError(new Error('AUTH_DISABLED_IN_EPHEMERAL_MODE'), {
+        errorCode: 'AUTH_DISABLED_IN_EPHEMERAL_MODE',
+        httpStatus: 409,
+      });
+      res.status(409).json({
+        success: false,
+        errorCode: 'AUTH_DISABLED_IN_EPHEMERAL_MODE',
+        message: redacted.publicMessage,
+        requestId: redacted.diagnosticId,
+      });
+    });
+    return router;
+  }
+
+  if (!deps.throttle) {
+    throw new Error('AUTH_THROTTLE_REQUIRED');
+  }
+
   const login = createLogin(authDepsFromConfig(deps.config));
   const { throttle } = deps;
 

@@ -33,10 +33,19 @@ import { Router, Request, Response } from 'express';
 import { getProvider, getProviderOperationType } from '../services/providers/ProviderFactory.js';
 import type { EditRequest, EditResponse, EditResult } from 'shared/types.js';
 import type { GenerationService } from '../services/GenerationService.js';
+import {
+  createEphemeralProvider,
+  type EphemeralProviderResult,
+} from '../services/providers/ephemeral.js';
 import { DomainError, isDomainError } from '../domain/errors.js';
 import type { DomainErrorCode } from '../domain/errors.js';
 import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
 import { redactError, redactString } from '../security/redaction.js';
+
+export interface EditRouterOptions {
+  runtimeMode?: import('shared/types.js').RuntimeMode;
+  ephemeralProviderFactory?: (input: unknown) => EphemeralProviderResult;
+}
 
 function statusForCode(code: DomainErrorCode): number {
   switch (code) {
@@ -78,6 +87,49 @@ function sendDomainError(res: Response, err: DomainError): void {
   });
 }
 
+function sendEphemeralError(
+  res: Response,
+  errorCode: string,
+  status: number
+): void {
+  const redacted = redactError(new Error(errorCode), { errorCode, httpStatus: status });
+  res.status(status).json({
+    success: false,
+    errorCode,
+    message: redacted.publicMessage,
+    requestId: redacted.diagnosticId,
+  });
+}
+
+function classifyEphemeralError(error: unknown): { errorCode: string; status: number } {
+  const err = error as { status?: number; message?: string; name?: string };
+  const message = err?.message?.toLowerCase() ?? '';
+  if (err?.status === 401) return { errorCode: 'PROVIDER_AUTH_FAILED', status: 401 };
+  if (err?.status === 403) return { errorCode: 'PROVIDER_MODEL_FORBIDDEN', status: 403 };
+  if (err?.status === 429) return { errorCode: 'PROVIDER_RATE_LIMITED', status: 429 };
+  if (
+    err?.status === 504 ||
+    err?.name === 'AbortError' ||
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('超时')
+  ) {
+    return { errorCode: 'PROVIDER_TIMEOUT', status: 504 };
+  }
+  if (
+    message.includes('fetch failed') ||
+    message.includes('econn') ||
+    message.includes('network') ||
+    message.includes('网络')
+  ) {
+    return { errorCode: 'PROVIDER_NETWORK', status: 502 };
+  }
+  if (typeof err?.status === 'number' && err.status >= 500) {
+    return { errorCode: 'PROVIDER_UNAVAILABLE', status: 502 };
+  }
+  return { errorCode: 'PROVIDER_UNAVAILABLE', status: 502 };
+}
+
 /**
  * V2 compatibility request body. The `projectId` field is the discriminator
  * that selects the V2 path; all other V2 fields are optional except `prompt`.
@@ -88,14 +140,28 @@ interface V2CompatRequest extends EditRequest {
   recipe?: unknown;
 }
 
-export function createEditRouter(generationService: GenerationService): Router {
+export function createEditRouter(
+  generationService?: GenerationService,
+  options: EditRouterOptions = {}
+): Router {
   const router = Router();
+  const isEphemeralDemo = options.runtimeMode === 'ephemeral-demo';
+  const ephemeralProviderFactory =
+    options.ephemeralProviderFactory ?? createEphemeralProvider;
 
   router.post('/', async (req: Request, res: Response) => {
     const body = req.body as V2CompatRequest;
 
     // --- V2 compatibility path -------------------------------------------
     if (body && body.projectId) {
+      if (isEphemeralDemo) {
+        sendEphemeralError(res, 'PERSISTENCE_DISABLED', 409);
+        return;
+      }
+      if (!generationService) {
+        sendEphemeralError(res, 'PERSISTENCE_DISABLED', 409);
+        return;
+      }
       // Reject mixed input: legacy-only fields cannot be combined with the
       // project-aware path. Callers must choose one shape.
       const legacyFields: string[] = [];
@@ -187,8 +253,25 @@ export function createEditRouter(generationService: GenerationService): Router {
         return;
       }
 
-      const provider = getProvider(providerId);
+      let provider: ReturnType<typeof getProvider>;
+      if (isEphemeralDemo) {
+        const ephemeralInput = body.provider
+          ? { ...body.provider, defaultModel: model || body.provider.defaultModel }
+          : body.provider;
+        const ephemeralResult = ephemeralProviderFactory(ephemeralInput);
+        if (!('provider' in ephemeralResult)) {
+          sendEphemeralError(res, ephemeralResult.errorCode, ephemeralResult.status);
+          return;
+        }
+        provider = ephemeralResult.provider;
+      } else {
+        provider = getProvider(providerId);
+      }
       if (!provider) {
+        if (isEphemeralDemo) {
+          sendEphemeralError(res, 'PROVIDER_KEY_MISSING', 400);
+          return;
+        }
         res.status(400).json({
           success: false,
           error: '未找到可用的 Provider，请先在 API 设置中配置',
@@ -223,6 +306,14 @@ export function createEditRouter(generationService: GenerationService): Router {
         } catch (err) {
           const code = err instanceof Error ? err.message : 'INVALID_IMAGE_MALFORMED';
           const httpStatus = imageValidationHttpStatus(code);
+          if (isEphemeralDemo) {
+            const errorCode =
+              httpStatus === 413 || code.includes('TOO_LARGE')
+                ? 'EDIT_IMAGE_TOO_LARGE'
+                : 'EDIT_INPUT_INVALID';
+            sendEphemeralError(res, errorCode, httpStatus);
+            return;
+          }
           res.status(httpStatus).json({
             success: false,
             error: `图片校验失败: ${code}`,
@@ -261,6 +352,14 @@ export function createEditRouter(generationService: GenerationService): Router {
           throw new Error(`不支持的模型: ${selectedModel}`);
       }
 
+      if (!result.imageData && !result.imageUrl && !result.text) {
+        if (isEphemeralDemo) {
+          sendEphemeralError(res, 'EDIT_RESPONSE_INVALID', 502);
+          return;
+        }
+        throw new Error('PROVIDER_EMPTY_RESULT');
+      }
+
       res.json({
         success: true,
         imageData: result.imageData,
@@ -275,6 +374,11 @@ export function createEditRouter(generationService: GenerationService): Router {
         },
       } as EditResponse);
     } catch (error: unknown) {
+      if (isEphemeralDemo) {
+        const classified = classifyEphemeralError(error);
+        sendEphemeralError(res, classified.errorCode, classified.status);
+        return;
+      }
       const redacted = redactError(error, { errorCode: 'LEGACY_EDIT_FAILED' });
       console.error('[routes.edit] legacy path failed', redacted.log);
 
