@@ -11,7 +11,6 @@
  */
 
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -38,6 +37,11 @@ import { ProjectService } from './services/ProjectService.js';
 import { GenerationService } from './services/GenerationService.js';
 import { loadRuntimeConfig } from './config/runtime.js';
 import { createAuthThrottle } from './security/authThrottle.js';
+import {
+  createCorsErrorHandler,
+  createCorsMiddleware,
+  type CorsEnvironment,
+} from './security/cors.js';
 import type { GenerationJob, JobExecutor } from './domain/persistence.js';
 
 /**
@@ -103,6 +107,12 @@ dotenv.config();
 // D-034: Load runtime config with fail-fast in deployed mode. Never assign
 // default secrets to process.env — local mode uses safe defaults internally.
 const runtimeConfig = loadRuntimeConfig();
+const corsEnvironment: CorsEnvironment = {
+  CORS_ALLOWLIST: runtimeConfig.corsAllowlist.join(','),
+  VERCEL_URL: process.env.VERCEL_URL,
+  VERCEL_BRANCH_URL: process.env.VERCEL_BRANCH_URL,
+  VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+};
 
 // Configure ProviderStore with injected encryption key and mode flag. In
 // deployed mode this switches to env-managed (no filesystem reads/writes).
@@ -175,20 +185,9 @@ const authThrottle = createAuthThrottle({
 const app = express();
 
 // D-034: Allowlist-based CORS. Requests with no Origin (same-process tests,
-// health tooling) are allowed; configured origins are allowed; all others
-// are rejected.
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || runtimeConfig.corsAllowlist.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: false,
-  })
-);
+// health tooling) are allowed; exact configured/project origins are allowed;
+// all others are rejected by the dedicated policy module.
+app.use(createCorsMiddleware(corsEnvironment));
 app.use(express.json({ limit: runtimeConfig.maxUploadBytes }));
 
 // D-034 Task 7: Health endpoint returns ONLY {"status":"ok"}.
@@ -275,6 +274,10 @@ if (fs.existsSync(publicDir)) {
 app.use((req, res) => {
   res.status(404).json({ error: `Cannot ${req.method} ${req.path}` });
 });
+
+// CORS rejection must be a structured 4xx response. Without this handler,
+// Express's default error handler emits an HTML 500 for the middleware error.
+app.use(createCorsErrorHandler());
 
 export default app;
 
