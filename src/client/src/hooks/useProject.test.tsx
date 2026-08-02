@@ -431,4 +431,25 @@ describe('useProject hook', () => {
     expect(result.current.error?.errorCode).toBe('CLEANUP_PENDING');
     expect(result.current.error?.status).toBe(202);
   });
+
+  // LUMEN-RESULT-VIEWER-ASPECT-ALIGNMENT-01: clearError minimal method.
+
+  it('clearError resets error to null', async () => {
+    // Use useProject() without projectId to avoid auto-fetch on mount.
+    const { result } = renderHook(() => useProject());
+
+    // Trigger an error via upload failure.
+    mocked.createProject.mockRejectedValue(new Error('upload failed'));
+
+    await act(async () => {
+      await result.current.upload(new File([], 'test.png'), 'test');
+    });
+    expect(result.current.error).not.toBeNull();
+
+    // clearError resets it.
+    act(() => {
+      result.current.clearError();
+    });
+    expect(result.current.error).toBeNull();
+  });
 });
