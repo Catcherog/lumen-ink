@@ -45,6 +45,45 @@ type ViewMode = 'result' | 'original' | 'compare';
 type CompareMode = 'slider' | 'split';
 type ZoomMode = 'fit' | '1:1' | 'fullscreen';
 
+export interface Size {
+  width: number;
+  height: number;
+}
+
+/**
+ * Pure function: calculate the largest size that fits `source` inside
+ * `container` while preserving aspect ratio (CSS object-contain equivalent).
+ * When `allowUpscale` is false (default), the result is never larger than
+ * the source's natural dimensions.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function calculateContainSize(
+  source: Size,
+  container: Size,
+  allowUpscale = false,
+): Size {
+  if (
+    source.width <= 0 ||
+    source.height <= 0 ||
+    container.width <= 0 ||
+    container.height <= 0
+  ) {
+    return { width: 0, height: 0 };
+  }
+
+  const rawScale = Math.min(
+    container.width / source.width,
+    container.height / source.height,
+  );
+
+  const scale = allowUpscale ? rawScale : Math.min(1, rawScale);
+
+  return {
+    width: Math.round(source.width * scale),
+    height: Math.round(source.height * scale),
+  };
+}
+
 export default function ResultViewer({
   originalImage,
   originalMimeType = 'image/png',
@@ -75,6 +114,8 @@ export default function ResultViewer({
   const [sliderPosition, setSliderPosition] = useState(50);
   const [isDragOver, setIsDragOver] = useState(false);
   const [imageMenu, setImageMenu] = useState<{ x: number; y: number } | null>(null);
+  const [naturalImageSize, setNaturalImageSize] = useState<Size>({ width: 0, height: 0 });
+  const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 });
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const compareStageRef = useRef<HTMLDivElement>(null);
@@ -154,6 +195,30 @@ export default function ResultViewer({
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // Track canvas container size via ResizeObserver for explicit contain stage sizing
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const cr = entry.contentRect;
+        setContainerSize({ width: cr.width, height: cr.height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleOriginalImageLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const img = e.currentTarget;
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setNaturalImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+      }
+    },
+    [],
+  );
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -236,6 +301,7 @@ export default function ResultViewer({
   const updateSlider = useCallback((clientX: number) => {
     if (!compareStageRef.current) return;
     const rect = compareStageRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const x = clientX - rect.left;
     const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
     setSliderPosition(percentage);
@@ -264,6 +330,10 @@ export default function ResultViewer({
     }
   }, []);
 
+  const handlePointerCancel = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
   const handleSliderKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
@@ -283,6 +353,13 @@ export default function ResultViewer({
 
   // 无内容时的空状态标志
   const isEmptyState = !displaySrc && !resultText && !isLoading;
+
+  // RF-01: Explicit contain-size calculation for the compare stage.
+  // The stage uses the original image's natural dimensions and the canvas
+  // container's observed size to compute the exact contain box. This ensures
+  // the slider's 0%–100% range maps precisely to the visible image area,
+  // not to surrounding whitespace.
+  const stageSize = calculateContainSize(naturalImageSize, containerSize);
 
   return (
     <div
@@ -451,19 +528,18 @@ export default function ResultViewer({
               <div
                 ref={compareStageRef}
                 data-testid="compare-stage"
-                className="relative max-w-full max-h-full"
-                style={{ touchAction: 'none' }}
+                className="relative"
+                style={{
+                  width: stageSize.width > 0 ? `${stageSize.width}px` : undefined,
+                  height: stageSize.height > 0 ? `${stageSize.height}px` : undefined,
+                  touchAction: 'none',
+                }}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
+                onLostPointerCapture={handlePointerCancel}
               >
-                {/* Sizing image: invisible but participates in layout to set stage dimensions */}
-                <img
-                  src={originalSrc || undefined}
-                  alt=""
-                  className="block max-w-full max-h-full invisible pointer-events-none"
-                  draggable={false}
-                />
                 {/* Result overlay: fills the stage, contained */}
                 <img
                   src={resultSrc}
@@ -478,6 +554,7 @@ export default function ResultViewer({
                   className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                   style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
                   draggable={false}
+                  onLoad={handleOriginalImageLoad}
                 />
                 {/* Slider line + handle */}
                 <div
