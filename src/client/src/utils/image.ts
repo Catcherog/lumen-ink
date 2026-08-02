@@ -46,3 +46,48 @@ export function downloadImage(base64: string, mimeType: string, filename: string
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/** Download a Provider-hosted result without introducing an arbitrary URL proxy. */
+export async function downloadImageUrl(url: string, filename: string): Promise<void> {
+  const openDirectly = () => {
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      throw new Error('DOWNLOAD_FAILED');
+    }
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch {
+    // A signed Provider URL may reject browser fetch because its CDN omits
+    // CORS headers. Direct navigation is the safe fallback; no server-side
+    // proxy is used, so arbitrary URLs cannot become an SSRF primitive.
+    openDirectly();
+    return;
+  }
+
+  if (!response.ok) {
+    throw new Error('DOWNLOAD_FAILED');
+  }
+
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    openDirectly();
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

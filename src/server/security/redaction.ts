@@ -172,6 +172,28 @@ function getPublicMessage(errorCode: string | undefined): string {
       return '保存失败，请稍后重试';
     case 'PROVIDER_CONFIG_ENV_MANAGED':
       return 'Provider 配置由环境变量管理，无法通过 API 修改';
+    case 'PROVIDER_KEY_MISSING':
+      return '请先配置当前会话的 API Key';
+    case 'PROVIDER_TYPE_UNSUPPORTED':
+      return '当前 Provider 类型不支持';
+    case 'PROVIDER_AUTH_FAILED':
+      return 'API Key 无效或已过期';
+    case 'PROVIDER_MODEL_FORBIDDEN':
+      return '当前模型或 Endpoint 没有权限';
+    case 'PROVIDER_RATE_LIMITED':
+      return 'Provider 请求受限，请稍后重试';
+    case 'PROVIDER_UNAVAILABLE':
+      return 'Provider 服务暂时不可用，请稍后重试';
+    case 'EDIT_INPUT_INVALID':
+      return '编辑输入无效，请检查图片和参数';
+    case 'EDIT_IMAGE_TOO_LARGE':
+      return '图片过大，请压缩后重试';
+    case 'EDIT_RESPONSE_INVALID':
+      return 'Provider 返回了无法识别的结果';
+    case 'AUTH_DISABLED_IN_EPHEMERAL_MODE':
+      return '临时展示模式不启用登录';
+    case 'PERSISTENCE_DISABLED':
+      return '临时展示模式不保存项目或历史';
     default:
       return '处理请求时发生未知错误';
   }

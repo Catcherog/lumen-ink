@@ -9,7 +9,7 @@ import { getProviderOperationType } from './operationType.js';
 
 export { getProviderOperationType };
 
-function createProvider(config: ProviderConfig): ImageProvider {
+export function createProvider(config: ProviderConfig): ImageProvider {
   switch (config.type) {
     case 'glm':
       return new GLMProvider(config);

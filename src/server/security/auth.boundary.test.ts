@@ -59,6 +59,9 @@ function makeFakeThrottleRepo(): FakeThrottleRepo {
 
 function makeRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
   return {
+    runtimeMode: 'persistent',
+    persistence: 'enabled',
+    authMode: 'password',
     isDeployed: false,
     providerEnvManaged: false,
     authPassword: AUTH_PASSWORD,

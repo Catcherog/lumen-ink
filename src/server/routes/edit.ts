@@ -32,7 +32,13 @@
 import { Router, Request, Response } from 'express';
 import { getProvider, getProviderOperationType } from '../services/providers/ProviderFactory.js';
 import type { EditRequest, EditResponse, EditResult } from 'shared/types.js';
+import type { RuntimeMode } from 'shared/types.js';
 import type { GenerationService } from '../services/GenerationService.js';
+import {
+  createEphemeralProvider,
+  type EphemeralProviderResult,
+} from '../services/providers/ephemeral.js';
+import type { ImageProvider } from '../services/providers/ImageProvider.js';
 import { DomainError, isDomainError } from '../domain/errors.js';
 import type { DomainErrorCode } from '../domain/errors.js';
 import { validateImageBytes, imageValidationHttpStatus } from '../security/imageValidation.js';
@@ -88,14 +94,33 @@ interface V2CompatRequest extends EditRequest {
   recipe?: unknown;
 }
 
-export function createEditRouter(generationService: GenerationService): Router {
+export interface EditRouterOptions {
+  runtimeMode?: RuntimeMode;
+  ephemeralProviderFactory?: (input: unknown) => EphemeralProviderResult;
+}
+
+export function createEditRouter(
+  generationService: GenerationService | undefined,
+  options: EditRouterOptions = {},
+): Router {
   const router = Router();
+  const isEphemeral = options.runtimeMode === 'ephemeral-demo';
+  const ephemeralProviderFactory = options.ephemeralProviderFactory ?? createEphemeralProvider;
 
   router.post('/', async (req: Request, res: Response) => {
     const body = req.body as V2CompatRequest;
 
     // --- V2 compatibility path -------------------------------------------
     if (body && body.projectId) {
+      if (isEphemeral) {
+        res.status(409).json({
+          success: false,
+          errorCode: 'PERSISTENCE_DISABLED',
+          message: 'ephemeral-demo 不支持项目和持久化任务',
+        });
+        return;
+      }
+
       // Reject mixed input: legacy-only fields cannot be combined with the
       // project-aware path. Callers must choose one shape.
       const legacyFields: string[] = [];
@@ -132,6 +157,14 @@ export function createEditRouter(generationService: GenerationService): Router {
       }
 
       try {
+        if (!generationService) {
+          res.status(503).json({
+            success: false,
+            errorCode: 'PERSISTENCE_UNAVAILABLE',
+            message: '持久化服务不可用',
+          });
+          return;
+        }
         const job = await generationService.createJob({
           projectId: body.projectId,
           prompt: body.prompt,
@@ -187,7 +220,37 @@ export function createEditRouter(generationService: GenerationService): Router {
         return;
       }
 
-      const provider = getProvider(providerId);
+      let provider: ImageProvider | null;
+      if (isEphemeral) {
+        const result = ephemeralProviderFactory(body.provider);
+        if (!('provider' in result)) {
+          res.status(result.status).json({
+            success: false,
+            errorCode: result.errorCode,
+            message: result.errorCode,
+          });
+          return;
+        }
+        provider = result.provider;
+      } else {
+        if (body.provider) {
+          res.status(400).json({
+            success: false,
+            errorCode: 'PROVIDER_REQUEST_SCOPE_INVALID',
+            message: 'BYO Provider 仅可用于 ephemeral-demo',
+          });
+          return;
+        }
+        provider = getProvider(providerId);
+        if (!provider) {
+          res.status(400).json({
+            success: false,
+            error: '未找到可用的 Provider，请先在 API 设置中配置',
+          } as EditResponse);
+          return;
+        }
+      }
+
       if (!provider) {
         res.status(400).json({
           success: false,

@@ -318,4 +318,34 @@ describe('useEditor (FLOW-001 P0-01-R2 / P0-02-VERIFY-R2)', () => {
       // 三层均为 N，无错位
     });
   });
+
+  describe('ephemeral-demo request-scoped provider', () => {
+    it('sends only the current provider key and never a previous provider key', async () => {
+      const { result } = renderHook(() => useEditor({
+        persistHistory: false,
+        ephemeralProvider: {
+          type: 'gemini',
+          defaultModel: 'gemini-2.5-flash-image',
+          apiKey: 'gemini-new-key',
+        },
+      }));
+
+      await act(async () => {
+        result.current.uploadImage({
+          base64: 'ephemeral-image',
+          mimeType: 'image/jpeg',
+          file: makeFile('a.jpg', 'image/jpeg'),
+        });
+        await result.current.submitEdit('use the selected provider');
+      });
+
+      const [, body] = mockedAxiosPost.mock.calls[0];
+      expect(body.provider).toEqual({
+        type: 'gemini',
+        defaultModel: 'gemini-2.5-flash-image',
+        apiKey: 'gemini-new-key',
+      });
+      expect(JSON.stringify(body)).not.toContain('openai-old-key');
+    });
+  });
 });

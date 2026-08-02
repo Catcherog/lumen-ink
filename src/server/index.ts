@@ -17,6 +17,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createEditRouter } from './routes/edit.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createRuntimeRouter } from './routes/runtime.js';
 import providersRouter from './routes/providers.js';
 import detectRouter from './routes/detect.js';
 import { createProjectsRouter } from './routes/projects.js';
@@ -114,37 +115,32 @@ const corsEnvironment: CorsEnvironment = {
   VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
 };
 
-// Configure ProviderStore with injected encryption key and mode flag. In
-// deployed mode this switches to env-managed (no filesystem reads/writes).
-providerStore.configure({
-  isDeployed: runtimeConfig.providerEnvManaged,
-  providerEncryptionKey: runtimeConfig.providerEncryptionKey,
-});
+const isEphemeralDemo = runtimeConfig.runtimeMode === 'ephemeral-demo';
 
-if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
-  console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
+// The explicit ephemeral branch must not even select a persistence adapter.
+// This keeps CloudBase/Postgres construction, readiness probes, worker timers,
+// project/generation services, and the durable auth throttle out of the boot.
+if (!isEphemeralDemo) {
+  providerStore.configure({
+    isDeployed: runtimeConfig.providerEnvManaged,
+    providerEncryptionKey: runtimeConfig.providerEncryptionKey,
+  });
+
+  if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.DEFAULT_PROVIDER_ID) {
+    console.warn('[ENV] SEEDREAM_API_KEY 未配置，默认 Seedream Provider 将没有 API Key');
+  }
 }
 
-// PERSIST-001 P0-01: select persistence adapter by deployment mode.
-// Deployed mode (VERCEL=1) uses CloudBase PostgreSQL + PG Storage with
-// fail-fast config validation. Local mode uses the file-backed adapter.
-const persistenceDeps = selectPersistenceByEnv();
+const persistenceDeps = isEphemeralDemo ? null : selectPersistenceByEnv();
 
-// In deployed mode, the CloudBase adapter must be initialized before any
-// method is invoked. Top-level await is safe in ESM and runs once per cold
-// start. If ensureReady() throws, the boot fails fast with a stable error.
-if (runtimeConfig.isDeployed) {
+if (persistenceDeps && runtimeConfig.isDeployed) {
   const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
   await cloudBaseDeps.ensureReady();
 }
 
-// PERSIST-001 P0-01: in deployed mode, use the real worker executor that
-// actually invokes GenerationService.executeJob (with polling + sweeper
-// recovery). In local/dev mode, the local no-op executor is sufficient —
-// Jobs are executed manually in tests or via the legacy /api/edit path.
 let workerExecutor: WorkerExecutor | null = null;
-let jobExecutor: JobExecutor;
-if (runtimeConfig.isDeployed) {
+let jobExecutor: JobExecutor | null = null;
+if (persistenceDeps && runtimeConfig.isDeployed) {
   workerExecutor = createWorkerJobExecutor({
     deps: persistenceDeps,
     providerFactory: productionProviderFactory,
@@ -154,14 +150,17 @@ if (runtimeConfig.isDeployed) {
   });
   jobExecutor = workerExecutor.executor;
   workerExecutor.start();
-} else {
+} else if (persistenceDeps) {
   jobExecutor = createLocalJobExecutor();
 }
 
-const projectService = new ProjectService(persistenceDeps, jobExecutor);
-const generationService = new GenerationService(persistenceDeps, jobExecutor);
+const projectService = persistenceDeps && jobExecutor
+  ? new ProjectService(persistenceDeps, jobExecutor)
+  : null;
+const generationService = persistenceDeps && jobExecutor
+  ? new GenerationService(persistenceDeps, jobExecutor)
+  : null;
 
-// Graceful shutdown: stop the worker timers so the process can exit cleanly.
 if (workerExecutor) {
   const shutdown = () => {
     try {
@@ -174,13 +173,14 @@ if (workerExecutor) {
   process.on('SIGINT', shutdown);
 }
 
-// D-034: Durable login throttle backed by the frozen AuthThrottleRepository.
-const authThrottle = createAuthThrottle({
-  repo: persistenceDeps.authThrottle,
-  jwtSecret: runtimeConfig.jwtSecret,
-  windowMs: runtimeConfig.loginWindowMs,
-  maxFailures: 5,
-});
+const authThrottle = persistenceDeps && runtimeConfig.authMode === 'password'
+  ? createAuthThrottle({
+      repo: persistenceDeps.authThrottle,
+      jwtSecret: runtimeConfig.jwtSecret,
+      windowMs: runtimeConfig.loginWindowMs,
+      maxFailures: 5,
+    })
+  : null;
 
 const app = express();
 
@@ -199,6 +199,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Public, redacted feature discovery. Secrets and provider credentials never
+// appear in this descriptor.
+app.use('/api/runtime', createRuntimeRouter(runtimeConfig));
+
 // LUMEN-CLOUDBASE-CONNECTIVITY-DIFFERENTIAL-01 AC-02: Diagnostic probe for
 // Vercel-to-CloudBase connectivity. Only active when:
 //   1. The persistence backend is CloudBase NoSQL (identified by __brand marker)
@@ -213,7 +217,9 @@ app.get('/api/health', (_req, res) => {
 // inside probe.ts also returns 404 if VERCEL_ENV=production. This dual-guard
 // ensures the probe is never accessible in Production even if the mounting
 // logic changes.
-const isNoSqlBackend = (persistenceDeps as unknown as Record<string, unknown>).__brand === 'cloudbase_nosql';
+const isNoSqlBackend = persistenceDeps
+  ? (persistenceDeps as unknown as Record<string, unknown>).__brand === 'cloudbase_nosql'
+  : false;
 const isProductionEnv = process.env.VERCEL_ENV === 'production';
 if (isNoSqlBackend && !isProductionEnv) {
   const cloudbaseEnvId = process.env.CLOUDBASE_ENV_ID ?? 'unknown';
@@ -224,35 +230,57 @@ if (isNoSqlBackend && !isProductionEnv) {
 }
 
 // Auth router does NOT use authMiddleware (it issues tokens, not verifies them).
-app.use('/api/auth', createAuthRouter({ config: runtimeConfig, throttle: authThrottle }));
+app.use('/api/auth', createAuthRouter({ config: runtimeConfig, throttle: authThrottle ?? undefined }));
 
-// All routes below require a valid JWT.
-const authMiddleware = createAuthMiddleware({
-  authPassword: runtimeConfig.authPassword,
-  jwtSecret: runtimeConfig.jwtSecret,
-});
+if (isEphemeralDemo) {
+  const persistenceDisabled = (_req: express.Request, res: express.Response) => {
+    res.status(409).json({
+      success: false,
+      errorCode: 'PERSISTENCE_DISABLED',
+      message: '临时展示模式不保存项目或历史',
+    });
+  };
 
-app.use('/api/providers', authMiddleware, providersRouter);
-app.use('/api/edit', authMiddleware, createEditRouter(generationService));
-app.use('/api/detect', authMiddleware, detectRouter);
-app.use(
-  '/api/projects',
-  authMiddleware,
-  createProjectsRouter({ projectService, generationService })
-);
-app.use('/api/jobs', authMiddleware, createJobsRouter(generationService));
+  // Ephemeral requests are deliberately public and request-scoped. The
+  // provider body is validated by createEditRouter and is never persisted.
+  app.use('/api/edit', createEditRouter(undefined, { runtimeMode: 'ephemeral-demo' }));
+  app.use('/api/providers', persistenceDisabled);
+  app.use('/api/projects', persistenceDisabled);
+  app.use('/api/jobs', persistenceDisabled);
+  app.use('/api/worker', persistenceDisabled);
+} else {
+  if (!persistenceDeps || !projectService || !generationService || !authThrottle) {
+    throw new Error('PERSISTENT_RUNTIME_DEPENDENCIES_REQUIRED');
+  }
 
-// PERSIST-001 P0-01C: explicit worker-recovery endpoint for Vercel Cron.
-// Auth uses CRON_SECRET bearer token, NOT the user JWT middleware, because
-// cron ticks have no user session. Disabled (503) when CRON_SECRET is unset.
-app.use(
-  '/api/worker',
-  createWorkerRouter({
-    deps: persistenceDeps,
-    providerFactory: productionProviderFactory,
-    leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
-  })
-);
+  // All persistent routes require a valid JWT.
+  const authMiddleware = createAuthMiddleware({
+    authPassword: runtimeConfig.authPassword,
+    jwtSecret: runtimeConfig.jwtSecret,
+  });
+
+  app.use('/api/providers', authMiddleware, providersRouter);
+  app.use('/api/edit', authMiddleware, createEditRouter(generationService));
+  app.use('/api/detect', authMiddleware, detectRouter);
+  app.use(
+    '/api/projects',
+    authMiddleware,
+    createProjectsRouter({ projectService, generationService })
+  );
+  app.use('/api/jobs', authMiddleware, createJobsRouter(generationService));
+
+  // PERSIST-001 P0-01C: explicit worker-recovery endpoint for Vercel Cron.
+  // Auth uses CRON_SECRET bearer token, NOT the user JWT middleware, because
+  // cron ticks have no user session. Disabled (503) when CRON_SECRET is unset.
+  app.use(
+    '/api/worker',
+    createWorkerRouter({
+      deps: persistenceDeps,
+      providerFactory: productionProviderFactory,
+      leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
+    })
+  );
+}
 
 const publicDir = path.join(__dirname, 'public');
 if (fs.existsSync(publicDir)) {
