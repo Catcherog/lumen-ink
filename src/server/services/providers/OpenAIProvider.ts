@@ -1,5 +1,6 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
+import { redactString } from '../../security/redaction.js';
 
 const OPENAI_API_BASE = 'https://api.openai.com/v1';
 const FETCH_TIMEOUT = 50000;
@@ -103,7 +104,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Image API error:', response.status, errorText);
+      console.error('OpenAI Image API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -157,7 +158,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Edit API error:', response.status, errorText);
+      console.error('OpenAI Edit API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }
@@ -246,7 +247,7 @@ export class OpenAIProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI Chat API error:', response.status, errorText);
+      console.error('OpenAI Chat API error:', response.status, redactString(errorText));
       const errMsg = this.parseError(response.status, errorText);
       throw Object.assign(new Error(errMsg.message), { status: errMsg.status });
     }

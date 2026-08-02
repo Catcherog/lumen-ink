@@ -1,5 +1,6 @@
 import type { ImageProvider, GenerateParams, EditParams, ChatParams, EditResult } from './ImageProvider.js';
 import type { ProviderConfig } from 'shared/types.js';
+import { redactString } from '../../security/redaction.js';
 
 const GOOGLE_AI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const VERTEX_AI_BASE = 'https://aiplatform.googleapis.com/v1';
@@ -98,7 +99,7 @@ export class GeminiProvider implements ImageProvider {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Gemini API error:', response.status, errorText);
+      console.error('Gemini API error:', response.status, redactString(errorText));
       let errorMessage = `Gemini API 错误: ${response.status}`;
       let isApiKeyError = false;
       try {
