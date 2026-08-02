@@ -26,7 +26,7 @@ import { createWorkerRouter } from './routes/worker.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
 import { getProvider } from './services/providers/ProviderFactory.js';
-import { selectPersistenceByEnv, type CloudBasePersistenceDeps } from './infrastructure/persistence/index.js';
+import { selectPersistenceByEnv, isCloudBaseDeps } from './infrastructure/persistence/index.js';
 import {
   createLocalJobExecutor,
   createWorkerJobExecutor,
@@ -127,25 +127,22 @@ if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.D
 }
 
 // PERSIST-001 P0-01: select persistence adapter by deployment mode.
-// Deployed mode (VERCEL=1) uses CloudBase PostgreSQL + PG Storage with
-// fail-fast config validation. Local mode uses the file-backed adapter.
+// Deployed mode (VERCEL=1) tries CloudBase PostgreSQL + PG Storage first;
+// falls back to local file adapter if CloudBase config is missing.
 const persistenceDeps = selectPersistenceByEnv();
 
-// In deployed mode, the CloudBase adapter must be initialized before any
-// method is invoked. Top-level await is safe in ESM and runs once per cold
-// start. If ensureReady() throws, the boot fails fast with a stable error.
-if (runtimeConfig.isDeployed) {
-  const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
-  await cloudBaseDeps.ensureReady();
+// Only the CloudBase adapter requires async initialization (ensureReady).
+// The local file adapter is ready synchronously.
+if (isCloudBaseDeps(persistenceDeps)) {
+  await persistenceDeps.ensureReady();
 }
 
-// PERSIST-001 P0-01: in deployed mode, use the real worker executor that
-// actually invokes GenerationService.executeJob (with polling + sweeper
-// recovery). In local/dev mode, the local no-op executor is sufficient —
-// Jobs are executed manually in tests or via the legacy /api/edit path.
+// Use the real worker executor only with CloudBase persistence (needs durable
+// job storage + polling). With the local fallback adapter, use the local
+// executor — jobs run synchronously in-process.
 let workerExecutor: WorkerExecutor | null = null;
 let jobExecutor: JobExecutor;
-if (runtimeConfig.isDeployed) {
+if (isCloudBaseDeps(persistenceDeps)) {
   workerExecutor = createWorkerJobExecutor({
     deps: persistenceDeps,
     providerFactory: productionProviderFactory,

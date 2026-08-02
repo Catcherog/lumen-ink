@@ -32,6 +32,7 @@ import {
   createCloudBasePersistence,
   validateCloudBaseConfig,
   type CloudBasePersistenceOptions,
+  type CloudBasePersistenceDeps,
 } from './cloudbase.js';
 import { createLocalPersistence } from './local.js';
 
@@ -48,8 +49,10 @@ export interface SelectPersistenceOptions {
  * Select and construct the appropriate persistence adapter for the given
  * environment source (defaults to `process.env`).
  *
- * Throws `CLOUDBASE_CONFIG_REQUIRED` (via `validateCloudBaseConfig`) when
- * deployed mode is requested but required CloudBase env vars are missing.
+ * In deployed mode, tries CloudBase PostgreSQL + PG Storage first. If
+ * CloudBase config is missing, falls back to the local file-backed adapter
+ * (using `/tmp` on Vercel) with a warning — data will NOT persist across
+ * cold starts, but the app remains functional.
  */
 export function selectPersistenceByEnv(
   env: EnvSource = process.env,
@@ -67,17 +70,41 @@ export function selectPersistenceByEnv(
         ? Number(env.CLOUDBASE_SIGNED_URL_TTL_SECONDS)
         : undefined,
     };
-    // Fail fast with a stable error code before constructing the adapter.
-    validateCloudBaseConfig(cloudBaseOptions);
-    return createCloudBasePersistence(
-      cloudBaseOptions as CloudBasePersistenceOptions
-    );
+
+    // Try CloudBase first; fall back to local if config is missing.
+    try {
+      validateCloudBaseConfig(cloudBaseOptions);
+      return createCloudBasePersistence(
+        cloudBaseOptions as CloudBasePersistenceOptions
+      );
+    } catch {
+      // CloudBase config missing — fall back to local file adapter.
+      // Data will NOT persist across cold starts on Vercel serverless.
+      console.warn(
+        '[PERSISTENCE] CloudBase config missing, falling back to local file adapter. ' +
+        'Data will NOT persist across cold starts.'
+      );
+      // Use /tmp on Vercel (only writable directory in serverless functions)
+      const rootDir = env.PERSISTENCE_ROOT || '/tmp/lumen-ink-data';
+      return createLocalPersistence({ rootDir });
+    }
   }
 
   // Local / dev / test mode: file-backed adapter.
   const rootDir =
     options.localRootDir ?? env.PERSISTENCE_ROOT ?? defaultLocalRoot();
   return createLocalPersistence({ rootDir });
+}
+
+/**
+ * Type guard: returns true when the given deps are backed by CloudBase
+ * (i.e., require `ensureReady()` before use). Used by the server bootstrap
+ * to decide whether to call `ensureReady()` and start the worker executor.
+ */
+export function isCloudBaseDeps(
+  deps: PersistenceDependencies
+): deps is CloudBasePersistenceDeps {
+  return '__brand' in deps && (deps as { __brand?: string }).__brand === 'cloudbase';
 }
 
 /**

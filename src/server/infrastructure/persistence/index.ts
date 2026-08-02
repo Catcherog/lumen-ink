@@ -20,5 +20,6 @@ export {
 } from './cloudbase.js';
 export {
   selectPersistenceByEnv,
+  isCloudBaseDeps,
   type SelectPersistenceOptions,
 } from './select.js';

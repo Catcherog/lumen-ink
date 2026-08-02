@@ -1,53 +1,52 @@
 import { describe, it, expect } from 'vitest';
-import { selectPersistenceByEnv } from './select.js';
+import { selectPersistenceByEnv, isCloudBaseDeps } from './select.js';
 
 /**
  * PERSIST-001 P0-01B regression: deployment-mode adapter selection.
  *
- * Verifies the FIX_PACKET requirements:
- *  - VERCEL=1 + missing CloudBase config → fail-fast (CLOUDBASE_CONFIG_REQUIRED)
- *  - VERCEL=1 + CloudBase config present (postgresUrl + envId + bucketId +
- *    storageToken) → CloudBase adapter (not local)
- *  - No VERCEL → local adapter (PoC/dev/tests)
- *
- * Round 2 update: envId + bucketId are now separate required fields
- * (PERSIST001-P0-01B). Missing envId must also fail-fast.
+ * Behaviour after fallback change:
+ *  - VERCEL=1 + missing CloudBase config → falls back to local file adapter
+ *    (NOT fail-fast). Data won't persist across cold starts, but the app
+ *    stays functional. `isCloudBaseDeps(deps)` returns false.
+ *  - VERCEL=1 + full CloudBase config → CloudBase adapter with __brand.
+ *  - No VERCEL → local adapter (PoC/dev/tests).
  */
 
 describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
-  it('VERCEL=1 without CloudBase config throws CLOUDBASE_CONFIG_REQUIRED', () => {
-    expect(() =>
-      selectPersistenceByEnv({
-        VERCEL: '1',
-        AUTH_PASSWORD: 'test-password-12',
-        JWT_SECRET: 'a'.repeat(32),
-        PROVIDER_ENCRYPTION_KEY: 'b'.repeat(32),
-        CORS_ALLOWLIST: 'https://example.com',
-        SEEDREAM_API_KEY: 'sk-test',
-      })
-    ).toThrowError(/CLOUDBASE_CONFIG_REQUIRED/);
+  it('VERCEL=1 without CloudBase config falls back to local adapter', () => {
+    const deps = selectPersistenceByEnv({
+      VERCEL: '1',
+      AUTH_PASSWORD: 'test-password-12',
+      JWT_SECRET: 'a'.repeat(32),
+      PROVIDER_ENCRYPTION_KEY: 'b'.repeat(32),
+      CORS_ALLOWLIST: 'https://example.com',
+      SEEDREAM_API_KEY: 'sk-test',
+    });
+    expect((deps as { __brand?: string }).__brand).toBeUndefined();
+    expect(isCloudBaseDeps(deps)).toBe(false);
+    expect(deps.projects).toBeDefined();
   });
 
-  it('VERCEL=1 with partial CloudBase config (missing envId + storage) throws', () => {
-    expect(() =>
-      selectPersistenceByEnv({
-        VERCEL: '1',
-        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
-        // Missing CLOUDBASE_ENV_ID, CLOUDBASE_STORAGE_BUCKET, CLOUDBASE_STORAGE_TOKEN
-      })
-    ).toThrowError(/CLOUDBASE_CONFIG_REQUIRED/);
+  it('VERCEL=1 with partial CloudBase config falls back to local adapter', () => {
+    const deps = selectPersistenceByEnv({
+      VERCEL: '1',
+      CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+      // Missing CLOUDBASE_ENV_ID, CLOUDBASE_STORAGE_BUCKET, CLOUDBASE_STORAGE_TOKEN
+    });
+    expect((deps as { __brand?: string }).__brand).toBeUndefined();
+    expect(isCloudBaseDeps(deps)).toBe(false);
   });
 
-  it('VERCEL=1 missing only envId throws CLOUDBASE_CONFIG_REQUIRED mentioning CLOUDBASE_ENV_ID', () => {
-    expect(() =>
-      selectPersistenceByEnv({
-        VERCEL: '1',
-        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
-        CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
-        CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
-        // CLOUDBASE_ENV_ID missing
-      })
-    ).toThrowError(/CLOUDBASE_ENV_ID/);
+  it('VERCEL=1 missing only envId falls back to local adapter', () => {
+    const deps = selectPersistenceByEnv({
+      VERCEL: '1',
+      CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+      CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
+      CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
+      // CLOUDBASE_ENV_ID missing
+    });
+    expect((deps as { __brand?: string }).__brand).toBeUndefined();
+    expect(isCloudBaseDeps(deps)).toBe(false);
   });
 
   it('VERCEL=1 with full CloudBase config returns CloudBase-backed deps (not local)', () => {
@@ -65,6 +64,7 @@ describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
     // check the adapter is tagged via a __brand marker so tests can
     // distinguish production from local without instanceof.
     expect((deps as { __brand?: string }).__brand).toBe('cloudbase');
+    expect(isCloudBaseDeps(deps)).toBe(true);
     expect(deps.projects).toBeDefined();
     expect(deps.assets).toBeDefined();
     expect(deps.versions).toBeDefined();
@@ -78,6 +78,7 @@ describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
     const deps = selectPersistenceByEnv({});
     // Local adapter does not carry the cloudbase brand marker.
     expect((deps as { __brand?: string }).__brand).toBeUndefined();
+    expect(isCloudBaseDeps(deps)).toBe(false);
     // Sanity: local adapter can still create a project (smoke test).
     expect(deps.projects).toBeDefined();
     expect(deps.objects).toBeDefined();
@@ -91,5 +92,6 @@ describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
       CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
     });
     expect((deps as { __brand?: string }).__brand).toBeUndefined();
+    expect(isCloudBaseDeps(deps)).toBe(false);
   });
 });
