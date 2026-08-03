@@ -129,13 +129,13 @@ export default function FaceBeautyPanel({ state, onSubmit }: ToolPanelProps) {
         人脸美化参数
       </div>
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 gap-2 min-w-0">
         {(['natural', 'refined', 'premium'] as PresetKey[]).map((preset) => (
           <button
             key={preset}
             onClick={() => applyPreset(preset)}
             className={`
-              flex-1 flex items-center justify-center gap-1 px-2 py-2 text-xs rounded-lg border transition-colors
+              min-w-0 flex items-center justify-center gap-1 px-1.5 py-2 text-xs rounded-lg border transition-colors
               ${activePreset === preset
                 ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400'
                 : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}
@@ -151,7 +151,7 @@ export default function FaceBeautyPanel({ state, onSubmit }: ToolPanelProps) {
 
       <div className="space-y-4">
         {SLIDERS.map(({ key, label }) => (
-          <div key={key}>
+          <div key={key} className="min-w-0">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs text-gray-700 dark:text-gray-300">{label}</label>
               <span className="text-xs text-gray-500 dark:text-gray-400 w-8 text-right">{params[key]}</span>
@@ -171,7 +171,7 @@ export default function FaceBeautyPanel({ state, onSubmit }: ToolPanelProps) {
       <button
         onClick={handleApply}
         disabled={state.isLoading}
-        className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+        className="w-full min-w-0 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
       >
         {state.isLoading ? (
           <>
