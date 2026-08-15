@@ -1,70 +1,95 @@
 import { describe, it, expect } from 'vitest';
-import { selectPersistenceByEnv, isCloudBaseDeps } from './select.js';
+import { selectPersistenceByEnv } from './select.js';
 
 /**
- * PERSIST-001 P0-01B regression: deployment-mode adapter selection.
+ * PERSIST-001 P0-01B / LUMEN-CLOUDBASE-NOSQL-IMPLEMENT-01 FIX-R2 regression:
+ * deployment-mode adapter selection.
  *
- * Behaviour after fallback change:
- *  - VERCEL=1 + missing CloudBase config → falls back to local file adapter
- *    (NOT fail-fast). Data won't persist across cold starts, but the app
- *    stays functional. `isCloudBaseDeps(deps)` returns false.
- *  - VERCEL=1 + full CloudBase config → CloudBase adapter with __brand.
- *  - No VERCEL → local adapter (PoC/dev/tests).
+ * NOSQL-R2-07 (2026-07-21): Backend is now selected EXPLICITLY via
+ * `PERSISTENCE_BACKEND`. Previous implicit `CLOUDBASE_API_KEY` detection
+ * is removed. Tests updated to set PERSISTENCE_BACKEND explicitly.
+ *
+ * Verifies:
+ *  - VERCEL=1 + PERSISTENCE_BACKEND=cloudbase-postgres + full CloudBase
+ *    config → CloudBase PostgreSQL adapter (not local)
+ *  - VERCEL=1 + missing PERSISTENCE_BACKEND → fail-fast
+ *    (PERSISTENCE_BACKEND_REQUIRED)
+ *  - VERCEL=1 + PERSISTENCE_BACKEND=local → fail-fast (not allowed in
+ *    deployed mode)
+ *  - VERCEL=1 + invalid PERSISTENCE_BACKEND → fail-fast
+ *    (PERSISTENCE_BACKEND_INVALID)
+ *  - VERCEL=1 + partial CloudBase config → CLOUDBASE_CONFIG_REQUIRED
+ *  - No VERCEL → local adapter (default)
  */
 
-describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
-  it('VERCEL=1 without CloudBase config falls back to local adapter', () => {
-    const deps = selectPersistenceByEnv({
-      VERCEL: '1',
-      AUTH_PASSWORD: 'test-password-12',
-      JWT_SECRET: 'a'.repeat(32),
-      PROVIDER_ENCRYPTION_KEY: 'b'.repeat(32),
-      CORS_ALLOWLIST: 'https://example.com',
-      SEEDREAM_API_KEY: 'sk-test',
-    });
-    expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(isCloudBaseDeps(deps)).toBe(false);
-    expect(deps.projects).toBeDefined();
+describe('PERSIST-001 P0-01 / NOSQL-R2-07: selectPersistenceByEnv', () => {
+  it('VERCEL=1 without PERSISTENCE_BACKEND throws PERSISTENCE_BACKEND_REQUIRED', () => {
+    expect(() =>
+      selectPersistenceByEnv({
+        VERCEL: '1',
+        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+        CLOUDBASE_ENV_ID: 'lumen-prod-env',
+        CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
+        CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
+      })
+    ).toThrowError(/PERSISTENCE_BACKEND_REQUIRED/);
   });
 
-  it('VERCEL=1 with partial CloudBase config falls back to local adapter', () => {
-    const deps = selectPersistenceByEnv({
-      VERCEL: '1',
-      CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
-      // Missing CLOUDBASE_ENV_ID, CLOUDBASE_STORAGE_BUCKET, CLOUDBASE_STORAGE_TOKEN
-    });
-    expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(isCloudBaseDeps(deps)).toBe(false);
+  it('VERCEL=1 with PERSISTENCE_BACKEND=local throws PERSISTENCE_BACKEND_REQUIRED', () => {
+    expect(() =>
+      selectPersistenceByEnv({
+        VERCEL: '1',
+        PERSISTENCE_BACKEND: 'local',
+        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+      })
+    ).toThrowError(/PERSISTENCE_BACKEND_REQUIRED/);
   });
 
-  it('VERCEL=1 missing only envId falls back to local adapter', () => {
-    const deps = selectPersistenceByEnv({
-      VERCEL: '1',
-      CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
-      CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
-      CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
-      // CLOUDBASE_ENV_ID missing
-    });
-    expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(isCloudBaseDeps(deps)).toBe(false);
+  it('VERCEL=1 with invalid PERSISTENCE_BACKEND throws PERSISTENCE_BACKEND_INVALID', () => {
+    expect(() =>
+      selectPersistenceByEnv({
+        VERCEL: '1',
+        PERSISTENCE_BACKEND: 'mysql',
+        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+      })
+    ).toThrowError(/PERSISTENCE_BACKEND_INVALID/);
   });
 
-  it('VERCEL=1 with full CloudBase config returns CloudBase-backed deps (not local)', () => {
+  it('VERCEL=1 with partial CloudBase config (missing envId + storage) throws CLOUDBASE_CONFIG_REQUIRED', () => {
+    expect(() =>
+      selectPersistenceByEnv({
+        VERCEL: '1',
+        PERSISTENCE_BACKEND: 'cloudbase-postgres',
+        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+        // Missing CLOUDBASE_ENV_ID, CLOUDBASE_STORAGE_BUCKET, CLOUDBASE_STORAGE_TOKEN
+      })
+    ).toThrowError(/CLOUDBASE_CONFIG_REQUIRED/);
+  });
+
+  it('VERCEL=1 missing only envId throws CLOUDBASE_CONFIG_REQUIRED mentioning CLOUDBASE_ENV_ID', () => {
+    expect(() =>
+      selectPersistenceByEnv({
+        VERCEL: '1',
+        PERSISTENCE_BACKEND: 'cloudbase-postgres',
+        CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
+        CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
+        CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
+        // CLOUDBASE_ENV_ID missing
+      })
+    ).toThrowError(/CLOUDBASE_ENV_ID/);
+  });
+
+  it('VERCEL=1 with full CloudBase Postgres config returns CloudBase-backed deps (not local)', () => {
     const deps = selectPersistenceByEnv({
       VERCEL: '1',
+      PERSISTENCE_BACKEND: 'cloudbase-postgres',
       CLOUDBASE_POSTGRES_URL: 'postgresql://user:pass@host:5432/db',
       CLOUDBASE_ENV_ID: 'lumen-prod-env',
       CLOUDBASE_STORAGE_BUCKET: 'lumen-private',
       CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
     });
 
-    // The returned deps must implement the frozen surface. We assert it's
-    // NOT the local adapter by checking that it doesn't expose the local
-    // adapter's file-backed getSignedUrl shape (file://...). Instead we
-    // check the adapter is tagged via a __brand marker so tests can
-    // distinguish production from local without instanceof.
     expect((deps as { __brand?: string }).__brand).toBe('cloudbase');
-    expect(isCloudBaseDeps(deps)).toBe(true);
     expect(deps.projects).toBeDefined();
     expect(deps.assets).toBeDefined();
     expect(deps.versions).toBeDefined();
@@ -74,12 +99,9 @@ describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
     expect(deps.authThrottle).toBeDefined();
   });
 
-  it('No VERCEL env → returns local adapter', () => {
+  it('No VERCEL env → returns local adapter by default', () => {
     const deps = selectPersistenceByEnv({});
-    // Local adapter does not carry the cloudbase brand marker.
     expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(isCloudBaseDeps(deps)).toBe(false);
-    // Sanity: local adapter can still create a project (smoke test).
     expect(deps.projects).toBeDefined();
     expect(deps.objects).toBeDefined();
   });
@@ -92,6 +114,12 @@ describe('PERSIST-001 P0-01: selectPersistenceByEnv', () => {
       CLOUDBASE_STORAGE_TOKEN: 'storage-token-test',
     });
     expect((deps as { __brand?: string }).__brand).toBeUndefined();
-    expect(isCloudBaseDeps(deps)).toBe(false);
+  });
+
+  it('No VERCEL env with PERSISTENCE_BACKEND=local returns local adapter', () => {
+    const deps = selectPersistenceByEnv({
+      PERSISTENCE_BACKEND: 'local',
+    });
+    expect((deps as { __brand?: string }).__brand).toBeUndefined();
   });
 });
