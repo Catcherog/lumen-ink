@@ -79,7 +79,7 @@ function makeSnapshot(overrides: Partial<ProjectSnapshotDto> = {}): ProjectSnaps
       label: 'v0',
       createdAt: '2026-07-18T00:00:00Z',
     },
-    signedUrls: { 'redacted://asset_0.bin': 'https://signed.example/asset_0' },
+    signedUrls: { 'asset_0': 'https://signed.example/asset_0' },
     ...overrides,
   };
 }

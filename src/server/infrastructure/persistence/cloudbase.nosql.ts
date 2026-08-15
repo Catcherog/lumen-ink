@@ -370,7 +370,14 @@ export function createCloudBaseNoSqlPersistence(
 
   async function ensureReady(): Promise<void> {
     if (ready) return;
-    const tcb = await import('@cloudbase/node-sdk');
+    const tcbModule = await import('@cloudbase/node-sdk');
+    // CJS/ESM interop: @cloudbase/node-sdk is CommonJS, so `import()` exposes
+    // the real `tcb` object under `.default`. Support both shapes so the call
+    // works whether the runtime resolves it as ESM-default or CJS.
+    const tcb = ((tcbModule as { default?: unknown }).default ??
+      tcbModule) as {
+      init: (opts: { env: string; accessKey: string }) => unknown;
+    };
     const instance = tcb.init({
       env: options.envId,
       accessKey: options.apiKey,
