@@ -186,7 +186,22 @@ export function createWorkerJobExecutor(
         void processQueue();
       }
     } catch (err) {
-      console.warn('[WorkerExecutor] sweeper error:', err);
+      // P5-X03 HARDEN: a sweeper read failure (e.g. CloudBase NoSQL read
+      // quota exhaustion — LimitExceeded.OutOfReadRequestQuota /
+      // EXCEED_REQUEST_LIMIT) MUST NOT crash the worker, the API request, or
+      // server initialization. Record the error and let the next sweep retry.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isQuota =
+        msg.includes('LimitExceeded.OutOfReadRequestQuota') ||
+        msg.includes('EXCEED_REQUEST_LIMIT');
+      console.warn(
+        `[WorkerExecutor] sweeper error${
+          isQuota
+            ? ' (CloudBase read quota exhausted — will retry on next sweep)'
+            : ''
+        }:`,
+        msg
+      );
     }
   }
 

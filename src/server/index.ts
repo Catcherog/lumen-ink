@@ -150,7 +150,13 @@ if (runtimeConfig.isDeployed) {
     providerFactory: productionProviderFactory,
     pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 100),
     leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
-    sweeperIntervalMs: Number(process.env.WORKER_SWEEPER_INTERVAL_MS ?? 500),
+    // P5-X03 HARDEN: back off the CloudBase NoSQL read-amplifying sweeper.
+    // Default raised 500ms -> 30000ms. A serverless instance freezes
+    // setInterval after the HTTP response, so the in-process sweeper does
+    // little useful work at 500ms while burning the free-tier read quota;
+    // the daily CRON_SECRET-gated /api/worker/recover remains the backstop.
+    // Env override (new name preferred; legacy name still honored).
+    sweeperIntervalMs: Number(process.env.SWEEPER_INTERVAL_MS ?? process.env.WORKER_SWEEPER_INTERVAL_MS ?? 30000),
   });
   jobExecutor = workerExecutor.executor;
   workerExecutor.start();
