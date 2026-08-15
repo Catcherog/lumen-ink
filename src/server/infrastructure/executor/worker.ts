@@ -186,7 +186,22 @@ export function createWorkerJobExecutor(
         void processQueue();
       }
     } catch (err) {
-      console.warn('[WorkerExecutor] sweeper error:', err);
+      // P5-X03 HARDEN: a sweeper read failure (e.g. CloudBase NoSQL read
+      // quota exhaustion — LimitExceeded.OutOfReadRequestQuota /
+      // EXCEED_REQUEST_LIMIT) MUST NOT crash the worker, the API request, or
+      // server initialization. Record the error and let the next sweep retry.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isQuota =
+        msg.includes('LimitExceeded.OutOfReadRequestQuota') ||
+        msg.includes('EXCEED_REQUEST_LIMIT');
+      console.warn(
+        `[WorkerExecutor] sweeper error${
+          isQuota
+            ? ' (CloudBase read quota exhausted — will retry on next sweep)'
+            : ''
+        }:`,
+        msg
+      );
     }
   }
 
@@ -219,8 +234,28 @@ export function createWorkerJobExecutor(
   const executor: JobExecutor = {
     async enqueue(jobId: string): Promise<void> {
       queue.add(jobId);
-      // Trigger a processing cycle immediately for low-latency execution.
-      void processQueue();
+      // PERSIST-001 P0-01C (BUSOS-P5-X01): On Vercel serverless the
+      // in-process setInterval poll loop started by `start()` is frozen after
+      // the HTTP response is sent, so a fire-and-forget `processQueue()` never
+      // completes and a queued Job is never executed within the caller's
+      // request window. The only surviving executor then becomes the
+      // once-daily CRON_SECRET-gated `/api/worker/recover` cron, whose period
+      // far exceeds the caller's poll budget and surfaced on the BUSOS live
+      // E2E as `GENERATION_FAILED` (a null-errorCode fallback for a Job that
+      // simply never ran). Execute synchronously inside the requesting
+      // Function invocation so the Job reaches a terminal state before the
+      // function freezes. The daily cron remains as a backstop recovery path.
+      try {
+        await generationService.executeJob(jobId, {
+          providerFactory: options.providerFactory,
+          leaseSeconds,
+          workerId,
+        });
+      } catch {
+        // executeJob records terminal failure (with a real errorCode) via
+        // failWith; the caller polls GET /jobs/:id for the terminal state.
+        // Swallow the throw so enqueue always resolves.
+      }
     },
     async cancel(_jobId: string): Promise<'cancelled' | 'best_effort'> {
       // Best-effort: we do not abort in-flight executeJob calls. Atomic

@@ -15,6 +15,11 @@ import { PROVIDER_MODELS } from '../../shared/types';
 import type { ProviderModelOption } from '../../shared/types';
 import { Sun, Moon, LogOut, PanelRightOpen, PanelRightClose, Image as ImageIcon } from 'lucide-react';
 
+// Unified responsive breakpoint: must match Tailwind's `xl` breakpoint (1280px).
+// Using matchMedia keeps React state in sync with Tailwind's CSS breakpoints
+// so the fixed right parameter panel only appears at >= 1280px and never clips.
+const DESKTOP_WORKSPACE_QUERY = "(min-width: 1280px)";
+
 const CAPABILITY_ICONS: Record<string, string> = {
   generation: '🎨',
   edit: '✏️',
@@ -34,7 +39,11 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const [showMobileRightPanel, setShowMobileRightPanel] = useState(false);
-  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia(DESKTOP_WORKSPACE_QUERY).matches
+      : false
+  );
   const [templatePrompt, setTemplatePrompt] = useState<string | undefined>(undefined);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [manualWorkflowOpen, setManualWorkflowOpen] = useState(false);
@@ -178,11 +187,15 @@ export default function App() {
   const selectedProviderConfig = providers.find((p) => p.id === state.selectedProvider);
   const availableModels = selectedProviderConfig ? (PROVIDER_MODELS[selectedProviderConfig.type] || []) : [];
 
-  // Responsive desktop detection
+  // Responsive desktop detection -- keep React state in sync with Tailwind xl breakpoint
   useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const media = window.matchMedia(DESKTOP_WORKSPACE_QUERY);
+    const update = () => setIsDesktop(media.matches);
+
+    update();
+    media.addEventListener("change", update);
+
+    return () => media.removeEventListener("change", update);
   }, []);
 
   const handleLogin = (newToken: string) => {
@@ -216,7 +229,7 @@ export default function App() {
       <ErrorBoundary>
         <div className="flex flex-col h-[100dvh] bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 overflow-hidden">
           {/* Header */}
-          <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 flex items-center justify-between flex-shrink-0">
+          <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 flex items-center justify-between flex-shrink-0 min-w-0">
             <div className="flex items-center gap-3">
               <div className="p-1.5 bg-blue-600 text-white rounded-lg">
                 <ImageIcon className="w-5 h-5" />
@@ -224,7 +237,7 @@ export default function App() {
               <h1 className="text-base lg:text-lg font-bold text-gray-900 dark:text-gray-100 hidden sm:block">光砚</h1>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 sm:gap-2 lg:gap-3 min-w-0">
               {/* Provider selector */}
               <div className="flex items-center gap-2">
                 <label className="text-xs text-gray-500 dark:text-gray-400 hidden md:inline">Provider：</label>
@@ -232,7 +245,7 @@ export default function App() {
                   <select
                     value={state.selectedProvider || ''}
                     onChange={(e) => setProvider(e.target.value || null)}
-                    className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none"
+                    className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none max-w-[112px] sm:max-w-[150px] xl:max-w-[190px]"
                   >
                     <option value="">选择 Provider</option>
                     {providers
@@ -257,7 +270,7 @@ export default function App() {
                     <select
                       value={state.selectedModel}
                       onChange={(e) => setModel(e.target.value)}
-                      className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none max-w-[180px]"
+                      className="pl-3 pr-8 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-400 appearance-none max-w-[112px] sm:max-w-[150px] xl:max-w-[190px]"
                     >
                       {availableModels.map((m) => (
                         <option key={m.value} value={m.value}>{formatModelLabel(m)}</option>
@@ -293,7 +306,7 @@ export default function App() {
           </header>
 
           {/* Main workspace */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
+          <div className="flex flex-1 w-full min-w-0 overflow-hidden min-h-0">
             {/* Left toolbar */}
             <Toolbar
               activeTool={state.selectedTool}
@@ -367,28 +380,36 @@ export default function App() {
               )}
             </main>
 
-            {/* Right panel — desktop */}
-            <div className="hidden lg:flex w-80 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 min-h-0 overflow-hidden">
-              <ParamPanel
-                tool={state.selectedTool}
-                state={state}
-                dispatch={dispatch}
-                onSubmit={submitEdit}
-                onSelectTemplate={handleSelectTemplate}
-                onRestoreHistory={restoreFromHistory}
-                onViewHistory={viewHistory}
-                onDeleteHistory={deleteHistory}
-                externalPrompt={templatePrompt}
-                onPromptConsumed={handlePromptConsumed}
-                onPromptChange={handlePromptChange}
-              />
-            </div>
+            {/* Right panel — desktop (rendered only when isDesktop to keep React
+                state in sync with the Tailwind xl breakpoint; the hidden xl:flex
+                classes remain as a CSS-level defense in case JS state is stale) */}
+            {isDesktop && (
+              <div
+                data-testid="desktop-param-panel"
+                className="hidden xl:flex xl:w-80 2xl:w-96 min-w-0 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 min-h-0 overflow-hidden"
+              >
+                <ParamPanel
+                  tool={state.selectedTool}
+                  state={state}
+                  dispatch={dispatch}
+                  onSubmit={submitEdit}
+                  onSelectTemplate={handleSelectTemplate}
+                  onRestoreHistory={restoreFromHistory}
+                  onViewHistory={viewHistory}
+                  onDeleteHistory={deleteHistory}
+                  externalPrompt={templatePrompt}
+                  onPromptConsumed={handlePromptConsumed}
+                  onPromptChange={handlePromptChange}
+                />
+              </div>
+            )}
           </div>
 
           {/* Mobile right panel toggle */}
           {!isDesktop && (
             <button
               onClick={() => setShowMobileRightPanel(true)}
+              data-testid="mobile-param-panel-toggle"
               className="fixed bottom-4 right-4 z-20 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
               title="打开参数面板"
             >

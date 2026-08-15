@@ -50,7 +50,7 @@ export interface ProjectSnapshot {
   versions: Version[];
   activeVersion?: Version;
   approvedVersion?: Version;
-  /** Signed URLs keyed by storageKey (caller can map asset → URL). */
+  /** Signed URLs keyed by asset.id (public, stable; the redacted storageKey is never used as a key). */
   signedUrls: Record<string, string>;
 }
 
@@ -201,7 +201,8 @@ export class ProjectService {
       assets: [asset],
       versions: [version],
       activeVersion: version,
-      signedUrls: { [storageKey]: signedUrl },
+      // Key by the public, stable asset.id — never the (redacted) storageKey.
+      signedUrls: { [asset.id]: signedUrl },
     };
   }
 
@@ -221,11 +222,13 @@ export class ProjectService {
       this.deps.versions.listByProject(projectId),
     ]);
 
-    // Pre-fetch signed URLs for every asset.
+    // Pre-fetch signed URLs for every asset, keyed by the public, stable
+    // asset.id. The (redacted) storageKey is intentionally NOT used as a key
+    // so external consumers never need to know the opaque storage layout.
     const signedUrls: Record<string, string> = {};
     await Promise.all(
       assets.map(async (a) => {
-        signedUrls[a.storageKey] = await this.deps.objects.getSignedUrl(a.storageKey);
+        signedUrls[a.id] = await this.deps.objects.getSignedUrl(a.storageKey);
       })
     );
 

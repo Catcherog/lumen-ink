@@ -270,7 +270,7 @@ export default function AppV2() {
     if (!version) return; // snapshot not yet refreshed
     const asset = snapshot.assets.find((a) => a.id === version.assetId);
     if (!asset) return;
-    const signedUrl = snapshot.signedUrls[asset.storageKey];
+    const signedUrl = snapshot.signedUrls[asset.id];
     if (!signedUrl) return;
 
     lastSyncedResultIdRef.current = job.resultVersionId;
@@ -298,7 +298,7 @@ export default function AppV2() {
     if (!version) return;
     const asset = snapshot.assets.find((a) => a.id === version.assetId);
     if (!asset) return;
-    const signedUrl = snapshot.signedUrls[asset.storageKey];
+    const signedUrl = snapshot.signedUrls[asset.id];
     if (!signedUrl) return;
     dispatch({
       type: 'SET_CURRENT_IMAGE',

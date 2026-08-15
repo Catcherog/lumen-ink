@@ -40,7 +40,7 @@ function makeSnapshot(
     versions,
     activeVersion,
     signedUrls: Object.fromEntries(
-      versions.map((v, i) => [`redacted://asset_${i}.bin`, `https://signed/${v.id}`])
+      versions.map((v, i) => [`asset_${i}`, `https://signed/${v.id}`])
     ),
     ...overrides,
   };

@@ -68,18 +68,18 @@ export default function ParamPanel({
   const isChatModel = state.selectedModel === 'glm-4.6v';
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div className="flex flex-col h-full w-full min-w-0 overflow-hidden bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3">
         <div className={`p-2 rounded-lg border ${meta.color}`}>
           <Icon className="w-5 h-5" />
         </div>
-        <div>
+        <div className="min-w-0">
           <h2 className="text-sm font-semibold">{meta.title}</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{meta.description}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{meta.description}</p>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto p-4 space-y-5">
         {/* Tool-specific panel */}
         <ToolPanel
           tool={tool}

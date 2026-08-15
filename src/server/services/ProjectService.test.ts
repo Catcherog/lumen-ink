@@ -128,7 +128,7 @@ describe('ProjectService', () => {
     expect(snapshot.assets).toHaveLength(1);
     expect(snapshot.versions).toHaveLength(1);
     expect(snapshot.activeVersion?.id).toBe(created.versions[0].id);
-    expect(snapshot.signedUrls[created.assets[0].storageKey]).toBeTruthy();
+    expect(snapshot.signedUrls[created.assets[0].id]).toBeTruthy();
   });
 
   it('getProjectSnapshot throws PROJECT_NOT_FOUND for unknown project', async () => {

@@ -26,7 +26,7 @@ import { createWorkerRouter } from './routes/worker.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { providerStore } from './services/providers/ProviderStore.js';
 import { getProvider } from './services/providers/ProviderFactory.js';
-import { selectPersistenceByEnv, isCloudBaseDeps } from './infrastructure/persistence/index.js';
+import { selectPersistenceByEnv, type CloudBasePersistenceDeps } from './infrastructure/persistence/index.js';
 import {
   createLocalJobExecutor,
   createWorkerJobExecutor,
@@ -131,24 +131,32 @@ if (!runtimeConfig.isDeployed && !process.env.SEEDREAM_API_KEY && !process.env.D
 // falls back to local file adapter if CloudBase config is missing.
 const persistenceDeps = selectPersistenceByEnv();
 
-// Only the CloudBase adapter requires async initialization (ensureReady).
-// The local file adapter is ready synchronously.
-if (isCloudBaseDeps(persistenceDeps)) {
-  await persistenceDeps.ensureReady();
-}
-
-// Use the real worker executor only with CloudBase persistence (needs durable
-// job storage + polling). With the local fallback adapter, use the local
-// executor — jobs run synchronously in-process.
+// In deployed mode, the CloudBase adapter (NoSQL or PostgreSQL) must be
+// initialized before any method is invoked. Top-level await is safe in ESM
+// and runs once per cold start. If ensureReady() throws, the boot fails fast
+// with a stable error — fail-closed, never a silent /tmp fallback.
+// PERSIST-001 P0-01 (BUSOS-P5-X02): in deployed mode ALWAYS use the real
+// worker executor that invokes GenerationService.executeJob. The worker
+// enqueue executes the Job synchronously within the request (serverless
+// freeze-safe), so generation completes before the Function returns. Local /
+// dev mode uses the no-op local executor (Jobs run via tests or /api/edit).
 let workerExecutor: WorkerExecutor | null = null;
 let jobExecutor: JobExecutor;
-if (isCloudBaseDeps(persistenceDeps)) {
+if (runtimeConfig.isDeployed) {
+  const cloudBaseDeps = persistenceDeps as CloudBasePersistenceDeps;
+  await cloudBaseDeps.ensureReady();
   workerExecutor = createWorkerJobExecutor({
     deps: persistenceDeps,
     providerFactory: productionProviderFactory,
     pollIntervalMs: Number(process.env.WORKER_POLL_INTERVAL_MS ?? 100),
     leaseSeconds: Number(process.env.WORKER_LEASE_SECONDS ?? 60),
-    sweeperIntervalMs: Number(process.env.WORKER_SWEEPER_INTERVAL_MS ?? 500),
+    // P5-X03 HARDEN: back off the CloudBase NoSQL read-amplifying sweeper.
+    // Default raised 500ms -> 30000ms. A serverless instance freezes
+    // setInterval after the HTTP response, so the in-process sweeper does
+    // little useful work at 500ms while burning the free-tier read quota;
+    // the daily CRON_SECRET-gated /api/worker/recover remains the backstop.
+    // Env override (new name preferred; legacy name still honored).
+    sweeperIntervalMs: Number(process.env.SWEEPER_INTERVAL_MS ?? process.env.WORKER_SWEEPER_INTERVAL_MS ?? 30000),
   });
   jobExecutor = workerExecutor.executor;
   workerExecutor.start();

@@ -12,6 +12,14 @@
  * with the appropriate HTTP status. The route NEVER returns object storage
  * keys or Provider credentials — signed URLs are exposed only via the
  * snapshot's `signedUrls` map and are short-lived (15 min by default).
+ *
+ * COMPAT (BUSOS-P5-03): `signedUrls` is keyed by the public, stable
+ * `asset.id`. The asset's `storageKey` is redacted in the response and is
+ * NEVER a key in `signedUrls`. (Pre-P5-03 the map was keyed by the real
+ * storageKey, but because `storageKey` is redacted in the external payload,
+ * no external caller could ever resolve it — so this is a fix, not a
+ * breaking change for working consumers. Known in-repo consumer
+ * `src/client/src/AppV2.tsx` was updated to read `signedUrls[asset.id]`.)
  */
 
 import { Router, Request, Response } from 'express';
